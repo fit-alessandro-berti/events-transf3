@@ -1,0 +1,977 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<log xes.version="1849-2016" xes.features="nested-attributes" xmlns="http://www.xes-standard.org/">
+	<trace>
+		<string key="concept:name" value="0" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T13:46:43.363034+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T13:46:48.805340+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="e" />
+			<date key="time:timestamp" value="1970-01-12T13:46:51.780825+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="1" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T14:46:42.959005+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T14:46:51.848451+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-12T14:46:53.747248+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="2" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T15:46:43.140723+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T15:46:49.463753+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-12T15:47:24.326660+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="3" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T16:46:43.128266+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T16:46:50.614274+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-12T16:46:53.168667+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="4" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-12T17:46:45.429719+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-12T17:46:56.559490+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-12T17:47:02.005475+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="5" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T18:46:43.128885+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T18:46:48.625310+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="e" />
+			<date key="time:timestamp" value="1970-01-12T18:46:51.370066+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="6" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T19:46:42.944524+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T19:46:53.880399+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-12T19:46:55.080506+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="7" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T20:46:43.171349+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T20:46:51.312261+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="e" />
+			<date key="time:timestamp" value="1970-01-12T20:46:54.318529+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="8" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T21:46:42.851502+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T21:46:52.239318+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-12T21:46:54.449524+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="9" />
+		<event>
+			<string key="concept:name" value="n" />
+			<date key="time:timestamp" value="1970-01-12T22:46:44.190746+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="d" />
+			<date key="time:timestamp" value="1970-01-12T22:46:49.871478+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="g" />
+			<date key="time:timestamp" value="1970-01-12T22:46:55.914724+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="h" />
+			<date key="time:timestamp" value="1970-01-12T22:46:57.922856+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T22:47:04.785742+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="j" />
+			<date key="time:timestamp" value="1970-01-12T22:47:06.120054+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="10" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-12T23:46:43.390428+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-12T23:46:51.808212+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-12T23:46:52.972571+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="11" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T00:46:43.021667+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T00:46:51.401953+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="r" />
+			<date key="time:timestamp" value="1970-01-13T00:46:56.120649+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="12" />
+		<event>
+			<string key="concept:name" value="d" />
+			<date key="time:timestamp" value="1970-01-13T01:46:41.307481+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="n" />
+			<date key="time:timestamp" value="1970-01-13T01:46:43.177787+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="g" />
+			<date key="time:timestamp" value="1970-01-13T01:46:49.712777+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="h" />
+			<date key="time:timestamp" value="1970-01-13T01:46:51.253423+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T01:46:58.224955+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="u" />
+			<date key="time:timestamp" value="1970-01-13T01:47:05.137461+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="13" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T02:46:43.027375+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T02:46:53.528138+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="i" />
+			<date key="time:timestamp" value="1970-01-13T02:46:57.192888+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="14" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T03:46:42.927981+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T03:46:46.435329+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="i" />
+			<date key="time:timestamp" value="1970-01-13T03:46:50.937523+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="15" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:46:45.967191+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:46:51.616981+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:46:56.022898+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:47:01.272246+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:47:07.508558+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:47:14.910599+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:47:20.848338+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:47:26.922105+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:47:32.732816+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:47:39.687991+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:47:44.935581+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:47:50.890113+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:47:56.787791+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:48:04.164140+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:48:09.634765+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:48:12.804165+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:48:18.339526+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:48:19.415709+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:48:25.171149+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:48:29.510691+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:48:35.339442+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:48:38.088950+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:48:43.297033+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T04:48:48.655237+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T04:48:54.557908+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="16" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T05:46:45.661252+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T05:46:54.730452+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T05:46:59.243537+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="17" />
+		<event>
+			<string key="concept:name" value="g" />
+			<date key="time:timestamp" value="1970-01-13T06:46:46.980753+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="d" />
+			<date key="time:timestamp" value="1970-01-13T06:46:49.237581+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="q" />
+			<date key="time:timestamp" value="1970-01-13T06:46:50.123726+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="h" />
+			<date key="time:timestamp" value="1970-01-13T06:46:51.111943+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-13T06:46:52.877529+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="18" />
+		<event>
+			<string key="concept:name" value="n" />
+			<date key="time:timestamp" value="1970-01-13T07:46:44.022747+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="d" />
+			<date key="time:timestamp" value="1970-01-13T07:46:55.394353+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="g" />
+			<date key="time:timestamp" value="1970-01-13T07:46:58.866098+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="h" />
+			<date key="time:timestamp" value="1970-01-13T07:47:01.310306+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="m" />
+			<date key="time:timestamp" value="1970-01-13T07:47:09.136794+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="19" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T08:46:43.343552+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T08:46:44.891984+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="e" />
+			<date key="time:timestamp" value="1970-01-13T08:46:47.906885+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="20" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T09:46:42.903422+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T09:46:52.234771+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-13T09:46:53.839102+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="21" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T10:46:43.213555+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T10:46:55.221405+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="r" />
+			<date key="time:timestamp" value="1970-01-13T10:47:01.991441+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="22" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T11:46:43.323979+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T11:46:53.379780+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-13T11:46:59.369262+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="23" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T12:46:45.392371+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T12:46:47.860855+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T12:46:53.223741+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T12:47:01.492758+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T12:47:07.030499+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T12:47:15.737438+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T12:47:21.431903+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T12:47:25.910754+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T12:47:32.295267+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T12:47:40.498224+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T12:47:45.470876+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="24" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T13:46:43.094847+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T13:46:47.459421+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="e" />
+			<date key="time:timestamp" value="1970-01-13T13:46:50.480466+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="25" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T14:46:45.006709+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T14:46:51.393948+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T14:46:56.940896+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T14:47:01.608216+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T14:47:06.030328+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="26" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T15:46:43.060853+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T15:46:50.185132+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-13T15:46:58.884878+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="27" />
+		<event>
+			<string key="concept:name" value="q" />
+			<date key="time:timestamp" value="1970-01-13T16:46:40.634497+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="d" />
+			<date key="time:timestamp" value="1970-01-13T16:46:46.516330+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="g" />
+			<date key="time:timestamp" value="1970-01-13T16:46:51.222622+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="h" />
+			<date key="time:timestamp" value="1970-01-13T16:46:52.781917+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-13T16:46:53.453499+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="28" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T17:46:43.046565+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T17:46:54.000728+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="e" />
+			<date key="time:timestamp" value="1970-01-13T17:46:56.954439+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="29" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T18:46:43.521675+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T18:46:54.561296+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-13T18:46:56.562020+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="30" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T19:46:45.679768+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T19:46:51.012913+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T19:46:56.456272+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T19:47:05.088504+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T19:47:11.321228+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T19:47:11.866840+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T19:47:16.730678+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T19:47:22.594244+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T19:47:27.886403+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T19:47:39.360658+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T19:47:45.196951+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="31" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T20:46:45.960111+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-13T20:46:50.501160+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-13T20:46:55.741301+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="32" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T21:46:43.305152+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T21:46:50.370238+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-13T21:46:52.047408+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="33" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T22:46:43.331607+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T22:46:48.827590+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="e" />
+			<date key="time:timestamp" value="1970-01-13T22:46:51.716502+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="34" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-13T23:46:42.515876+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-13T23:46:47.180652+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="u" />
+			<date key="time:timestamp" value="1970-01-13T23:46:51.262365+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="35" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T00:46:43.089693+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T00:46:53.372752+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-14T00:46:54.283134+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="36" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T01:46:43.486991+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T01:46:50.588256+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="r" />
+			<date key="time:timestamp" value="1970-01-14T01:46:55.087627+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="37" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T02:46:45.641513+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="38" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T03:46:43.184750+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T03:46:50.407991+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-14T03:46:51.459409+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="39" />
+		<event>
+			<string key="concept:name" value="q" />
+			<date key="time:timestamp" value="1970-01-14T04:46:41.794600+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="d" />
+			<date key="time:timestamp" value="1970-01-14T04:46:46.601704+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="g" />
+			<date key="time:timestamp" value="1970-01-14T04:46:50.471752+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="h" />
+			<date key="time:timestamp" value="1970-01-14T04:46:51.347896+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="m" />
+			<date key="time:timestamp" value="1970-01-14T04:47:03.978445+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="40" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T05:46:43.224310+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T05:46:52.120783+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="r" />
+			<date key="time:timestamp" value="1970-01-14T05:46:59.484042+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="41" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T06:46:45.218044+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-14T06:46:52.685702+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T06:46:57.731269+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="42" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T07:46:43.478191+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T07:46:53.339755+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-14T07:46:55.134310+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="43" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T08:46:45.455715+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-14T08:46:51.328621+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T08:46:56.920732+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-14T08:46:58.540694+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T08:47:03.918493+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="o" />
+			<date key="time:timestamp" value="1970-01-14T08:47:06.067769+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T08:47:12.117309+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="44" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T09:46:43.278315+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T09:46:49.503973+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="p" />
+			<date key="time:timestamp" value="1970-01-14T09:46:53.903041+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="45" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T10:46:43.321007+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T10:46:49.456987+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-14T10:46:51.366522+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="46" />
+		<event>
+			<string key="concept:name" value="b" />
+			<date key="time:timestamp" value="1970-01-14T11:46:45.763151+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="47" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T12:46:43.235972+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T12:46:49.682166+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="f" />
+			<date key="time:timestamp" value="1970-01-14T12:46:50.520820+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="48" />
+		<event>
+			<string key="concept:name" value="n" />
+			<date key="time:timestamp" value="1970-01-14T13:46:44.447343+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="g" />
+			<date key="time:timestamp" value="1970-01-14T13:46:51.575832+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="d" />
+			<date key="time:timestamp" value="1970-01-14T13:46:58.115841+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="h" />
+			<date key="time:timestamp" value="1970-01-14T13:47:05.697338+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-14T13:47:05.970257+00:00" />
+		</event>
+	</trace>
+	<trace>
+		<string key="concept:name" value="49" />
+		<event>
+			<string key="concept:name" value="a" />
+			<date key="time:timestamp" value="1970-01-14T14:46:43.085748+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="c" />
+			<date key="time:timestamp" value="1970-01-14T14:46:49.414767+00:00" />
+		</event>
+		<event>
+			<string key="concept:name" value="l" />
+			<date key="time:timestamp" value="1970-01-14T14:46:54.114718+00:00" />
+		</event>
+	</trace>
+</log>
