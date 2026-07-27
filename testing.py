@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import os
 import re
+import random
 import warnings
 import argparse
 from pathlib import Path
@@ -35,6 +36,13 @@ if __name__ =='__main__':
     help ="Prediction head for retrieval evaluation: prototypical head or feature-space kNN."
     )
     parser .add_argument (
+    '--test_retrieval_selection',
+    type =str ,
+    default =default_config .get ('test_retrieval_selection','nearest'),
+    choices =['nearest','random'],
+    help ="Select supports by embedding similarity or uniformly at random."
+    )
+    parser .add_argument (
     '--test_retrieval_report_confidence_buckets',
     action ='store_true',
     default =default_config .get ('test_retrieval_report_confidence_buckets',False ),
@@ -44,7 +52,7 @@ if __name__ =='__main__':
     '--test_retrieval_first_expert_only',
     action ='store_true',
     default =default_config .get ('test_retrieval_first_expert_only',False ),
-    help ="If set, stop retrieval-augmented evaluation after the first expert."
+    help ="Under expert scope, evaluate only the first expert; under model scope, also report the first expert."
     )
     args =parser .parse_args ()
     CONFIG ['test_mode']=args .test_mode
@@ -53,6 +61,7 @@ if __name__ =='__main__':
     CONFIG ['test_retrieval_candidate_percentages']=args .test_retrieval_candidate_percentages
     CONFIG ['test_retrieval_eval_scope']=args .test_retrieval_eval_scope
     CONFIG ['test_retrieval_prediction_mode']=args .test_retrieval_prediction_mode
+    CONFIG ['test_retrieval_selection']=args .test_retrieval_selection
     CONFIG ['test_retrieval_report_confidence_buckets']=args .test_retrieval_report_confidence_buckets
     CONFIG ['test_retrieval_first_expert_only']=args .test_retrieval_first_expert_only
     print ("--- 🚀 Initializing Test Run with Configuration ---")
@@ -99,6 +108,7 @@ if __name__ =='__main__':
         print (f"  - Retrieval Candidate %: {CONFIG ['test_retrieval_candidate_percentages']}")
         print (f"  - Retrieval Eval Scope: {CONFIG ['test_retrieval_eval_scope']}")
         print (f"  - Retrieval Prediction Mode: {CONFIG ['test_retrieval_prediction_mode']}")
+        print (f"  - Retrieval Selection: {CONFIG ['test_retrieval_selection']}")
         print (f"  - Retrieval Confidence Buckets: {CONFIG ['test_retrieval_report_confidence_buckets']}")
     strategy =CONFIG ['embedding_strategy']
     print (f"--- Running Testing Script in Stand-Alone Mode (strategy: '{strategy }') ---")
@@ -114,6 +124,7 @@ if __name__ =='__main__':
     testing_logs =loader .transform (log_to_transform )
     torch .manual_seed (42 );
     np .random .seed (42 )
+    random .seed (42 )
     model =create_model (CONFIG ,loader ,device )
     load_model_weights (
     model ,
@@ -143,6 +154,7 @@ if __name__ =='__main__':
         first_expert_only =CONFIG .get ('test_retrieval_first_expert_only',False),
         eval_scope =CONFIG .get ('test_retrieval_eval_scope','experts'),
         prediction_mode =CONFIG .get ('test_retrieval_prediction_mode','proto_head'),
+        retrieval_selection =CONFIG .get ('test_retrieval_selection','nearest'),
         report_confidence_buckets =CONFIG .get ('test_retrieval_report_confidence_buckets',False)
         )
     elif test_mode =='meta_learning':
