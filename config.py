@@ -72,9 +72,9 @@ CONFIG ={
 'test_mode':'retrieval_augmented',
 'test_retrieval_k':[1 ,5 ,10 ,20 ,50 ,100 ,200 ],
 'test_retrieval_candidate_percentages':[0.5 ,1 ,3 ,5 ,10 ,20 ,50 ,100 ],
-'test_retrieval_eval_scope':'model' , # experts, model
+'test_retrieval_eval_scope':'experts' , # experts, model
 'test_retrieval_prediction_mode':'proto_head' , # proto_head, foundation_knn
-'test_retrieval_report_confidence_buckets':True , # only for proto_head
+'test_retrieval_report_confidence_buckets':False , # only for proto_head
 'test_retrieval_first_expert_only':False ,
 'num_test_episodes':200 ,
 'num_cases_for_testing':500 ,
