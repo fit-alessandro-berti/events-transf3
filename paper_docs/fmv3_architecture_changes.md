@@ -26,6 +26,21 @@ The Transformer encoder and its four-expert mixture remain the learned
 representation backbone. The structured transition memory adds no target-log
 gradient updates and does not change remaining-time prediction.
 
+## Four-stage comparison
+
+| Dimension | FM-v2 baseline | Original full FM-v3 | Corrected FM-v3 | Structured FM-v3 |
+|---|---|---|---|---|
+| Encoder | Four Transformer experts | Same backbone, continued training | Same backbone, continued from FM-v2 epoch 20 | Frozen corrected epoch-23 checkpoint |
+| Local geometry | Neighborhood-centered cosine | Uncentered cosine | Neighborhood-centered cosine restored | Same as corrected FM-v3 |
+| Local aggregation | Summed soft-kNN mass | Log-sum-exp with learned count normalization | Log-sum-exp with fixed $\gamma=0$ | Same as corrected FM-v3 |
+| Candidate labels | Local top-k only | Full support pool | Full support pool, but global evidence used only for locally missing labels | Neural candidates plus structured transition evidence |
+| Global combination | None | Learned/fixed global-local fusion for all classes | Margin-gated coverage fallback | Same fallback inside $p_{FM}$ |
+| Class prior | Implicit local frequency | Explicit balanced/natural mode | Balanced | Balanced neural head plus uniform structured class prior |
+| Abstention | None | Learned missing-pool abstention | Removed | Removed |
+| Target-log adaptation | Embedding retrieval | Embedding retrieval and prototypes | Corrected retrieval and prototypes | Corrected neural memory plus order-1--3 transition memory |
+| Target gradients | None | None | None | None |
+| Status | Authoritative baseline | Rejected combined design | Selected neural base | **Selected final classifier** |
+
 ## Architecture at a glance
 
 ```mermaid
@@ -163,9 +178,11 @@ L_c(q)=\log\sum_{i\in\mathcal N_k(q):y_i=c}
 \operatorname{cos}(q,z_i)\bigr).
 $$
 
-With the common softmax normalizer omitted, this preserves FM-v2's local class
-ordering. The corrected experiment therefore changes candidate coverage
-without needlessly replacing a strong local rule.
+At a matched similarity scale, omitting the common softmax normalizer makes this
+the same class score and ordering as FM-v2's summed attention mass. Continued
+training may adjust the learned scale, but the local geometry and aggregation
+form are restored. The corrected experiment therefore changes candidate
+coverage without needlessly replacing a strong local rule.
 
 ### 2.3 Made retrieval expert-specific
 
@@ -221,6 +238,18 @@ The corrected continuation uses:
 - balanced, natural, long-tail, random-shot, and rare-path episodes for the
   remainder;
 - a 5x prototypical-head learning-rate multiplier after warmup.
+
+The classification episode mixture is exactly:
+
+| Episode type | Probability within classification steps |
+|---|---:|
+| Balanced | 0.25 |
+| Natural | 0.15 |
+| Long-tail | 0.10 |
+| Random-shot | 0.15 |
+| Rare-path | 0.10 |
+| Missing local label | 0.25 |
+| Missing pool label | 0.00 |
 
 In a missing-local-label episode, the query's correct label is removed from its
 retrieved local neighbors but remains in the global support pool. This directly
@@ -343,7 +372,8 @@ available to the FM head. It introduces:
 
 - no new learned parameters;
 - no target-log gradient steps;
-- no access to held-out query labels;
+- no use of held-out query labels when fitting transition counts; the observed
+  query prefix is used only to look up its context at inference;
 - no changes to the frozen epoch-23 checkpoint;
 - no changes to remaining-time inference.
 
@@ -351,6 +381,12 @@ Its configuration is an evaluation-only overlay with no `extends` clause:
 [`structured_memory_eval.yaml`](../configs/fmv3/structured_memory_eval.yaml).
 This is intentional: loading it must not overwrite the checkpoint's resolved
 encoder or corrected-head configuration.
+
+The protocol does supply a fixed target-log activity universe for probability
+alignment and for scoring zero recall consistently across support budgets.
+Support-absent labels still receive zero evidence. For deployment, this fixed
+universe should come from the declared process schema or observed target-log
+vocabulary; it is not learned by the transition counts.
 
 ## Final inference algorithm
 
