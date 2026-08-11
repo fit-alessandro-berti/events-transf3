@@ -1,0 +1,14 @@
+extends: 01_realistic_episodes.yaml
+experiment_name: 10_fmv2_cls80
+epochs: 25
+episodes_per_epoch: 200
+classification_task_probability: 0.80
+fmv3_training:
+  episode_mix:
+    balanced: 0.40
+    natural: 0.25
+    long_tail: 0.20
+    random_shot: 0.15
+    rare_path: 0.0
+    missing_local_label: 0.0
+    missing_pool_label: 0.0

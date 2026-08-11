@@ -1,9 +1,15 @@
 import unittest
 
 import numpy as np
+import torch
 
+from components.prototypical_head import PrototypicalHead
 from evaluation.fmv3_metrics import classification_metrics, regression_metrics
-from evaluation.fmv3_protocol import fixed_case_split, support_case_order
+from evaluation.fmv3_protocol import (
+    _batched_head_probabilities,
+    fixed_case_split,
+    support_case_order,
+)
 
 
 def _tasks():
@@ -51,6 +57,44 @@ class FMV3ProtocolTests(unittest.TestCase):
         result = regression_metrics([1, 2, 100], [2, 2, 2])
         self.assertIn("d2_absolute_error", result)
         self.assertAlmostEqual(result["mae_skill_vs_median"], 0.0)
+
+    def test_batched_coverage_fallback_matches_head(self):
+        head = PrototypicalHead(
+            classification_mode="coverage_fallback",
+            count_normalization_gamma=0.0,
+            local_centering=True,
+            global_centering=False,
+            coverage_fallback_margin=0.7,
+            fallback_inference_temperature=0.4,
+            prior_mode="balanced",
+        )
+        head.eval()
+        pool = torch.tensor([
+            [1.0, 0.0], [0.8, 0.2], [0.0, 1.0], [0.1, 0.9], [-1.0, 0.0]
+        ])
+        labels = torch.tensor([0, 0, 1, 1, 2])
+        query = torch.tensor([[0.9, 0.1], [0.0, 1.0]])
+        local_positions = torch.tensor([[0, 1], [0, 4]])
+        batched, _ = _batched_head_probabilities(
+            head, query, pool, labels, local_positions, [0, 1, 2],
+            "configured", "balanced", 1.0,
+        )
+        expected = []
+        for row in range(query.size(0)):
+            _, classes, probabilities = head.forward_classification(
+                pool[local_positions[row]],
+                labels[local_positions[row]],
+                query[row : row + 1],
+                global_support_features=pool,
+                global_support_labels=labels,
+                candidate_classes=torch.tensor([0, 1, 2]),
+                prior_mode="balanced",
+                prior_strength=1.0,
+            )
+            aligned = torch.zeros(3)
+            aligned[classes.long()] = probabilities[0]
+            expected.append(aligned)
+        torch.testing.assert_close(batched, torch.stack(expected), atol=1e-6, rtol=1e-6)
 
 
 if __name__ == "__main__":

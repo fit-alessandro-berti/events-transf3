@@ -111,6 +111,40 @@ python run_fmv3_baselines.py --resume
 python generate_fmv3_report.py
 ```
 
+The post-audit corrected checkpoint and its focused comparison are available at:
+
+- `checkpoints/fmv3/corrected_fmv3/model_epoch_23.pth`
+- `configs/fmv3/corrected_fmv3.yaml`
+- `paper_docs/fmv3_improvement_report.md`
+
+Regenerate the paired improvement report with:
+
+```bash
+python generate_fmv3_improvement_report.py
+```
+
+The three-way corrected baseline/control/FM-v3 evaluation manifest is
+`configs/fmv3/improved_evaluation_manifest.yaml`.
+
+The corrected `coverage_fallback` head keeps FM-v2's centered local decision
+rule and admits a globally available but locally missing label only when its
+prototype clears a configurable margin. Evaluation retrieves neighbours in
+each expert's own embedding space.
+
+The selected run is a continuation of `00_fmv2` epoch 20. To reproduce the
+training schedule in a new directory, seed that directory with the epoch-20
+checkpoint and training artifacts, then resume with the corrected config and
+retain epoch 23:
+
+```bash
+cp -a checkpoints/fmv3/00_fmv2 checkpoints/fmv3/corrected_fmv3_reproduction
+python main.py \
+  --config configs/fmv3/corrected_fmv3.yaml \
+  --checkpoint_dir checkpoints/fmv3/corrected_fmv3_reproduction \
+  --resume \
+  --stop_after_epoch 23
+```
+
 The primary classification endpoint is balanced accuracy. The evaluator also records ordinary accuracy, macro-F1/precision, per-class recall, zero-recall classes, pool and retrieval label coverage, frequency-stratified recall, NLL, multiclass Brier score, reliability bins, risk–coverage curves, and case-bootstrap intervals. Remaining-time outputs include MAE, median absolute error, normalized MAE, MAE skill, D² absolute-error score, R², and interval coverage/width.
 
 ## Simulating new logs (optional)

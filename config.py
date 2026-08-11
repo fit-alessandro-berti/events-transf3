@@ -81,10 +81,15 @@ CONFIG ={
 'seed':42,
 'training_enabled':True,
 'fmv3_head':{
-'classification_mode':'legacy_soft_knn', # legacy_soft_knn, local, global, global_local
+'classification_mode':'legacy_soft_knn', # legacy_soft_knn, local, global, global_local, coverage_fallback
 'local_temperature':0.2,
 'global_temperature':0.2,
 'learn_temperature':False,
+'local_centering':False,
+'global_centering':False,
+'coverage_fallback_margin':0.5,
+'inference_temperature':1.0,
+'fallback_inference_temperature':1.0,
 'count_normalization':'fixed', # fixed, learned
 'count_normalization_gamma':0.0,
 'prior_mode':'none', # none, uniform/balanced, natural

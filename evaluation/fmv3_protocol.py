@@ -273,7 +273,12 @@ def _batched_head_probabilities(
         logits = logits.masked_fill(local_counts == 0, -torch.inf)
         return F.softmax(logits, dim=1), logits.new_zeros(num_queries)
 
-    local_similarities = torch.einsum("qd,qkd->qk", query, local) / head.local_temperature
+    local_query = query
+    if head.local_centering:
+        local_center = local.mean(dim=1, keepdim=True)
+        local = F.normalize(local - local_center, p=2, dim=2)
+        local_query = F.normalize(query - local_center.squeeze(1), p=2, dim=1)
+    local_similarities = torch.einsum("qd,qkd->qk", local_query, local) * head.local_scale
     local_evidence = query.new_full((num_queries, num_classes), -torch.inf)
     gamma = head.evidence_gamma
     for column in range(num_classes):
@@ -287,6 +292,11 @@ def _batched_head_probabilities(
         )
 
     task_prior = pool.mean(dim=0)
+    global_query = query
+    if head.global_centering:
+        pool = F.normalize(pool - task_prior.unsqueeze(0), p=2, dim=1)
+        global_query = F.normalize(query - task_prior.unsqueeze(0), p=2, dim=1)
+        task_prior = torch.zeros_like(task_prior)
     prototypes = []
     pool_present = pool_counts > 0
     for column, cls in enumerate(classes):
@@ -295,14 +305,15 @@ def _batched_head_probabilities(
             prototypes.append(task_prior)
             continue
         mean = members.mean(dim=0)
-        if head.shrinkage_mode in {"fixed", "learned"}:
+        if head.shrinkage_mode in {"fixed", "learned"} and not head.global_centering:
             weight = pool_counts[column] / (pool_counts[column] + head.shrinkage_kappa)
             mean = weight * mean + (1.0 - weight) * task_prior
         prototypes.append(mean)
     prototypes = F.normalize(torch.stack(prototypes), p=2, dim=1)
-    global_evidence = query @ prototypes.t() / head.global_temperature
+    global_evidence = global_query @ prototypes.t() * head.global_scale
     global_evidence = global_evidence.masked_fill(~pool_present.unsqueeze(0), -torch.inf)
 
+    fallback_has_missing = None
     if selected_mode == "local":
         evidence = local_evidence
     elif selected_mode == "global":
@@ -329,6 +340,22 @@ def _batched_head_probabilities(
             local_evidence + torch.log(gate.clamp_min(1e-8)),
             global_evidence + torch.log1p(-gate.clamp(max=1.0 - 1e-8)),
         )
+    elif selected_mode == "coverage_fallback":
+        local_present = local_counts > 0
+        valid_local = local_evidence.masked_fill(~local_present, -torch.inf)
+        best_local = valid_local.max(dim=1, keepdim=True).values
+        best_present_global = global_evidence.masked_fill(~local_present, -torch.inf).max(
+            dim=1, keepdim=True
+        ).values
+        missing_logits = (
+            best_local
+            + global_evidence
+            - best_present_global
+            - head.coverage_fallback_margin
+        )
+        missing_candidates = (~local_present) & pool_present.unsqueeze(0)
+        fallback_has_missing = missing_candidates.any(dim=1)
+        evidence = torch.where(missing_candidates, missing_logits, valid_local)
     else:
         raise ValueError(f"Unsupported batched classification mode: {selected_mode}")
 
@@ -344,14 +371,23 @@ def _batched_head_probabilities(
     else:
         raise ValueError(f"Unknown prior mode: {selected_prior}")
     logits = evidence + prior_logits
+    temperature = logits.new_full((num_queries, 1), head.inference_temperature)
+    if fallback_has_missing is not None:
+        fallback_temperature = temperature.new_full(
+            temperature.shape, head.fallback_inference_temperature
+        )
+        temperature = torch.where(
+            fallback_has_missing.unsqueeze(1), fallback_temperature, temperature
+        )
     abstain = logits.new_zeros(num_queries)
     if head.enable_abstention:
         abstain_logits = head.abstain_bias - F.softplus(head.abstain_slope) * evidence.max(dim=1).values
-        all_probabilities = F.softmax(torch.cat([logits, abstain_logits.unsqueeze(1)], dim=1), dim=1)
+        all_logits = torch.cat([logits, abstain_logits.unsqueeze(1)], dim=1)
+        all_probabilities = F.softmax(all_logits / temperature, dim=1)
         abstain = all_probabilities[:, -1]
         probabilities = all_probabilities[:, :-1]
     else:
-        probabilities = F.softmax(logits, dim=1)
+        probabilities = F.softmax(logits / temperature, dim=1)
     return probabilities, abstain
 
 
@@ -377,18 +413,17 @@ def _predict_classification_fixed_k(
     query_indices_device = torch.as_tensor(query_indices, device=device)
     labels_device = labels.to(device)
     embeddings_device = [embedding.to(device) for embedding in embeddings_by_expert]
-    reference_queries = embeddings_device[0][query_indices_device]
-    reference_pool = embeddings_device[0][support_indices_device]
     k_eff = min(int(retrieval_k), len(support_indices))
-    local_positions = torch.topk(reference_queries @ reference_pool.t(), k_eff, dim=1).indices
-    local_labels = labels_device[support_indices_device][local_positions]
 
     expert_probabilities, abstain_probabilities = [], []
     for expert, embeddings in zip(experts, embeddings_device):
+        expert_queries = embeddings[query_indices_device]
+        expert_pool = embeddings[support_indices_device]
+        local_positions = torch.topk(expert_queries @ expert_pool.t(), k_eff, dim=1).indices
         probabilities, abstain = _batched_head_probabilities(
             expert.proto_head,
-            embeddings[query_indices_device],
-            embeddings[support_indices_device],
+            expert_queries,
+            expert_pool,
             labels_device[support_indices_device],
             local_positions,
             prediction_classes,
@@ -398,6 +433,10 @@ def _predict_classification_fixed_k(
         )
         expert_probabilities.append(probabilities)
         abstain_probabilities.append(abstain)
+    reference_queries = embeddings_device[0][query_indices_device]
+    reference_pool = embeddings_device[0][support_indices_device]
+    reference_positions = torch.topk(reference_queries @ reference_pool.t(), k_eff, dim=1).indices
+    local_labels = labels_device[support_indices_device][reference_positions]
     mean_probs = torch.stack(expert_probabilities).mean(dim=0)
     mean_abstain = torch.stack(abstain_probabilities).mean(dim=0)
     best_conf, best_idx = mean_probs.max(dim=1)
@@ -584,16 +623,13 @@ def predict_regression(experts, embeddings_by_expert, labels, query_indices, sup
     support_indices_device = torch.as_tensor(support_indices, device=device)
     query_indices_device = torch.as_tensor(query_indices, device=device)
     embeddings_device = [embedding.to(device) for embedding in embeddings_by_expert]
-    reference = embeddings_device[0]
-    reference_queries = reference[query_indices_device]
-    reference_pool = reference[support_indices_device]
     k_eff = min(int(retrieval_k), len(support_indices))
-    positions = torch.topk(reference_queries @ reference_pool.t(), k_eff, dim=1).indices
-    neighbor_targets = labels_device[support_indices_device][positions]
     expert_predictions = []
     for expert, embeddings in zip(experts, embeddings_device):
         query = F.normalize(embeddings[query_indices_device], p=2, dim=1)
         pool = F.normalize(embeddings[support_indices_device], p=2, dim=1)
+        positions = torch.topk(query @ pool.t(), k_eff, dim=1).indices
+        neighbor_targets = labels_device[support_indices_device][positions]
         local = pool[positions]
         center = local.mean(dim=1, keepdim=True)
         centered_local = F.normalize(local - center, p=2, dim=2)
@@ -603,6 +639,11 @@ def predict_regression(experts, embeddings_by_expert, labels, query_indices, sup
             similarities * expert.proto_head.reg_logit_scale.clamp(1.0, 100.0), dim=1
         )
         expert_predictions.append((weights * neighbor_targets).sum(dim=1))
+    reference = F.normalize(embeddings_device[0], p=2, dim=1)
+    reference_positions = torch.topk(
+        reference[query_indices_device] @ reference[support_indices_device].t(), k_eff, dim=1
+    ).indices
+    neighbor_targets = labels_device[support_indices_device][reference_positions]
     transformed_prediction = torch.stack(expert_predictions).mean(dim=0).cpu().numpy()
     transformed_truth = labels_device[query_indices_device].cpu().numpy()
     transformed_std = neighbor_targets.std(dim=1, correction=0).cpu().numpy()

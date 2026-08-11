@@ -1,0 +1,7 @@
+extends: 12_corrected_fallback_m10.yaml
+experiment_name: corrected_fmv3
+epochs: 25
+selected_checkpoint_epoch: 23
+fmv3_head:
+  inference_temperature: 1.0
+  fallback_inference_temperature: 0.4

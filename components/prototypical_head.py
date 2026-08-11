@@ -35,6 +35,15 @@ class PrototypicalHead(nn.Module):
         self.classification_mode = str(config.get("classification_mode", "legacy_soft_knn"))
         self.local_temperature = max(float(config.get("local_temperature", 0.2)), 1e-4)
         self.global_temperature = max(float(config.get("global_temperature", 0.2)), 1e-4)
+        self.learn_temperature = _as_bool(config.get("learn_temperature", False))
+        self.local_centering = _as_bool(config.get("local_centering", False))
+        self.global_centering = _as_bool(config.get("global_centering", False))
+        self.coverage_fallback_margin = float(config.get("coverage_fallback_margin", 0.5))
+        self.inference_temperature = max(float(config.get("inference_temperature", 1.0)), 1e-4)
+        self.fallback_inference_temperature = max(
+            float(config.get("fallback_inference_temperature", self.inference_temperature)), 1e-4
+        )
+        self._temperature_scale_reference = max(float(init_logit_scale), 1e-4)
         self.prior_mode = str(config.get("prior_mode", "none"))
         self.prior_smoothing = max(float(config.get("prior_smoothing", 1.0)), 0.0)
         self.prior_strength = float(config.get("prior_strength", 0.0))
@@ -66,7 +75,7 @@ class PrototypicalHead(nn.Module):
         self.abstain_slope.requires_grad_(self.enable_abstention)
 
         self.logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
-        self.logit_scale.requires_grad_(_as_bool(config.get("learn_temperature", False)))
+        self.logit_scale.requires_grad_(self.learn_temperature)
         self.reg_logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
 
         # Kept for strict compatibility with historical FM-v2 checkpoints.
@@ -89,6 +98,20 @@ class PrototypicalHead(nn.Module):
         mu = support.mean(dim=0, keepdim=True)
         return _l2_normalize(support - mu), _l2_normalize(query - mu)
 
+    @property
+    def local_scale(self) -> torch.Tensor:
+        if self.learn_temperature:
+            multiplier = self.logit_scale.clamp(1.0, 20.0) / self._temperature_scale_reference
+            return multiplier / self.local_temperature
+        return self.logit_scale.new_tensor(1.0 / self.local_temperature)
+
+    @property
+    def global_scale(self) -> torch.Tensor:
+        if self.learn_temperature:
+            multiplier = self.logit_scale.clamp(1.0, 20.0) / self._temperature_scale_reference
+            return multiplier / self.global_temperature
+        return self.logit_scale.new_tensor(1.0 / self.global_temperature)
+
     @staticmethod
     def _class_counts(labels: torch.Tensor, classes: torch.Tensor) -> torch.Tensor:
         return torch.stack([(labels == cls).sum() for cls in classes]).float()
@@ -107,7 +130,9 @@ class PrototypicalHead(nn.Module):
         }
 
     def _local_evidence(self, support, labels, query, classes):
-        sims = (query @ support.t()) / self.local_temperature
+        if self.local_centering:
+            support, query = self._center_and_renorm(support, query)
+        sims = (query @ support.t()) * self.local_scale
         evidence = torch.full((query.size(0), classes.numel()), -1e4, device=query.device)
         counts = self._class_counts(labels, classes).to(query.device)
         gamma = self.evidence_gamma
@@ -120,6 +145,12 @@ class PrototypicalHead(nn.Module):
     def _global_evidence(self, support, labels, query, classes):
         counts = self._class_counts(labels, classes).to(query.device)
         task_prior = support.mean(dim=0)
+        if self.global_centering:
+            support = _l2_normalize(support - task_prior.unsqueeze(0))
+            query = _l2_normalize(query - task_prior.unsqueeze(0))
+            # A shared centroid prior becomes the zero vector after task
+            # centering. Do not apply the old origin-dependent interpolation.
+            task_prior = torch.zeros_like(task_prior)
         prototypes = []
         variances = []
         for idx, cls in enumerate(classes):
@@ -129,14 +160,39 @@ class PrototypicalHead(nn.Module):
                 variances.append(query.new_tensor(0.0))
                 continue
             mean = members.mean(dim=0)
-            if self.shrinkage_mode in {"fixed", "learned"}:
+            if self.shrinkage_mode in {"fixed", "learned"} and not self.global_centering:
                 weight = counts[idx] / (counts[idx] + self.shrinkage_kappa)
                 mean = weight * mean + (1.0 - weight) * task_prior
             prototypes.append(mean)
             variances.append(((members - members.mean(dim=0)) ** 2).mean())
         prototypes = _l2_normalize(torch.stack(prototypes))
-        evidence = (query @ prototypes.t()) / self.global_temperature
+        evidence = (query @ prototypes.t()) * self.global_scale
         return evidence, counts, prototypes, torch.stack(variances)
+
+    def _coverage_fallback_evidence(self, local, global_evidence, local_counts, pool_counts):
+        """Keep the local decision and admit only confident missing candidates.
+
+        Local logits retain their exact ordering.  A class missing from the
+        retrieved neighbourhood can win only when its global prototype exceeds
+        the best locally present class prototype by ``coverage_fallback_margin``.
+        This turns global memory into a candidate-coverage fallback instead of
+        allowing noisy prototypes to perturb every locally supported class.
+        """
+        local_present = local_counts > 0
+        pool_present = pool_counts > 0
+        valid_local = local.masked_fill(~local_present.unsqueeze(0), -torch.inf)
+        best_local = valid_local.max(dim=1, keepdim=True).values
+        best_present_global = global_evidence.masked_fill(
+            ~local_present.unsqueeze(0), -torch.inf
+        ).max(dim=1, keepdim=True).values
+        missing_logits = (
+            best_local
+            + global_evidence
+            - best_present_global
+            - self.coverage_fallback_margin
+        )
+        missing_candidates = (~local_present & pool_present).unsqueeze(0)
+        return torch.where(missing_candidates, missing_logits, valid_local)
 
     def _prior_logits(self, counts: torch.Tensor, num_queries: int, mode: Optional[str] = None, strength: Optional[float] = None):
         selected = str(mode or self.prior_mode)
@@ -202,7 +258,12 @@ class PrototypicalHead(nn.Module):
         pool_labels = global_support_labels if global_support_labels is not None else support_labels
         pool_features = _l2_normalize(pool_features)
         if candidate_classes is None:
-            classes = torch.unique(pool_labels if selected_mode in {"global", "global_local"} else support_labels, sorted=True)
+            classes = torch.unique(
+                pool_labels
+                if selected_mode in {"global", "global_local", "coverage_fallback"}
+                else support_labels,
+                sorted=True,
+            )
         else:
             classes = torch.unique(candidate_classes.to(support_labels.device), sorted=True)
         classes = classes[classes != self.abstain_label]
@@ -213,6 +274,7 @@ class PrototypicalHead(nn.Module):
         global_evidence, pool_counts, prototypes, prototype_variances = self._global_evidence(
             pool_features, pool_labels, query, classes
         )
+        global_evidence = global_evidence.masked_fill(pool_counts.unsqueeze(0) <= 0, -torch.inf)
         if prior_counts is not None:
             pool_counts = prior_counts.to(query.device).float()
 
@@ -232,6 +294,11 @@ class PrototypicalHead(nn.Module):
                 local + torch.log(gate.clamp_min(1e-8)),
                 global_evidence + torch.log1p(-gate.clamp(max=1.0 - 1e-8)),
             )
+        elif selected_mode == "coverage_fallback":
+            evidence = self._coverage_fallback_evidence(
+                local, global_evidence, local_counts, pool_counts
+            )
+            gate = (local_counts > 0).unsqueeze(0).expand_as(local).to(local.dtype)
         else:
             raise ValueError(f"Unknown classification mode: {selected_mode}")
 
@@ -242,7 +309,15 @@ class PrototypicalHead(nn.Module):
             logits = torch.cat([logits, abstain_logits.unsqueeze(1)], dim=1)
             classes = torch.cat([classes, classes.new_tensor([self.abstain_label])])
 
-        confidence = F.softmax(logits, dim=-1)
+        output_logits = logits
+        if not self.training:
+            temperature = logits.new_full((query.size(0), 1), self.inference_temperature)
+            if selected_mode == "coverage_fallback":
+                has_missing_candidate = ((local_counts <= 0) & (pool_counts > 0)).any()
+                if bool(has_missing_candidate):
+                    temperature.fill_(self.fallback_inference_temperature)
+            output_logits = logits / temperature
+        confidence = F.softmax(output_logits, dim=-1)
         diagnostics: Dict[str, torch.Tensor | str] = {
             "mode": selected_mode,
             "local_counts": local_counts,
@@ -253,7 +328,7 @@ class PrototypicalHead(nn.Module):
             "prototypes": prototypes,
             "prototype_variances": prototype_variances,
         }
-        result = (logits, classes, confidence, diagnostics)
+        result = (output_logits, classes, confidence, diagnostics)
         return result if return_diagnostics else result[:3]
 
     def forward_regression(self, support_features, support_labels, query_features):

@@ -118,7 +118,9 @@ cleanup_checkpoints =False ):
             current_train_mode =training_strategy
             if training_strategy =='mixed':
                 current_train_mode ='retrieval'if step %2 ==0 else 'episodic'
-            task_type =random .choice (['classification','regression'])
+            classification_probability =float (config .get ('classification_task_probability',0.5 ))
+            classification_probability =min (1.0 ,max (0.0 ,classification_probability ))
+            task_type ='classification'if random .random ()<classification_probability else 'regression'
             if task_type =='classification'and cls_task_pools :
                 task_data_pool =random .choice (cls_task_pools )
             elif task_type =='regression'and reg_task_pools :

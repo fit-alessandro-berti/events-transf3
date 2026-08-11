@@ -1,5 +1,13 @@
 # FM-v3 evaluation report
 
+> **Post-audit update (2026-08-11):** the implementation and training protocol
+> used for this report contained defects in temperature learning, similarity
+> centering, and multi-expert retrieval. The corrected architecture now exceeds
+> the re-evaluated FM-v2 baseline. See
+> [`fmv3_improvement_report.md`](fmv3_improvement_report.md) for the paired
+> results and selected checkpoint. The original report below is retained as the
+> pre-correction experimental record.
+
 ## Executive summary
 
 Across paired natural-support rows, full FM-v3 changed balanced accuracy by **-0.0312**, macro-F1 by **-0.0655**, and ordinary accuracy by **-0.1365** on average relative to the re-evaluated FM-v2 checkpoint. The highest mean balanced accuracy across all evaluated rows was achieved by **FM-v2 (re-evaluated)** (0.4118). The evaluated evidence therefore does not support the full FM-v3 configuration as a replacement for FM-v2 under this protocol.

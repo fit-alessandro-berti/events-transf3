@@ -1,0 +1,29 @@
+extends: base.yaml
+experiment_name: 11_corrected_fallback_m05
+epochs: 25
+episodes_per_epoch: 200
+classification_task_probability: 0.80
+proto_head_lr_mult_after_warmup: 5.0
+fmv3_head:
+  classification_mode: coverage_fallback
+  local_temperature: 0.2
+  global_temperature: 0.2
+  learn_temperature: true
+  local_centering: true
+  global_centering: false
+  coverage_fallback_margin: 0.5
+  count_normalization: fixed
+  count_normalization_gamma: 0.0
+  prior_mode: balanced
+  prior_strength: 1.0
+  shrinkage_mode: none
+  enable_abstention: false
+fmv3_training:
+  episode_mix:
+    balanced: 0.25
+    natural: 0.15
+    long_tail: 0.10
+    random_shot: 0.15
+    rare_path: 0.10
+    missing_local_label: 0.25
+    missing_pool_label: 0.0
