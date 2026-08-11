@@ -1,0 +1,112 @@
+% LaTeX support: latex@mdpi.com
+%=================================================================
+\documentclass[electronics,article,submit,oneauthor]{Definitions/mdpi}
+
+%=================================================================
+% MDPI internal commands
+\firstpage{1}
+\makeatletter
+\setcounter{page}{\@firstpage}
+\makeatother
+\pubvolume{1}
+\issuenum{1}
+\articlenumber{0}
+\pubyear{2026}
+\copyrightyear{2026}
+\datereceived{}
+\daterevised{}
+\dateaccepted{}
+\datepublished{}
+
+%=================================================================
+% Packages already loaded by mdpi.cls include: amsmath, amssymb,
+% graphicx, booktabs, natbib, hyperref, cleveref, amsthm, etc.
+% Add extra packages here if needed.
+\setlength{\headheight}{20pt}
+
+%=================================================================
+\Title{Dummy Title: Placeholder for the Manuscript Title}
+
+\newcommand{\orcidauthorA}{0000-0002-3279-4795}
+
+\Author{Alessandro Berti $^{1}$\orcidA{}}
+
+\AuthorNames{Alessandro Berti}
+
+\address[1]{%
+$^{1}$ \quad Chair of Process and Data Science, RWTH Aachen University, Ahornstra{\ss}e 55, 52074 Aachen, Germany; a.berti@pads.rwth-aachen.de}
+
+\corres{Correspondence: a.berti@pads.rwth-aachen.de}
+
+\abstract{%
+This is a dummy abstract. Replace this text with a concise summary of the paper's background, methods, results, and conclusions.}
+
+\keyword{keyword one; keyword two; keyword three; keyword four}
+
+%=================================================================
+\begin{document}
+
+%=================================================================
+\section{Introduction}\label{sec:introduction}
+
+Dummy introduction. Replace this section with the problem motivation and contributions of the paper.
+
+\section{Related Work}\label{sec:related}
+
+Dummy related work. Replace this section with a discussion of prior literature.
+
+\section{Preliminaries}\label{sec:preliminaries}
+
+Dummy preliminaries. Replace this section with the background concepts required by the paper.
+
+\section{Approach}\label{sec:approach}
+
+Dummy approach. Replace this section with the proposed method.
+
+\section{Assessment}\label{sec:assessment}
+
+Dummy assessment. Replace this section with the experimental evaluation.
+
+\section{Discussion}\label{sec:discussion}
+
+Dummy discussion. Replace this section with interpretation, limitations, and future work.
+
+\section{Conclusions}\label{sec:conclusion}
+
+Dummy conclusions. Replace this section with a brief closing summary.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\authorcontributions{Conceptualization, A.B.; methodology, A.B.; software, A.B.; validation, A.B.; formal analysis, A.B.; investigation, A.B.; data curation, A.B.; writing---original draft preparation, A.B.; writing---review and editing, A.B.; visualization, A.B. The author has read and agreed to the published version of the manuscript.}
+
+\funding{This research received no external funding.}
+
+\institutionalreview{Not applicable.}
+
+\informedconsent{Not applicable.}
+
+\dataavailability{No new data were created or analyzed in this study.}
+
+\acknowledgments{Dummy acknowledgments. Replace or remove as appropriate.}
+
+\conflictsofinterest{The author declares no conflicts of interest.}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\abbreviations{Abbreviations}{%
+The following abbreviations are used in this manuscript:\\
+
+\noindent
+\begin{tabular}{@{}ll}
+TODO & To Be Defined\\
+\end{tabular}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{adjustwidth}{-\extralength}{0cm}
+
+\reftitle{References}
+
+\bibliography{references}
+
+\PublishersNote{}
+\end{adjustwidth}
+\end{document}
