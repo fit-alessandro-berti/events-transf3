@@ -80,6 +80,79 @@ def _sample_balanced_classification_batch(
     return batch[:batch_size]
 
 
+def _valid_classification_items(task_pool):
+    return [item for item in task_pool if item[1] is not None and int(item[1]) != -100]
+
+
+def _weighted_episode_type(config):
+    mix = config.get("fmv3_training", {}).get("episode_mix", {"balanced": 1.0})
+    names = [name for name, weight in mix.items() if float(weight) > 0]
+    weights = [float(mix[name]) for name in names]
+    return random.choices(names, weights=weights, k=1)[0] if names else "balanced"
+
+
+def _sample_classification_batch(task_pool, batch_size, episode_type, config):
+    """Sample balanced, natural, long-tail, or random-shot deployment episodes."""
+    valid = _valid_classification_items(task_pool)
+    train_cfg = config.get("fmv3_training", {})
+    case_range = train_cfg.get("cases_per_episode_range")
+    if case_range and len(case_range) == 2:
+        cases = list({str(item[2]) for item in valid})
+        target_cases = random.randint(max(2, int(case_range[0])), max(2, int(case_range[1])))
+        chosen_cases = set(random.sample(cases, min(target_cases, len(cases))))
+        restricted = [item for item in valid if str(item[2]) in chosen_cases]
+        if len(restricted) >= batch_size:
+            valid = restricted
+    if len(valid) < batch_size:
+        return None
+    if episode_type in {"balanced", "missing_local_label", "missing_pool_label"}:
+        return _sample_balanced_classification_batch(
+            valid,
+            batch_size,
+            min_per_class=int(config.get("retrieval_min_per_class", 2)),
+            max_classes=config.get("retrieval_train_max_classes"),
+        )
+    if episode_type == "natural":
+        return random.sample(valid, batch_size)
+
+    by_label = defaultdict(list)
+    for item in valid:
+        by_label[int(item[1])].append(item)
+    labels = list(by_label)
+    if not labels:
+        return None
+    if episode_type in {"long_tail", "rare_path"}:
+        labels.sort(key=lambda label: len(by_label[label]), reverse=True)
+        power_range = train_cfg.get("long_tail_power_range")
+        if power_range and len(power_range) == 2:
+            power = random.uniform(float(power_range[0]), float(power_range[1]))
+        else:
+            power = float(train_cfg.get("long_tail_power", 1.5))
+        power = max(power, 0.0)
+        if episode_type == "long_tail":
+            weights = np.asarray([(rank + 1) ** (-power) for rank in range(len(labels))], dtype=float)
+        else:
+            weights = np.asarray([len(by_label[label]) ** (-power) for label in labels], dtype=float)
+        weights /= weights.sum()
+        return [random.choice(by_label[int(np.random.choice(labels, p=weights))]) for _ in range(batch_size)]
+    if episode_type == "random_shot":
+        random.shuffle(labels)
+        low = max(1, int(train_cfg.get("random_shot_min", 1)))
+        high = max(low, int(train_cfg.get("random_shot_max", 20)))
+        sampled = []
+        for label in labels:
+            shot = random.randint(low, high)
+            items = by_label[label]
+            sampled.extend(random.sample(items, min(shot, len(items))))
+            if len(sampled) >= batch_size:
+                break
+        if len(sampled) < batch_size:
+            sampled.extend(random.sample(valid, batch_size - len(sampled)))
+        random.shuffle(sampled)
+        return sampled[:batch_size]
+    raise ValueError(f"Unknown FM-v3 episode type: {episode_type}")
+
+
 def _supcon_loss(
     z: torch.Tensor,
     labels: torch.Tensor,
@@ -221,15 +294,15 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     if len(task_data_pool) < retrieval_batch_size:
         return None, progress_bar_task
 
+    episode_type = "regression"
     if task_type == "classification":
-        min_per_class = int(config.get("retrieval_min_per_class", 2))
-        max_classes = config.get("retrieval_train_max_classes", None)
-        batch_tasks_raw = _sample_balanced_classification_batch(
-            task_data_pool,
-            retrieval_batch_size,
-            min_per_class=min_per_class,
-            max_classes=max_classes,
+        episode_type = _weighted_episode_type(config)
+        batch_tasks_raw = _sample_classification_batch(
+            task_data_pool, retrieval_batch_size, episode_type, config
         )
+        if not batch_tasks_raw:
+            return None, f"{progress_bar_task}_empty"
+        progress_bar_task = f"{progress_bar_task}_{episode_type}"
     else:
         batch_tasks_raw = random.sample(task_data_pool, retrieval_batch_size)
 
@@ -303,98 +376,75 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
         if task_type == "classification":
             if int(query_label) == -100:
                 continue
-
-            positive_mask = (batch_labels == query_label) & (batch_case_ids != query_case_id)
-            positive_indices = np.where(positive_mask)[0]
-            if positive_indices.size == 0:
-                continue
-
             with torch.no_grad():
-                sims = (query_embedding_norm @ all_embeddings_norm_detached.t()).squeeze(0)
+                eligible = batch_case_ids != query_case_id
+                if episode_type == "missing_pool_label":
+                    eligible &= batch_labels != query_label
+                pool_indices_np = np.where(eligible)[0]
+                if pool_indices_np.size == 0:
+                    continue
+                pool_indices = torch.from_numpy(pool_indices_np).to(device)
 
-            pos_k = min(cls_pos_k_cfg, int(positive_indices.size), max(1, retrieval_k_train - 1))
-            if pos_use_nearest:
-                pos_candidates = torch.from_numpy(positive_indices).to(device)
-                pos_sims = sims[pos_candidates]
-                pos_rel = torch.topk(pos_sims, k=pos_k, largest=True).indices
-                pos_tensor = pos_candidates[pos_rel]
-            else:
-                chosen_pos_idx = np.random.choice(positive_indices, size=pos_k, replace=False)
-                pos_tensor = torch.from_numpy(chosen_pos_idx).to(device)
+                local_eligible = eligible.copy()
+                if episode_type == "missing_local_label":
+                    local_eligible &= batch_labels != query_label
+                local_mask = torch.from_numpy(np.where(~local_eligible)[0]).to(device)
 
-            neg_k = retrieval_k_train - pos_k
-            if neg_k <= 0:
+                # Balanced FM-v2 episodes preserve the historical guaranteed-positive
+                # behavior. Other episode types use ordinary retrieval and may omit it.
+                if episode_type == "balanced":
+                    positive_np = np.where(
+                        (batch_labels == query_label) & (batch_case_ids != query_case_id)
+                    )[0]
+                    if positive_np.size == 0:
+                        continue
+                    sims = (query_embedding_norm @ all_embeddings_norm_detached.t()).squeeze(0)
+                    pos_k = min(cls_pos_k_cfg, int(positive_np.size), max(1, retrieval_k_train - 1))
+                    positives = torch.from_numpy(positive_np).to(device)
+                    if pos_use_nearest:
+                        positives = positives[torch.topk(sims[positives], pos_k).indices]
+                    else:
+                        positives = positives[torch.randperm(positives.numel(), device=device)[:pos_k]]
+                    negative_mask = (~local_eligible) | (batch_labels == query_label)
+                    negatives = find_knn_indices(
+                        query_embedding_norm,
+                        all_embeddings_norm_detached,
+                        k=max(1, retrieval_k_train - pos_k),
+                        indices_to_mask=torch.from_numpy(np.where(negative_mask)[0]).to(device),
+                    )
+                    support_indices = torch.cat([positives, negatives])[:retrieval_k_train]
+                else:
+                    support_indices = find_knn_indices(
+                        query_embedding_norm,
+                        all_embeddings_norm_detached,
+                        k=min(retrieval_k_train, int(local_eligible.sum())),
+                        indices_to_mask=local_mask,
+                    )
+
+            if support_indices.numel() == 0:
                 continue
-
-            with torch.no_grad():
-                neg_mask = (batch_case_ids == query_case_id) | (batch_labels == query_label)
-                neg_mask_idx = torch.from_numpy(np.where(neg_mask)[0]).to(device)
-
-            neg_available_np = np.where(~neg_mask)[0]
-            if neg_available_np.size == 0:
-                continue
-
-            hard_pool_k = min(int(neg_available_np.size), max(neg_k, neg_k * neg_pool_factor))
-            hard_pool = find_knn_indices(
-                query_embedding_norm,
-                all_embeddings_norm_detached,
-                k=hard_pool_k,
-                indices_to_mask=neg_mask_idx,
-            )
-
-            rand_k = int(round(neg_k * neg_random_frac))
-            if neg_k > 1:
-                rand_k = min(rand_k, neg_k - 1)
-            else:
-                rand_k = 0
-            hard_k = neg_k - rand_k
-
-            hard_pool_np = hard_pool.detach().cpu().numpy() if hard_pool.numel() > 0 else np.array([], dtype=np.int64)
-            if hard_pool_np.size < hard_k:
-                hard_k = int(hard_pool_np.size)
-                rand_k = neg_k - hard_k
-
-            if hard_k > 0:
-                hard_sel_np = np.random.choice(hard_pool_np, size=hard_k, replace=False)
-            else:
-                hard_sel_np = np.array([], dtype=np.int64)
-
-            remaining_for_random = np.setdiff1d(neg_available_np, hard_sel_np, assume_unique=False)
-            rand_k_eff = min(rand_k, int(remaining_for_random.size))
-            if rand_k_eff > 0:
-                rand_sel_np = np.random.choice(remaining_for_random, size=rand_k_eff, replace=False)
-            else:
-                rand_sel_np = np.array([], dtype=np.int64)
-
-            neg_sel_np = np.concatenate([hard_sel_np, rand_sel_np]).astype(np.int64, copy=False)
-            if neg_sel_np.size < neg_k:
-                remaining_fill = np.setdiff1d(neg_available_np, neg_sel_np, assume_unique=False)
-                need = neg_k - int(neg_sel_np.size)
-                fill_k = min(need, int(remaining_fill.size))
-                if fill_k > 0:
-                    fill_np = np.random.choice(remaining_fill, size=fill_k, replace=False)
-                    neg_sel_np = np.concatenate([neg_sel_np, fill_np]).astype(np.int64, copy=False)
-
-            if neg_sel_np.size == 0:
-                continue
-
-            neg_indices = torch.from_numpy(neg_sel_np).to(device)
-
-            support_indices = torch.cat([pos_tensor, neg_indices])[:retrieval_k_train]
-
             support_embeddings = all_embeddings[support_indices]
-            support_labels_list = batch_labels[support_indices.cpu().numpy()]
-            support_labels_tensor = torch.as_tensor(support_labels_list, dtype=torch.long, device=device)
-
+            support_labels_tensor = labels_t[support_indices]
+            global_embeddings = all_embeddings[pool_indices]
+            global_labels = labels_t[pool_indices]
             logits, proto_classes, _ = model.proto_head.forward_classification(
-                support_embeddings, support_labels_tensor, query_embedding, mode="soft_knn"
+                support_embeddings,
+                support_labels_tensor,
+                query_embedding,
+                global_support_features=global_embeddings,
+                global_support_labels=global_labels,
             )
             if logits is None:
                 continue
 
             label_map = {orig.item(): new for new, orig in enumerate(proto_classes)}
+            target_label = (
+                int(config.get("fmv3_head", {}).get("abstain_label", -101))
+                if episode_type == "missing_pool_label"
+                else int(query_label)
+            )
             mapped_label = torch.tensor(
-                [label_map.get(int(query_label), -100)], device=device, dtype=torch.long
+                [label_map.get(target_label, -100)], device=device, dtype=torch.long
             )
             if mapped_label.item() == -100:
                 continue

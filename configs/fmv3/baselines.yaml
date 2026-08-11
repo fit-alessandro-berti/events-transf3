@@ -1,0 +1,26 @@
+seed: 42
+case_budgets: [1, 2, 4, 8, 16, 32, 64, 128]
+support_scenarios: [natural, class_aware]
+repetitions: 5
+test_case_fraction: 0.30
+max_test_cases: 50
+max_query_prefixes: 1000
+include_full_budget: true
+include_full_budget_max_cases: 1000
+classical_modes: [random_forest, gaussian_nb]
+sequence:
+  epochs: 20
+  batch_size: 64
+  lr: 0.001
+  embedding_dim: 32
+  hidden_dim: 64
+  dropout: 0.10
+  prior_smoothing: 1.0
+  logit_adjustment_tau: 1.0
+tabpfn:
+  enabled: true
+  model_version: v2
+  n_estimators: 4
+  max_native_classes: 10
+  many_class_redundancy: 2
+  balance_probabilities: false

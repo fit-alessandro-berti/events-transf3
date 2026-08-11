@@ -1,0 +1,46 @@
+extends: base.yaml
+experiment_name: 06_full_fmv3
+fmv3_training:
+  episode_mix:
+    balanced: 0.15
+    natural: 0.15
+    long_tail: 0.15
+    random_shot: 0.15
+    rare_path: 0.10
+    missing_local_label: 0.25
+    missing_pool_label: 0.05
+  long_tail_power_range: [0.75, 2.50]
+  cases_per_episode_range: [4, 64]
+fmv3_head:
+  classification_mode: global_local
+  local_temperature: 0.2
+  global_temperature: 0.2
+  learn_temperature: true
+  count_normalization: learned
+  count_normalization_gamma: 1.0
+  prior_mode: balanced
+  prior_strength: 1.0
+  prior_smoothing: 1.0
+  shrinkage_mode: learned
+  shrinkage_kappa: 2.0
+  gate_mode: dynamic
+  local_gate: 0.5
+  enable_abstention: true
+  abstain_label: -101
+fmv3_evaluation:
+  evaluation_profiles:
+    - name: main
+      retrieval_modes: [configured]
+      prior_modes: [balanced, natural]
+      prior_strengths: [1.0]
+      retrieval_k: [5, 20, 50]
+    - name: retrieval_ablation
+      retrieval_modes: [local, global, global_local, dynamic_expanded_local, foundation_knn]
+      prior_modes: [balanced]
+      prior_strengths: [1.0]
+      retrieval_k: [20]
+    - name: prior_pareto
+      retrieval_modes: [configured]
+      prior_modes: [natural]
+      prior_strengths: [0.0, 0.25, 0.5, 0.75, 1.0, 1.5]
+      retrieval_k: [20]

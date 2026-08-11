@@ -7,11 +7,11 @@ from .pretrained_event_embedder import PretrainedEventEmbedder
 from .event_encoder import EventEncoder
 from .prototypical_head import PrototypicalHead
 class MetaLearner (nn .Module ):
-    def __init__ (self ,strategy :str ,num_feat_dim :int ,d_model :int ,n_heads :int ,n_layers :int ,dropout :float =0.1 ,**kwargs ):
+    def __init__ (self ,strategy :str ,num_feat_dim :int ,d_model :int ,n_heads :int ,n_layers :int ,dropout :float =0.1 ,proto_head_config =None ,**kwargs ):
         super ().__init__ ()
         self .strategy =strategy
         self .encoder =EventEncoder (d_model ,n_heads ,n_layers ,dropout )
-        self .proto_head =PrototypicalHead ()
+        self .proto_head =PrototypicalHead (**(proto_head_config or {}))
         self .proj_head =nn .Sequential (
         nn .Linear (d_model ,d_model ),
         nn .GELU (),

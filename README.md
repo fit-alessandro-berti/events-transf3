@@ -86,6 +86,33 @@ python testing.py \
 Use `--test_retrieval_prediction_mode foundation_knn` to bypass prototypical heads and predict directly with kNN over foundation-model feature embeddings.
 Confidence-bucket reporting uses 5 dynamic buckets (equal-sized by confidence rank) and is applied only when `--test_retrieval_prediction_mode proto_head`.
 
+## FM-v3 experiments
+
+FM-v3 is configured through composable YAML files under `configs/fmv3/`. Any scalar or list can also be overridden without editing code:
+
+```bash
+python main.py \
+  --config configs/fmv3/06_full_fmv3.yaml \
+  --checkpoint_dir checkpoints/fmv3/06_full_fmv3 \
+  --set fmv3_head.prior_mode=natural
+```
+
+Train the complete ablation manifest on four GPUs:
+
+```bash
+python run_fmv3_training.py
+```
+
+Run the repeated, case-level low-data evaluation on all logs in `logs_eval/`:
+
+```bash
+python run_fmv3_evaluation.py --resume
+python run_fmv3_baselines.py --resume
+python generate_fmv3_report.py
+```
+
+The primary classification endpoint is balanced accuracy. The evaluator also records ordinary accuracy, macro-F1/precision, per-class recall, zero-recall classes, pool and retrieval label coverage, frequency-stratified recall, NLL, multiclass Brier score, reliability bins, risk–coverage curves, and case-bootstrap intervals. Remaining-time outputs include MAE, median absolute error, normalized MAE, MAE skill, D² absolute-error score, R², and interval coverage/width.
+
 ## Simulating new logs (optional)
 
 Generate synthetic XES logs using pm4py:

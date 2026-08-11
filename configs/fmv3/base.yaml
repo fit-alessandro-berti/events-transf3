@@ -1,0 +1,58 @@
+seed: 42
+embedding_strategy: learned
+moe_settings:
+  num_experts: 4
+d_model: 256
+n_heads: 8
+n_layers: 6
+dropout: 0.15
+lr: 0.0001
+weight_decay: 0.01
+epochs: 20
+episodes_per_epoch: 200
+training_strategy: retrieval
+episodic_label_shuffle: "yes"
+retrieval_train_k: 32
+retrieval_train_batch_size: 128
+retrieval_min_per_class: 2
+retrieval_train_max_classes: 32
+retrieval_contrastive_weight: 0.25
+retrieval_knn_aux_weight: 0.1
+proto_head_lr_mult_after_warmup: 1.0
+fmv3_training:
+  episode_mix:
+    balanced: 0.20
+    natural: 0.20
+    long_tail: 0.15
+    random_shot: 0.15
+    missing_local_label: 0.25
+    missing_pool_label: 0.05
+  long_tail_power: 1.5
+  random_shot_min: 1
+  random_shot_max: 20
+  missing_local_fraction: 1.0
+  missing_pool_fraction: 1.0
+fmv3_evaluation:
+  case_budgets: [1, 2, 4, 8, 16, 32, 64, 128]
+  support_scenarios: [natural, class_aware]
+  repetitions: 5
+  test_case_fraction: 0.30
+  max_test_cases: 50
+  max_query_prefixes: 1000
+  embedding_batch_size: 128
+  include_full_budget: true
+  include_full_budget_max_cases: 1000
+  retrieval_k: [5, 20, 50]
+  bootstrap_repetitions: 200
+  prior_modes: [balanced, natural]
+  prior_strengths: [1.0]
+  retrieval_modes: [configured]
+  dynamic_retrieval_max_k: 200
+  dynamic_retrieval_entropy_threshold: 0.65
+  threshold_fraction: 0.90
+  evaluation_profiles:
+    - name: main
+      retrieval_modes: [configured]
+      prior_modes: [balanced, natural]
+      prior_strengths: [1.0]
+      retrieval_k: [5, 20, 50]

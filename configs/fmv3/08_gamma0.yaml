@@ -1,0 +1,6 @@
+extends: 02_count_neutral.yaml
+experiment_name: 08_gamma0
+fmv3_head:
+  count_normalization: fixed
+  count_normalization_gamma: 0.0
+

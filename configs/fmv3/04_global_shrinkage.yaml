@@ -1,0 +1,6 @@
+extends: 03_global_prototypes.yaml
+experiment_name: 04_global_shrinkage
+fmv3_head:
+  shrinkage_mode: learned
+  shrinkage_kappa: 2.0
+

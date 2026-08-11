@@ -1,0 +1,7 @@
+extends: 04_global_shrinkage.yaml
+experiment_name: 05_global_local
+fmv3_head:
+  classification_mode: global_local
+  gate_mode: fixed
+  local_gate: 0.5
+

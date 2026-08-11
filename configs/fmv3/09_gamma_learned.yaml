@@ -1,0 +1,6 @@
+extends: 02_count_neutral.yaml
+experiment_name: 09_gamma_learned
+fmv3_head:
+  count_normalization: learned
+  count_normalization_gamma: 1.0
+

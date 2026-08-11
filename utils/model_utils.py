@@ -32,6 +32,7 @@ def create_model (config ,loader ,device ):
     n_heads =config ['n_heads'],
     n_layers =config ['n_layers'],
     dropout =config ['dropout'],
+    proto_head_config =config .get ('fmv3_head',{}),
     **model_params
     ).to (device )
     if strategy =='learned':

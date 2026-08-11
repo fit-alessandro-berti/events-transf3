@@ -20,6 +20,22 @@ def get_task_data (log ,task_type ,max_seq_len =10 ):
                 remaining_time =(trace [-1 ]['timestamp']-prefix [-1 ]['timestamp'])/3600.0
                 tasks .append ((prefix ,transform_time (remaining_time ),case_id ))
     return tasks
+def get_classification_and_regression_tasks (log ,max_seq_len =10 ):
+    """Materialize both prefix tasks in one pass over a transformed log."""
+    classification ,regression =[],[]
+    if not log :return classification ,regression
+    for trace in log :
+        if len (trace )<3 :continue
+        case_id =trace [0 ]['case_id']
+        final_timestamp =trace [-1 ]['timestamp']
+        for i in range (1 ,len (trace )-1 ):
+            prefix =trace [max (0 ,i +1 -max_seq_len ):i +1 ]
+            next_activity_id =trace [i +1 ]['activity_id']
+            if next_activity_id is not None :
+                classification .append ((prefix ,next_activity_id ,case_id ))
+            remaining_time =(final_timestamp -prefix [-1 ]['timestamp'])/3600.0
+            regression .append ((prefix ,transform_time (remaining_time ),case_id ))
+    return classification ,regression
 def create_episode (task_pool ,num_shots_range ,num_queries_per_class ,num_ways_range =(2 ,5 ),shuffle_labels =False ):
     class_dict =defaultdict (list )
     for seq ,label ,case_id in task_pool :

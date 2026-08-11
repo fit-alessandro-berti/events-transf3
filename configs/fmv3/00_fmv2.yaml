@@ -1,0 +1,20 @@
+extends: base.yaml
+experiment_name: 00_fmv2
+proto_head_lr_mult_after_warmup: 0.1
+fmv3_head:
+  classification_mode: legacy_soft_knn
+  count_normalization: fixed
+  count_normalization_gamma: 0.0
+  prior_mode: none
+  prior_strength: 0.0
+  shrinkage_mode: none
+  enable_abstention: false
+fmv3_training:
+  episode_mix:
+    balanced: 1.0
+    natural: 0.0
+    long_tail: 0.0
+    random_shot: 0.0
+    rare_path: 0.0
+    missing_local_label: 0.0
+    missing_pool_label: 0.0

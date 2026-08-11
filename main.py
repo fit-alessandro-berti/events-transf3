@@ -4,14 +4,23 @@ import os
 import argparse
 import shutil
 import re
+import random
 from config import CONFIG
+from config_utils import apply_experiment_config, save_yaml_config
 from utils .data_utils import get_task_data
 from utils .model_utils import init_loader ,create_model
 from training import train
 def main ():
+    pre_parser =argparse .ArgumentParser (add_help =False )
+    pre_parser .add_argument ('--config',type =str ,default =None )
+    pre_parser .add_argument ('--set',dest ='config_overrides',action ='append',default =[] )
+    pre_args ,_ =pre_parser .parse_known_args ()
+    apply_experiment_config (CONFIG ,pre_args .config ,pre_args .config_overrides )
     parser =argparse .ArgumentParser (description ="Run the meta-learning model training script.")
     default_config =CONFIG
     parser .add_argument ('--checkpoint_dir',type =str ,default ='./checkpoints',help ="Directory to save checkpoints and training artifacts.")
+    parser .add_argument ('--config',type =str ,default =pre_args .config ,help ="YAML experiment config (supports an extends key).")
+    parser .add_argument ('--set',dest ='config_overrides',action ='append',default =pre_args .config_overrides ,help ="Override a config value with dotted.path=value.")
     parser .add_argument ('--resume',action ='store_true',help ="Resume training from the latest checkpoint in --checkpoint_dir.")
     parser .add_argument ('--stop_after_epoch',type =int ,default =None ,help ="Stop training after this specific epoch number completes (e.g., 1).")
     parser .add_argument ('--cleanup_checkpoints',action ='store_true',help ="Remove all intermediate checkpoints after training, keeping only the last one.")
@@ -57,8 +66,10 @@ def main ():
     if args .stop_after_epoch :
         print (f"  - Stop After Epoch: {args .stop_after_epoch }")
     print (f"  - Cleanup Checkpoints: {args .cleanup_checkpoints }")
-    torch .manual_seed (42 )
-    np .random .seed (42 )
+    seed =int (CONFIG .get ('seed',42 ))
+    torch .manual_seed (seed )
+    np .random .seed (seed )
+    random .seed (seed )
     device =torch .device ("cuda"if torch .cuda .is_available ()else "cpu")
     print (f"Using device: {device }")
     strategy =CONFIG ['embedding_strategy']
@@ -106,6 +117,7 @@ def main ():
                 print (f'Failed to delete {file_path }. Reason: {e }')
     print ("Saving config...")
     torch .save (CONFIG ,config_path )
+    save_yaml_config (CONFIG ,os .path .join (checkpoint_dir ,'training_config.yaml'))
     print ("--- Phase 1: Preparing Training Data ---")
     loader =init_loader (CONFIG )
     if args .resume and os .path .exists (artifacts_path ):
@@ -128,6 +140,10 @@ def main ():
         model .load_state_dict (torch .load (latest_checkpoint_path ,map_location =device ))
     print (f"Model has {sum (p .numel ()for p in model .parameters ()if p .requires_grad ):,} trainable parameters.")
     print ("\n--- Phase 4: Starting Model Training ---")
+    if not CONFIG .get ('training_enabled',True ):
+        torch .save (model .state_dict (),os .path .join (checkpoint_dir ,'model_epoch_0.pth'))
+        print ("Training disabled by config; saved initialized model_epoch_0.pth.")
+        return
     train (
     model ,
     training_tasks ,

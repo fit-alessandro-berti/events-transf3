@@ -4,6 +4,7 @@ import pm4py
 import os
 import numpy as np
 import torch
+from itertools import chain
 from sentence_transformers import SentenceTransformer
 from sklearn .metrics .pairwise import cosine_similarity
 from scipy .optimize import linear_sum_assignment
@@ -75,25 +76,28 @@ class XESLogLoader :
     timestamp_key ='time:timestamp',resource_key ='org:resource',cost_key ='amount'):
         if not self .training_activity_names :raise RuntimeError ("Loader has not been fitted.")
         print (f"\nTransforming logs: {list (log_paths .keys ())}")
-        all_dfs =[pm4py .read_xes (path )for path in log_paths .values ()if
-        os .path .exists (path )]
-        for i in range (len (all_dfs )):
-            if not resource_key in all_dfs [i ]:
-                all_dfs [i ][resource_key ]="Unknown"
-        if not all_dfs :return {}
-        combined_df =pd .concat (all_dfs ,keys =log_paths .keys (),names =['log_name','orig_index']).reset_index ()
+        frames ={name :pm4py .read_xes (path )for name ,path in log_paths .items ()if os .path .exists (path )}
+        return self .transform_dataframes (frames ,case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key )
+    def transform_dataframes (self ,frames :dict ,case_id_key ='case:concept:name',activity_key ='concept:name',
+    timestamp_key ='time:timestamp',resource_key ='org:resource',cost_key ='amount',activity_names_by_log =None ):
+        if not self .training_activity_names :raise RuntimeError ("Loader has not been fitted.")
+        if not frames :return {}
+        for frame in frames .values ():
+            if resource_key not in frame :frame [resource_key ]="Unknown"
+        combined_df =pd .concat (frames .values (),keys =frames .keys (),names =['log_name','orig_index']).reset_index ()
         processed_logs ={}
         for name ,group_df in combined_df .groupby ('log_name'):
             raw_traces =self ._convert_df_to_raw_traces (group_df ,case_id_key ,activity_key ,timestamp_key ,
             resource_key ,cost_key )
             if self .strategy =='learned':
-                processed_logs [name ]=self ._transform_learned (raw_traces )
+                names =activity_names_by_log .get (name )if activity_names_by_log else None
+                processed_logs [name ]=self ._transform_learned (raw_traces ,names )
             else :
                 processed_logs [name ]=self ._transform_pretrained (group_df ,raw_traces ,activity_key ,resource_key )
         print ("✅ Transformation complete.")
         return processed_logs
-    def _transform_learned (self ,raw_traces ):
-        all_activities_in_log =set (event ['activity']for trace in raw_traces for event in trace )
+    def _transform_learned (self ,raw_traces ,activity_names =None ):
+        all_activities_in_log =activity_names or set (event ['activity']for trace in raw_traces for event in trace )
         local_activity_to_id ={name :i for i ,name in enumerate (sorted (list (all_activities_in_log )))}
         log_with_strings =[]
         for raw_trace in raw_traces :
@@ -116,18 +120,26 @@ class XESLogLoader :
         df [timestamp_key ]=pd .to_datetime (df [timestamp_key ],errors ='coerce').dt .tz_localize (None )
         df =df .dropna (subset =[timestamp_key ])
         df [resource_key ]=df [resource_key ].fillna ('Unknown')
-        for case_id ,trace_df in df .groupby (case_id_key ):
-            trace_df =trace_df .sort_values (by =timestamp_key )
+        if cost_key not in df :
+            df [cost_key ]=0.0
+        # Sorting once and iterating over plain tuples is materially faster than
+        # sorting every case and constructing a pandas Series for every event.
+        columns =[case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key ]
+        ordered =df .sort_values ([case_id_key ,timestamp_key ])[columns ]
+        for case_id ,trace_df in ordered .groupby (case_id_key ,sort =False ):
             if trace_df .empty :continue
-            trace ,start_time ,prev_time =[],trace_df .iloc [0 ][timestamp_key ],trace_df .iloc [0 ][timestamp_key ]
-            for _ ,event in trace_df .iterrows ():
-                current_time =event [timestamp_key ]
-                cost_val =event .get (cost_key ,0.0 )
-                if not isinstance (cost_val ,(int ,float ))or pd .isna (cost_val ):
+            rows =trace_df .itertuples (index =False ,name =None )
+            first =next (rows )
+            start_time =first [2 ]
+            prev_time =start_time
+            trace =[]
+            for event in chain ((first ,),rows ):
+                _ ,activity ,current_time ,resource ,cost_val =event
+                if not isinstance (cost_val ,(int ,float ,np .number ))or pd .isna (cost_val ):
                     cost_val =0.0
                 event_dict ={
-                'case_id':case_id ,'activity':event [activity_key ],'timestamp':current_time .timestamp (),
-                'resource':event [resource_key ],'cost':cost_val ,
+                'case_id':case_id ,'activity':activity ,'timestamp':current_time .timestamp (),
+                'resource':resource ,'cost':cost_val ,
                 'time_from_start':(current_time -start_time ).total_seconds (),
                 'time_from_previous':(current_time -prev_time ).total_seconds (),
                 }

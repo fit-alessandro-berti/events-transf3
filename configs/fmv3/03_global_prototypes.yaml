@@ -1,0 +1,10 @@
+extends: 02_count_neutral.yaml
+experiment_name: 03_global_prototypes
+fmv3_head:
+  classification_mode: global
+  count_normalization: fixed
+  count_normalization_gamma: 1.0
+  prior_mode: balanced
+  prior_strength: 1.0
+  shrinkage_mode: none
+  enable_abstention: false

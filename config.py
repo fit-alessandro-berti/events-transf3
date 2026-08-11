@@ -3,7 +3,7 @@ LOG_DIR ='./logs'
 CONFIG ={
 'log_paths':{
 'training':{
-'o2c':os .path .join (LOG_DIR ,'0001_o2c.xes.gz'),
+'o2c':os .path .join (LOG_DIR ,'00001_o2c.xes.gz'),
 'hire2retire':os .path .join (LOG_DIR ,'00002_hire2retire.xes.gz'),
 'di2re':os .path .join (LOG_DIR ,'00003_di2re.xes.gz'),
 'mak2stock':os .path .join (LOG_DIR ,'00004_mak2stock.xes.gz'),
@@ -78,6 +78,57 @@ CONFIG ={
 'test_retrieval_first_expert_only':False ,
 'num_test_episodes':200 ,
 'num_cases_for_testing':500 ,
+'seed':42,
+'training_enabled':True,
+'fmv3_head':{
+'classification_mode':'legacy_soft_knn', # legacy_soft_knn, local, global, global_local
+'local_temperature':0.2,
+'global_temperature':0.2,
+'learn_temperature':False,
+'count_normalization':'fixed', # fixed, learned
+'count_normalization_gamma':0.0,
+'prior_mode':'none', # none, uniform/balanced, natural
+'prior_strength':0.0,
+'prior_smoothing':1.0,
+'shrinkage_mode':'none', # none, fixed, learned
+'shrinkage_kappa':2.0,
+'gate_mode':'fixed', # fixed, dynamic
+'local_gate':0.5,
+'enable_abstention':False,
+'abstain_label':-101,
+'abstain_bias':0.0,
+'abstain_slope':2.0,
+},
+'fmv3_training':{
+'episode_mix':{'balanced':1.0},
+'long_tail_power':1.5,
+'random_shot_min':1,
+'random_shot_max':20,
+'missing_local_fraction':1.0,
+'missing_pool_fraction':1.0,
+},
+'fmv3_evaluation':{
+'case_budgets':[1,2,4,8,16,32,64,128],
+'support_scenarios':['natural','class_aware'],
+'repetitions':5,
+'test_case_fraction':0.3,
+'max_test_cases':50,
+'max_query_prefixes':1000,
+'embedding_batch_size':128,
+'include_full_budget':True,
+'include_full_budget_max_cases':1000,
+'retrieval_k':[5,20,50],
+'bootstrap_repetitions':200,
+'prior_modes':['balanced','natural'],
+'prior_strengths':[1.0],
+'retrieval_modes':['configured'],
+'dynamic_retrieval_max_k':200,
+'dynamic_retrieval_entropy_threshold':0.65,
+'threshold_fraction':0.9,
+'evaluation_profiles':[
+{'name':'main','retrieval_modes':['configured'],'prior_modes':['balanced','natural'],'prior_strengths':[1.0],'retrieval_k':[5,20,50]},
+],
+},
 }
 if False :
     OUT_DIR =os .path .join (LOG_DIR ,'out')

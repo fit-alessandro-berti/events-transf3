@@ -1,0 +1,12 @@
+extends: 00_fmv2.yaml
+experiment_name: 01_realistic_episodes
+proto_head_lr_mult_after_warmup: 0.1
+fmv3_training:
+  episode_mix:
+    balanced: 0.20
+    natural: 0.30
+    long_tail: 0.20
+    random_shot: 0.30
+    rare_path: 0.0
+    missing_local_label: 0.0
+    missing_pool_label: 0.0
