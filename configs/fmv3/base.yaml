@@ -50,6 +50,10 @@ fmv3_evaluation:
   dynamic_retrieval_max_k: 200
   dynamic_retrieval_entropy_threshold: 0.65
   threshold_fraction: 0.90
+  structured_max_order: 3
+  structured_smoothing: 0.5
+  structured_weight: 0.75
+  structured_tau: 0.5
   evaluation_profiles:
     - name: main
       retrieval_modes: [configured]

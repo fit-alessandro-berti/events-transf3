@@ -7,6 +7,8 @@ from components.prototypical_head import PrototypicalHead
 from evaluation.fmv3_metrics import classification_metrics, regression_metrics
 from evaluation.fmv3_protocol import (
     _batched_head_probabilities,
+    _fuse_structured_prediction,
+    _structured_class_probabilities,
     fixed_case_split,
     support_case_order,
 )
@@ -95,6 +97,58 @@ class FMV3ProtocolTests(unittest.TestCase):
             aligned[classes.long()] = probabilities[0]
             expected.append(aligned)
         torch.testing.assert_close(batched, torch.stack(expected), atol=1e-6, rtol=1e-6)
+
+    def test_structured_probabilities_back_off_to_seen_suffix(self):
+        labels = torch.tensor([0, 1, 0, 1, 0])
+        contexts = [(4, 7), (5, 7), (4, 8), (5, 8), (9, 7)]
+        probabilities, support, orders, counts = _structured_class_probabilities(
+            labels,
+            contexts,
+            query_indices=np.asarray([4]),
+            support_indices=np.asarray([0, 1, 2, 3]),
+            class_universe=[0, 1],
+            max_order=2,
+            smoothing=0.5,
+        )
+        self.assertEqual(counts, {0: 2, 1: 2})
+        self.assertEqual(orders.tolist(), [1])
+        self.assertEqual(support.tolist(), [2.0])
+        np.testing.assert_allclose(probabilities, [[0.5, 0.5]], atol=1e-7)
+
+    def test_structured_likelihood_balances_frequent_and_rare_classes(self):
+        labels = torch.tensor([0, 0, 0, 0, 1, 0])
+        contexts = [(7,), (1,), (2,), (3,), (7,), (7,)]
+        probabilities, _, _, _ = _structured_class_probabilities(
+            labels,
+            contexts,
+            query_indices=np.asarray([5]),
+            support_indices=np.asarray([0, 1, 2, 3, 4]),
+            class_universe=[0, 1],
+            max_order=1,
+            smoothing=0.5,
+        )
+        # Both classes produced state 7 once. Class-conditional normalization
+        # makes that observation stronger evidence for the globally rare class.
+        self.assertGreater(probabilities[0, 1], probabilities[0, 0])
+
+    def test_structured_fusion_shrinks_weight_by_context_support(self):
+        base = {
+            "y_true": [0, 1],
+            "y_pred": [0, 0],
+            "probabilities": np.asarray([[0.8, 0.2], [0.8, 0.2]]),
+            "confidences": [0.8, 0.8],
+            "support_counts": {0: 2, 1: 2},
+        }
+        structured = {
+            "probabilities": np.asarray([[0.2, 0.8], [0.2, 0.8]]),
+            "structured_context_support": [0.0, 2.0],
+        }
+        fused = _fuse_structured_prediction(
+            base, structured, [0, 1], weight=1.0, tau=2.0, fusion="mixture"
+        )
+        np.testing.assert_allclose(fused["probabilities"][0], [0.8, 0.2])
+        np.testing.assert_allclose(fused["probabilities"][1], [0.5, 0.5])
+        self.assertEqual(fused["structured_effective_weight"], [0.0, 0.5])
 
 
 if __name__ == "__main__":

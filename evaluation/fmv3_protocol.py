@@ -228,6 +228,148 @@ def _align_probabilities(classes, probabilities, universe):
     return aligned
 
 
+def _activity_context(task, max_order):
+    """Return the recent log-local activity state for a prefix task."""
+    prefix = task[0]
+    return tuple(int(event["activity_id"]) for event in prefix[-int(max_order) :])
+
+
+def _structured_class_probabilities(
+    labels,
+    contexts,
+    query_indices,
+    support_indices,
+    class_universe,
+    max_order=3,
+    smoothing=0.5,
+):
+    """Balanced class-conditional n-gram likelihood with suffix backoff.
+
+    The score estimates P(recent activity context | next activity) under a
+    uniform next-activity prior. Longer suffixes are preferred when observed;
+    an unseen state backs off to shorter suffixes and ultimately a uniform
+    distribution over support-covered labels.
+    """
+    max_order = max(1, int(max_order))
+    smoothing = max(float(smoothing), 1e-8)
+    support_indices = np.asarray(support_indices, dtype=np.int64)
+    query_indices = np.asarray(query_indices, dtype=np.int64)
+    labels_np = labels.cpu().numpy() if torch.is_tensor(labels) else np.asarray(labels)
+    classes = list(map(int, class_universe))
+    class_position = {label: position for position, label in enumerate(classes)}
+    global_counts = Counter(int(labels_np[index]) for index in support_indices)
+    tables = {order: defaultdict(Counter) for order in range(1, max_order + 1)}
+    for index in support_indices:
+        label = int(labels_np[index])
+        context = contexts[int(index)]
+        for order in tables:
+            tables[order][context[-order:]][label] += 1
+
+    probabilities = np.zeros((len(query_indices), len(classes)), dtype=np.float32)
+    context_support = np.zeros(len(query_indices), dtype=np.float32)
+    selected_orders = np.zeros(len(query_indices), dtype=np.int64)
+    for row, index in enumerate(query_indices):
+        query_context = contexts[int(index)]
+        counts = None
+        vocabulary_size = 1
+        for order in range(max_order, 0, -1):
+            candidate = tables[order].get(query_context[-order:])
+            if candidate:
+                counts = candidate
+                vocabulary_size = max(1, len(tables[order]))
+                context_support[row] = float(sum(candidate.values()))
+                selected_orders[row] = order
+                break
+
+        scores = np.full(len(classes), -1e9, dtype=np.float64)
+        for label, position in class_position.items():
+            if global_counts.get(label, 0) <= 0:
+                continue
+            if counts is None:
+                scores[position] = 0.0
+            else:
+                scores[position] = (
+                    math.log(counts.get(label, 0) + smoothing)
+                    - math.log(global_counts[label] + smoothing * vocabulary_size)
+                )
+        scores -= scores.max()
+        row_probabilities = np.exp(scores)
+        row_probabilities /= row_probabilities.sum().clip(min=1e-12)
+        probabilities[row] = row_probabilities
+    return probabilities, context_support, selected_orders, dict(global_counts)
+
+
+def _structured_prediction(
+    labels,
+    contexts,
+    query_indices,
+    support_indices,
+    class_universe,
+    max_order,
+    smoothing,
+):
+    probabilities, context_support, selected_orders, support_counts = (
+        _structured_class_probabilities(
+            labels, contexts, query_indices, support_indices, class_universe,
+            max_order=max_order, smoothing=smoothing,
+        )
+    )
+    universe = np.asarray(class_universe, dtype=np.int64)
+    predicted = universe[np.argmax(probabilities, axis=1)]
+    true = np.asarray([int(labels[int(index)]) for index in query_indices], dtype=np.int64)
+    pool_covered = np.asarray([support_counts.get(int(label), 0) > 0 for label in true])
+    return {
+        "y_true": true.tolist(),
+        "y_pred": predicted.tolist(),
+        "probabilities": probabilities,
+        "confidences": probabilities.max(axis=1).tolist(),
+        "pool_covered": pool_covered.tolist(),
+        "retrieval_covered": pool_covered.tolist(),
+        "support_counts": support_counts,
+        "structured_context_support": context_support,
+        "structured_selected_order": selected_orders,
+    }
+
+
+def _fuse_structured_prediction(base, structured, class_universe, weight, tau, fusion):
+    base_probabilities = np.asarray(base["probabilities"], dtype=np.float64)
+    structured_probabilities = np.asarray(structured["probabilities"], dtype=np.float64)
+    base_probabilities /= base_probabilities.sum(axis=1, keepdims=True).clip(min=1e-12)
+    structured_probabilities /= structured_probabilities.sum(axis=1, keepdims=True).clip(min=1e-12)
+    support = np.asarray(structured["structured_context_support"], dtype=np.float64)
+    tau = max(float(tau), 0.0)
+    reliability = np.ones_like(support) if tau == 0.0 else support / (support + tau)
+    effective_weight = np.clip(float(weight) * reliability, 0.0, 1.0)[:, None]
+    effective_weight[support <= 0] = 0.0
+    if fusion == "mixture":
+        probabilities = (
+            (1.0 - effective_weight) * base_probabilities
+            + effective_weight * structured_probabilities
+        )
+    elif fusion in {"product", "log_linear"}:
+        logits = (
+            (1.0 - effective_weight) * np.log(base_probabilities.clip(min=1e-12))
+            + effective_weight * np.log(structured_probabilities.clip(min=1e-12))
+        )
+        logits -= logits.max(axis=1, keepdims=True)
+        probabilities = np.exp(logits)
+    else:
+        raise ValueError(f"Unknown structured fusion: {fusion}")
+    probabilities /= probabilities.sum(axis=1, keepdims=True).clip(min=1e-12)
+    universe = np.asarray(class_universe, dtype=np.int64)
+    fused = dict(base)
+    fused["probabilities"] = probabilities
+    fused["y_pred"] = universe[np.argmax(probabilities, axis=1)].tolist()
+    fused["confidences"] = probabilities.max(axis=1).tolist()
+    fused["structured_context_support"] = support.tolist()
+    if "structured_selected_order" in structured:
+        fused["structured_selected_order"] = np.asarray(
+            structured["structured_selected_order"], dtype=np.int64
+        ).tolist()
+    fused["structured_effective_weight"] = effective_weight[:, 0].tolist()
+    return fused
+
+
 def _batched_head_probabilities(
     head,
     query,
@@ -524,7 +666,33 @@ def predict_classification(
     prior_mode,
     prior_strength,
     eval_cfg,
+    structured_contexts=None,
 ):
+    structured_modes = {"structured", "fm_structured_mix", "fm_structured_product"}
+    if retrieval_mode in structured_modes:
+        if structured_contexts is None:
+            raise ValueError(f"{retrieval_mode} requires structured prefix contexts")
+        max_order = int(eval_cfg.get("structured_max_order", 3))
+        smoothing = float(eval_cfg.get("structured_smoothing", 0.5))
+        structured = _structured_prediction(
+            labels, structured_contexts, query_indices, support_indices,
+            class_universe, max_order, smoothing,
+        )
+        if retrieval_mode == "structured":
+            return structured
+        base = _predict_classification_fixed_k(
+            experts, embeddings_by_expert, labels, query_indices, support_indices,
+            class_universe, retrieval_k, "configured", prior_mode, prior_strength,
+        )
+        fusion = "mixture" if retrieval_mode == "fm_structured_mix" else "product"
+        return _fuse_structured_prediction(
+            base,
+            structured,
+            class_universe,
+            float(eval_cfg.get("structured_weight", 0.5)),
+            float(eval_cfg.get("structured_tau", 2.0)),
+            fusion,
+        )
     if retrieval_mode == "dynamic_expanded_local":
         return _predict_classification_dynamic_batched(
             experts, embeddings_by_expert, labels, query_indices, support_indices,
@@ -717,6 +885,8 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
     class_query_indices = _fixed_query_indices(class_tasks, test_cases, max_queries, seed)
     reg_query_indices = _fixed_query_indices(reg_tasks, test_cases, max_queries, seed)
     class_labels = torch.as_tensor([int(item[1]) for item in class_tasks], dtype=torch.long)
+    structured_order = int(eval_cfg.get("structured_max_order", 3))
+    class_contexts = [_activity_context(task, structured_order) for task in class_tasks]
     reg_labels = torch.as_tensor([float(item[1]) for item in reg_tasks], dtype=torch.float32)
     universe = sorted({int(class_labels[idx]) for idx in class_query_indices})
     print(f"[{log_name}] encoding {len(class_tasks)} classification and {len(reg_tasks)} regression prefixes")
@@ -749,6 +919,7 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                         experts, class_embeddings, class_labels, class_query_indices,
                                         class_support_indices, universe, int(retrieval_k), retrieval_mode,
                                         prior_mode, float(prior_strength), eval_cfg,
+                                        structured_contexts=class_contexts,
                                     )
                                     metrics = classification_metrics(
                                         prediction["y_true"], prediction["y_pred"], prediction["probabilities"],
@@ -762,6 +933,31 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                         int(eval_cfg.get("bootstrap_repetitions", 200)),
                                         seed + repetition * 1009 + budget + int(retrieval_k),
                                     )
+                                    structured_diagnostics = {}
+                                    if "structured_context_support" in prediction:
+                                        context_support = np.asarray(
+                                            prediction["structured_context_support"], dtype=float
+                                        )
+                                        selected_order = np.asarray(
+                                            prediction["structured_selected_order"], dtype=float
+                                        )
+                                        structured_diagnostics = {
+                                            "structured_context_coverage": float(
+                                                np.mean(context_support > 0)
+                                            ),
+                                            "structured_mean_context_support": float(
+                                                context_support.mean()
+                                            ),
+                                            "structured_mean_selected_order": float(
+                                                selected_order.mean()
+                                            ),
+                                        }
+                                        if "structured_effective_weight" in prediction:
+                                            structured_diagnostics[
+                                                "structured_mean_effective_weight"
+                                            ] = float(
+                                                np.mean(prediction["structured_effective_weight"])
+                                            )
                                     row = {
                                         "task": "classification", "log": log_name,
                                         "experiment": config.get("experiment_name", "unnamed"),
@@ -771,6 +967,13 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                         "retrieval_mode": retrieval_mode, "prior_mode": prior_mode,
                                         "prior_strength": float(prior_strength),
                                         "retrieval_k": int(retrieval_k), **metrics,
+                                        "structured_max_order": structured_order,
+                                        "structured_smoothing": float(
+                                            eval_cfg.get("structured_smoothing", 0.5)
+                                        ),
+                                        "structured_weight": float(eval_cfg.get("structured_weight", 0.5)),
+                                        "structured_tau": float(eval_cfg.get("structured_tau", 2.0)),
+                                        **structured_diagnostics,
                                     }
                                     rows.append(row)
                                     with output_jsonl.open("a", encoding="utf-8") as handle:

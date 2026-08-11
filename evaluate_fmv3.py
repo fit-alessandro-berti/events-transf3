@@ -34,6 +34,9 @@ def _write_summary(rows, output_dir: Path):
     columns = [
         "task", "experiment", "evaluation_profile", "log", "repetition", "support_scenario", "case_budget",
         "support_prefixes", "retrieval_mode", "prior_mode", "prior_strength", "retrieval_k", "n_queries",
+        "structured_max_order", "structured_smoothing", "structured_weight", "structured_tau",
+        "structured_context_coverage", "structured_mean_context_support",
+        "structured_mean_selected_order", "structured_mean_effective_weight",
         "accuracy", "balanced_accuracy", "adjusted_balanced_accuracy", "macro_precision", "macro_f1", "zero_recall_fraction",
         "support_pool_availability", "macro_label_recall_at_k", "macro_retrieval_given_pool",
         "macro_decision_given_retrieval", "nll", "multiclass_brier",

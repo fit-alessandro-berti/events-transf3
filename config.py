@@ -130,6 +130,10 @@ CONFIG ={
 'dynamic_retrieval_max_k':200,
 'dynamic_retrieval_entropy_threshold':0.65,
 'threshold_fraction':0.9,
+'structured_max_order':3,
+'structured_smoothing':0.5,
+'structured_weight':0.75,
+'structured_tau':0.5,
 'evaluation_profiles':[
 {'name':'main','retrieval_modes':['configured'],'prior_modes':['balanced','natural'],'prior_strengths':[1.0],'retrieval_k':[5,20,50]},
 ],

@@ -1,0 +1,16 @@
+# Evaluation-only overlay for the frozen corrected FM-v3 checkpoint.
+# Intentionally has no `extends`: checkpoint architecture/training settings
+# remain authoritative when this file is passed to evaluate_fmv3.py.
+experiment_name: structured_fmv3
+fmv3_evaluation:
+  support_scenarios: [natural]
+  structured_max_order: 3
+  structured_smoothing: 0.5
+  structured_weight: 0.75
+  structured_tau: 0.5
+  evaluation_profiles:
+    - name: main
+      retrieval_modes: [fm_structured_mix]
+      prior_modes: [balanced]
+      prior_strengths: [1.0]
+      retrieval_k: [20]

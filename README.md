@@ -123,6 +123,25 @@ Regenerate the paired improvement report with:
 python generate_fmv3_improvement_report.py
 ```
 
+The stronger structured-memory inference branch combines the corrected FM-v3
+posterior with a log-local, class-balanced activity-transition memory. Run its
+frozen full protocol and regenerate the paired report with:
+
+```bash
+python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/corrected_fmv3 \
+  --logs_dir logs_eval \
+  --eval_config configs/fmv3/structured_memory_eval.yaml \
+  --output_dir evaluation_results/fmv3_improved/structured_fmv3
+python generate_structured_fmv3_report.py
+```
+
+The transition branch backs off from the last three activities to shorter
+suffixes. Its contribution is shrunk by observed context support and becomes
+zero for an unseen context, leaving the foundation-model prediction unchanged.
+The primary full-protocol comparison is documented in
+`paper_docs/structured_fmv3_report.md`.
+
 The three-way corrected baseline/control/FM-v3 evaluation manifest is
 `configs/fmv3/improved_evaluation_manifest.yaml`.
 
