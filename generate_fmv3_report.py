@@ -338,6 +338,13 @@ def main():
 
     text = f"""# FM-v3 evaluation report
 
+> **Historical pre-audit ablation report.** This report evaluates the original
+> `06_full_fmv3` design, not the selected final system. Several implementation
+> defects were corrected afterward, and structured transition memory was then
+> added. See [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md) for
+> the full evolution and [`structured_fmv3_report.md`](structured_fmv3_report.md)
+> for the final paired result.
+
 ## Executive summary
 
 {delta_text}

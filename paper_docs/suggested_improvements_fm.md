@@ -1,3 +1,12 @@
+# FM-v3 design recommendations
+
+> **Document status:** this is the pre-implementation design rationale, not a
+> description of the selected final system. See
+> [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md) for what was
+> actually implemented, retained, corrected, or rejected, and
+> [`structured_fmv3_report.md`](structured_fmv3_report.md) for the final paired
+> result.
+
 ## Balanced accuracy should become the primary classification metric
 
 For multiclass next-activity prediction,

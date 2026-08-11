@@ -1,5 +1,9 @@
 # FM-v3 experiment manifest
 
+For the architectural relationship among these runs, the selected final
+pipeline, and the distinction between training and inference changes, see
+[`fmv3_architecture_changes.md`](fmv3_architecture_changes.md).
+
 | Checkpoint | Change relative to preceding conceptual baseline |
 |---|---|
 | `minus1_fmv1_retrained` | FM-v1-style balanced episodic pretraining under the current data/code environment |
@@ -24,10 +28,22 @@
 | `13_corrected_fallback_centered` | Margin-1 fallback with centered global prototypes |
 | `corrected_fmv3` | Selected margin-1 epoch-23 checkpoint with adaptive fallback calibration |
 
+## Final inference-only augmentation
+
+| Variant | Purpose |
+|---|---|
+| `structured_fmv3` | Frozen `corrected_fmv3` checkpoint plus class-balanced order-1--3 transition memory and support-count-gated probability fusion |
+
+`structured_fmv3` is not a separately trained checkpoint. It uses
+`configs/fmv3/structured_memory_eval.yaml` as an evaluation-only overlay and
+stores results under `evaluation_results/fmv3_improved/structured_fmv3/`.
+
 The post-audit runs continue the common `00_fmv2` epoch-20 checkpoint. The
 screening manifest is `configs/fmv3/improvement_manifest.yaml`; the selected
 configuration is `configs/fmv3/corrected_fmv3.yaml`, and the confirmation
 manifest is `configs/fmv3/improved_evaluation_manifest.yaml`. Paired results
 and the implementation audit are in `paper_docs/fmv3_improvement_report.md`.
+The final end-to-end comparison is in
+`paper_docs/structured_fmv3_report.md`.
 
 Every folder contains its resolved `training_config.yaml`, serialized loader artifacts, and one final `model_epoch_*.pth`. The manifest is machine-readable at `configs/fmv3/manifest.yaml`.

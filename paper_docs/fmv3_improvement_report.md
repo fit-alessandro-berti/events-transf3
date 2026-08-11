@@ -1,10 +1,16 @@
 # FM-v3 architecture audit and improvement report
 
+> **Architecture role:** this report covers the intermediate corrected neural
+> checkpoint. The selected final system adds structured transition memory on
+> top. See [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md) for the
+> complete before/after architecture and
+> [`structured_fmv3_report.md`](structured_fmv3_report.md) for the final result.
+
 ## Outcome
 
 The corrected FM-v3 checkpoint improves the primary metric over FM-v2 by **+0.0059 balanced accuracy** across 200 paired natural-support rows. Ordinary accuracy changes by **+0.0075** and macro-F1 by **+0.0050**. It also improves balanced accuracy by **+0.0016** over the stronger classification-focused continuation control.
 
-After first averaging each nested learning curve within log and repetition, the paired balanced-accuracy gain is **+0.0061** with a 95% cluster-bootstrap interval of **[+0.0036, +0.0090]** (25 log/repetition clusters; 10,000 resamples).
+After averaging the nested learning curves within each log, the paired balanced-accuracy gain is **+0.0061** with a 95% cluster-bootstrap interval of **[+0.0022, +0.0104]** (5 log-level clusters; 10,000 resamples).
 
 The selected artifact is `checkpoints/fmv3/corrected_fmv3/model_epoch_23.pth`; its resolved configuration is `checkpoints/fmv3/corrected_fmv3/training_config.yaml`, with the reusable source configuration at `configs/fmv3/corrected_fmv3.yaml`.
 

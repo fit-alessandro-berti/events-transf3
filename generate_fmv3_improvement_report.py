@@ -146,9 +146,11 @@ def main() -> None:
     accuracy_delta = _delta(pair, "accuracy").mean()
     f1_delta = _delta(pair, "macro_f1").mean()
     control_bacc_delta = _delta(control_pair, "balanced_accuracy").mean()
-    cluster_frame = pair[["log", "repetition"]].copy()
+    # Repetitions share the same log-level query split, so the independent
+    # uncertainty unit is the log rather than each repeated support draw.
+    cluster_frame = pair[["log"]].copy()
     cluster_frame["delta"] = _delta(pair, "balanced_accuracy")
-    cluster_deltas = cluster_frame.groupby(["log", "repetition"]).delta.mean().to_numpy()
+    cluster_deltas = cluster_frame.groupby("log").delta.mean().to_numpy()
     rng = np.random.default_rng(42)
     bootstrapped = np.asarray([
         rng.choice(cluster_deltas, len(cluster_deltas), replace=True).mean()
@@ -158,11 +160,17 @@ def main() -> None:
     cluster_lower, cluster_upper = np.quantile(bootstrapped, [0.025, 0.975])
     report = f"""# FM-v3 architecture audit and improvement report
 
+> **Architecture role:** this report covers the intermediate corrected neural
+> checkpoint. The selected final system adds structured transition memory on
+> top. See [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md) for the
+> complete before/after architecture and
+> [`structured_fmv3_report.md`](structured_fmv3_report.md) for the final result.
+
 ## Outcome
 
 The corrected FM-v3 checkpoint improves the primary metric over FM-v2 by **{bacc_delta:+.4f} balanced accuracy** across {len(pair)} paired natural-support rows. Ordinary accuracy changes by **{accuracy_delta:+.4f}** and macro-F1 by **{f1_delta:+.4f}**. It also improves balanced accuracy by **{control_bacc_delta:+.4f}** over the stronger classification-focused continuation control.
 
-After first averaging each nested learning curve within log and repetition, the paired balanced-accuracy gain is **{cluster_mean:+.4f}** with a 95% cluster-bootstrap interval of **[{cluster_lower:+.4f}, {cluster_upper:+.4f}]** (25 log/repetition clusters; 10,000 resamples).
+After averaging the nested learning curves within each log, the paired balanced-accuracy gain is **{cluster_mean:+.4f}** with a 95% cluster-bootstrap interval of **[{cluster_lower:+.4f}, {cluster_upper:+.4f}]** ({len(cluster_deltas)} log-level clusters; 10,000 resamples).
 
 The selected artifact is `checkpoints/fmv3/corrected_fmv3/model_epoch_23.pth`; its resolved configuration is `checkpoints/fmv3/corrected_fmv3/training_config.yaml`, with the reusable source configuration at `configs/fmv3/corrected_fmv3.yaml`.
 

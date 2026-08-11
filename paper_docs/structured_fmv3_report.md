@@ -1,5 +1,10 @@
 # Structured FM-v3 architecture and paired evaluation
 
+> **Selected final system.** For a component-by-component explanation of the
+> FM-v2 baseline, the corrected neural head, the structured-memory equations,
+> training versus inference changes, and rejected alternatives, see
+> [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md).
+
 ## Outcome
 
 The frozen structured-memory FM-v3 improves the corrected FM-v2 evaluator by

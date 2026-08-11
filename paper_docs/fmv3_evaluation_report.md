@@ -1,12 +1,11 @@
 # FM-v3 evaluation report
 
-> **Post-audit update (2026-08-11):** the implementation and training protocol
-> used for this report contained defects in temperature learning, similarity
-> centering, and multi-expert retrieval. The corrected architecture now exceeds
-> the re-evaluated FM-v2 baseline. See
-> [`fmv3_improvement_report.md`](fmv3_improvement_report.md) for the paired
-> results and selected checkpoint. The original report below is retained as the
-> pre-correction experimental record.
+> **Historical pre-audit ablation report.** This report evaluates the original
+> `06_full_fmv3` design, not the selected final system. Several implementation
+> defects were corrected afterward, and structured transition memory was then
+> added. See [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md) for
+> the full evolution and [`structured_fmv3_report.md`](structured_fmv3_report.md)
+> for the final paired result.
 
 ## Executive summary
 

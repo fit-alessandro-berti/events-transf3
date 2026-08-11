@@ -90,6 +90,11 @@ Confidence-bucket reporting uses 5 dynamic buckets (equal-sized by confidence ra
 
 FM-v3 is configured through composable YAML files under `configs/fmv3/`. Any scalar or list can also be overridden without editing code:
 
+For a complete explanation of the selected architecture—including what changed
+at training time, what changed only at inference, the equations for coverage
+fallback and structured-memory fusion, and the rejected alternatives—start
+with [`paper_docs/fmv3_architecture_changes.md`](paper_docs/fmv3_architecture_changes.md).
+
 ```bash
 python main.py \
   --config configs/fmv3/06_full_fmv3.yaml \
@@ -116,6 +121,10 @@ The post-audit corrected checkpoint and its focused comparison are available at:
 - `checkpoints/fmv3/corrected_fmv3/model_epoch_23.pth`
 - `configs/fmv3/corrected_fmv3.yaml`
 - `paper_docs/fmv3_improvement_report.md`
+
+That checkpoint is the neural base of the final structured FM-v3. The
+improvement report documents the intermediate neural correction; it is not the
+final end-to-end result by itself.
 
 Regenerate the paired improvement report with:
 
