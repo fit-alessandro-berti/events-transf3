@@ -39,13 +39,14 @@ def create_model (config ,loader ,device ):
         model .set_char_vocab (loader .char_to_id )
     return model
 def load_state_dict_compatible (model ,state_dict ):
-    """Load checkpoints across explicit temporal-architecture migrations."""
+    """Load checkpoints across explicit temporal/prefix adapter migrations."""
     incompatible =model .load_state_dict (state_dict ,strict =False )
     allowed_missing =[
     key for key in incompatible .missing_keys
     if '.proto_head.time_transform_bank.'in key
     or '.embedder.time_input_adapter.'in key
     or '.embedder.temporal_input_encoder.'in key
+    or 'encoder.state_aware_pool.'in key
     ]
     migrating_to_independent_inputs =any (
     '.embedder.temporal_input_encoder.'in key for key in allowed_missing )
@@ -62,7 +63,7 @@ def load_state_dict_compatible (model ,state_dict ):
         f"unexpected={disallowed_unexpected}"
         )
     if allowed_missing :
-        print (f"🆕 Initialized {len (allowed_missing )} learned temporal parameters from config.")
+        print (f"🆕 Initialized {len (allowed_missing )} learned adapter parameters from config.")
     if allowed_unexpected :
         print (f"♻️ Ignored {len (allowed_unexpected )} superseded shared-adapter parameters.")
     return incompatible

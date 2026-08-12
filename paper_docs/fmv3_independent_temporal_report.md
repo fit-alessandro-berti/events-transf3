@@ -1,9 +1,15 @@
 # FM-v3 independent temporal architecture
 
-## Status and selected checkpoint
+> **Historical status:** this report records the immediate predecessor. The
+> current selected architecture retains these independent clocks and adds a
+> state-aware, task-conditioned prefix projection. See
+> [`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md).
 
-This is the current temporal architecture. It supersedes the shared,
-regression-only input adapter documented in
+## Historical status and selected Stage-5 checkpoint
+
+This was the selected temporal architecture before the state-aware prefix
+continuation. It superseded the shared, regression-only input adapter
+documented in
 [`fmv3_time_transform_report.md`](fmv3_time_transform_report.md).
 
 The selected closing checkpoint is

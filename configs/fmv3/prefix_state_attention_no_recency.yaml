@@ -1,0 +1,5 @@
+extends: prefix_state_attention_70.yaml
+experiment_name: prefix_state_attention_no_recency
+fmv3_head:
+  prefix_attention_initial_recency: 0.0001
+

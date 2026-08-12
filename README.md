@@ -151,17 +151,21 @@ zero for an unseen context, leaving the foundation-model prediction unchanged.
 The primary full-protocol comparison is documented in
 `paper_docs/structured_fmv3_report.md`.
 
-### Independent learned temporal architecture
+### State-aware prefix attention and independent clocks
 
-The current architecture gives each observable prefix clock its own learned
-component: one bank for elapsed time from case start and a parameter-disjoint
-bank for time since the previous event. Their learned residuals are part of the
-event representation used by both next-activity classification and
-remaining-time regression. The selected variant augments the two legacy
-`log1p` clock coordinates with learned residuals, retaining the logged
-coordinates in parallel; the full confirmation found this residual design
-stronger for regression than complete replacement. Cost keeps its existing
+The current architecture keeps parameter-disjoint learned components for the
+two observable prefix clocks: elapsed time from case start and time since the
+previous event. Their residuals augment the legacy `log1p` coordinates before
+the Transformer and are consumed by both tasks. Cost keeps its existing
 numerical path.
+
+After the Transformer, a state-aware prefix adapter now supplements the
+historical static pooling query. It builds a dynamic query from the CLS state
+and last valid event, applies a learned task-specific ordinal-recency bias, and
+adds a small gated residual to the historical prefix vector. Classification
+and regression have separate query offsets, gates, and recency strengths. The
+old projection remains the frozen anchor, and the feature is disabled by
+default for historical configurations.
 
 The regression head is a third independent learned component. It learns four
 monotone target transforms and returns every branch to raw hours before
@@ -173,11 +177,13 @@ the remaining-time label, so passing it to either task would leak the answer.
 The second observable prefix clock is `time_from_previous`.
 
 Start with
-[`paper_docs/fmv3_independent_temporal_report.md`](paper_docs/fmv3_independent_temporal_report.md)
-for the current design, evaluation, ablations, and reproduction commands. The
-full component history is in
+[`paper_docs/fmv3_prefix_attention_report.md`](paper_docs/fmv3_prefix_attention_report.md)
+for the current design, bottleneck audit, equations, ablations, diagnostics,
+evaluation, and reproduction commands. The full component history is in
 [`paper_docs/fmv3_architecture_changes.md`](paper_docs/fmv3_architecture_changes.md),
-while
+while the immediate predecessor is recorded in
+[`paper_docs/fmv3_independent_temporal_report.md`](paper_docs/fmv3_independent_temporal_report.md)
+and
 [`paper_docs/fmv3_time_transform_report.md`](paper_docs/fmv3_time_transform_report.md)
 records the superseded shared, regression-only temporal adapter.
 
@@ -185,18 +191,19 @@ Reproduce the selected confirmation with:
 
 ```bash
 python evaluate_fmv3.py \
-  --checkpoint_dir checkpoints/fmv3/learned_time_independent_4_cls70 \
-  --checkpoint_epoch 34 \
-  --eval_config configs/fmv3/independent_temporal_confirmation_eval.yaml \
-  --output_dir evaluation_results/independent_temporal/confirmation_learned_time_independent_4_cls70_e34
+  --checkpoint_dir checkpoints/fmv3/prefix_state_attention_joint \
+  --checkpoint_epoch 36 \
+  --eval_config configs/fmv3/prefix_attention_confirmation_eval.yaml \
+  --output_dir evaluation_results/prefix_attention/confirmations/prefix_state_attention_joint_e36
 ```
 
-On the 200-row full paired regression protocol, the selected checkpoint reaches
-1,113.1992-hour MAE and 1,661.3121-hour RMSE. It improves the fixed-sqrt
-baseline by 12.6429 and 4.3861 hours, and the previous learned temporal model by
-0.5201 and 0.6310 hours. Classification balanced accuracy changes from
-0.446293 to 0.445968, ordinary accuracy from 0.708601 to 0.708158, and macro-F1
-from 0.417745 to 0.417730; this small tradeoff is reported rather than hidden.
+On the full paired protocol, the selected checkpoint reaches balanced accuracy
+`0.447473`, ordinary accuracy `0.709352`, macro-F1 `0.418885`, MAE
+`1,112.2914` hours, and RMSE `1,660.6820` hours. Relative to the immediate
+independent-temporal predecessor, all five primary means improve: `+0.001504`,
+`+0.001194`, `+0.001155`, `-0.9078` hours, and `-0.6301` hours, respectively.
+MAE and RMSE are `13.5507` and `5.0163` hours below the fixed-sqrt structured
+baseline.
 
 The three-way corrected baseline/control/FM-v3 evaluation manifest is
 `configs/fmv3/improved_evaluation_manifest.yaml`.

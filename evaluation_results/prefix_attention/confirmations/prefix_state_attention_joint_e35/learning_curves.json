@@ -1,0 +1,102 @@
+[
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.2837330316742081,
+      "128": 0.6296657616892911,
+      "16": 0.4330081447963801,
+      "2": 0.3352714932126697,
+      "32": 0.48005158371040724,
+      "4": 0.3770588235294118,
+      "64": 0.5951553544494721,
+      "8": 0.3878579185520362
+    },
+    "cases_to_90pct_max_budget": 64,
+    "experiment": "prefix_attention_confirmation",
+    "log": "billing",
+    "log2_case_budget_auc": 0.43787181641887524,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.29978510378510376,
+      "128": 0.34159462759462766,
+      "16": 0.33659584859584857,
+      "2": 0.30073748473748474,
+      "32": 0.3492942612942613,
+      "4": 0.2989059829059829,
+      "64": 0.3521074481074481,
+      "8": 0.3222026862026862
+    },
+    "cases_to_90pct_max_budget": 8,
+    "experiment": "prefix_attention_confirmation",
+    "log": "helpdesk",
+    "log2_case_budget_auc": 0.32579051107622536,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.13629665071770336,
+      "128": 0.5549569377990431,
+      "16": 0.33010526315789473,
+      "2": 0.18005741626794258,
+      "32": 0.3503030303030303,
+      "4": 0.20221690590111643,
+      "64": 0.4531578947368421,
+      "8": 0.2718309409888357
+    },
+    "cases_to_90pct_max_budget": 128,
+    "experiment": "prefix_attention_confirmation",
+    "log": "receipt",
+    "log2_case_budget_auc": 0.3047568922305764,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.6611111111111112,
+      "16": 0.80239898989899,
+      "2": 0.7102272727272728,
+      "32": 0.8027777777777778,
+      "4": 0.751010101010101,
+      "43": 0.7986111111111112,
+      "8": 0.78989898989899
+    },
+    "cases_to_90pct_max_budget": 4,
+    "experiment": "prefix_attention_confirmation",
+    "log": "roadtraffic100traces",
+    "log2_case_budget_auc": 0.7605208749455503,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.2636521808225692,
+      "1000": 0.6111796748855169,
+      "128": 0.5878552973667295,
+      "16": 0.4473666224508692,
+      "2": 0.2691537846421618,
+      "32": 0.497662057773963,
+      "4": 0.3606986577247139,
+      "64": 0.534174271168091,
+      "8": 0.39296054880339837
+    },
+    "cases_to_90pct_max_budget": 128,
+    "experiment": "prefix_attention_confirmation",
+    "log": "sepsis",
+    "log2_case_budget_auc": 0.4721965764032574,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  }
+]

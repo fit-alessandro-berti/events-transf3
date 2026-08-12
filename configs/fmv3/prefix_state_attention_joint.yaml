@@ -1,0 +1,4 @@
+extends: prefix_state_attention_70.yaml
+experiment_name: prefix_state_attention_joint
+trainable_scope: temporal_prefix_joint
+

@@ -10,7 +10,8 @@ class MetaLearner (nn .Module ):
     def __init__ (self ,strategy :str ,num_feat_dim :int ,d_model :int ,n_heads :int ,n_layers :int ,dropout :float =0.1 ,proto_head_config =None ,**kwargs ):
         super ().__init__ ()
         self .strategy =strategy
-        self .encoder =EventEncoder (d_model ,n_heads ,n_layers ,dropout )
+        self .encoder =EventEncoder (
+        d_model ,n_heads ,n_layers ,dropout ,prefix_config =proto_head_config )
         self .proto_head =PrototypicalHead (**(proto_head_config or {}))
         self .proj_head =nn .Sequential (
         nn .Linear (d_model ,d_model ),
@@ -65,7 +66,8 @@ class MetaLearner (nn .Module ):
         time_scale_factor =time_scale_factor )
         embeddings_reshaped =all_embeddings .view (len (batch_of_sequences ),max_len ,-1 )
         mask_tensor =torch .tensor (masks ,dtype =torch .bool ,device =device )
-        return self .encoder (embeddings_reshaped ,src_key_padding_mask =mask_tensor )
+        return self .encoder (
+        embeddings_reshaped ,src_key_padding_mask =mask_tensor ,task_type =task_type )
     def forward (self ,support_set ,query_set ,task_type ):
         support_seqs ,query_seqs =[s [0 ]for s in support_set ],[q [0 ]for q in query_set ]
         all_seqs =support_seqs +query_seqs

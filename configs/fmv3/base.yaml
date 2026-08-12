@@ -53,6 +53,13 @@ fmv3_head:
   temporal_previous_scale_min_hours: 0.0002777777777777778
   temporal_previous_scale_max_hours: 1000.0
   temporal_previous_residual_logit: -3.0
+  # Optional state-aware prefix projection. The historical CLS/static-query
+  # path stays intact and becomes the residual anchor when this is enabled.
+  state_aware_prefix_attention: false
+  prefix_attention_hidden_dim: 128
+  prefix_attention_dropout: 0.15
+  prefix_attention_gate_logit: -3.0
+  prefix_attention_initial_recency: 0.25
   regression_mae_weight: 0.5
   regression_rmse_weight: 0.5
 fmv3_training:

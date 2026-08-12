@@ -1,0 +1,14 @@
+extends: learned_time_independent_4_cls70.yaml
+experiment_name: prefix_state_attention_70
+epochs: 38
+lr: 0.001
+weight_decay: 0.001
+classification_task_probability: 0.70
+trainable_scope: prefix_attention
+fmv3_head:
+  state_aware_prefix_attention: true
+  prefix_attention_hidden_dim: 128
+  prefix_attention_dropout: 0.15
+  prefix_attention_gate_logit: -3.0
+  prefix_attention_initial_recency: 0.25
+

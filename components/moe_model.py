@@ -16,11 +16,11 @@ class MoEModel (nn .Module ):
         if self .strategy =='learned':
             for expert in self .experts :
                 expert .set_char_vocab (char_to_id )
-    def _process_batch (self ,batch_of_sequences ):
+    def _process_batch (self ,batch_of_sequences ,task_type =None ):
         if not self .experts :
             return None
         all_expert_embeddings =[
-        expert ._process_batch (batch_of_sequences )
+        expert ._process_batch (batch_of_sequences ,task_type =task_type )
         for expert in self .experts
         ]
         stacked_embeddings =torch .stack (all_expert_embeddings )

@@ -53,11 +53,18 @@ The final end-to-end comparison is in
 | `learned_time_4_temporal`, epoch 33 | Shared two-clock adapter used only by regression plus four learned target transforms | Superseded input architecture; historical full result retained |
 | `learned_time_independent_4`, epoch 34 | Separate four-branch start/previous encoders used by both tasks; legacy logged clocks retained | Screen ablation |
 | `learned_time_independent_8`, epoch 34 | Eight-branch capacity ablation for both independent input clocks | Screen ablation |
-| `learned_time_independent_4_cls70`, epoch 34 | Four-branch architecture with 70% classification training episodes | **Selected current temporal architecture** |
+| `learned_time_independent_4_cls70`, epoch 34 | Four-branch architecture with 70% classification training episodes | Selected immediate predecessor |
 | `learned_time_independent_4_replace`, epoch 34 | Separate four-branch input encoders for both tasks; old logged clock coordinates removed | Classification-favoring full-confirmation ablation |
+| `prefix_state_attention_70`, epoch 35 | Dynamic CLS/last-state query and learned recency; only the prefix adapter trained | Full-confirmation ablation |
+| `prefix_state_attention_no_recency`, epoch 35 | Same state path with near-zero initial recency | Full-confirmation ablation |
+| `prefix_state_attention_80`, epochs 35--38 | Prefix-only path, 80% classification sampling, stronger initial recency | Screen ablation |
+| `prefix_state_attention_joint`, epoch 35 | Prefix adapter plus both clock encoders and regression bank | Full-confirmation checkpoint candidate |
+| `prefix_state_attention_joint`, epoch 36 | Same joint scope after a second continuation epoch | **Selected current architecture** |
+| State-aware epoch-38 checkpoints | End-of-schedule candidates for all four variants | Rejected by development screen |
 
-The selected run completed epoch 34 and was intentionally stopped during
-epoch 35 when the experiment was closed. Its architecture, migration rules,
+The selected independent-temporal predecessor completed epoch 34 and was
+intentionally stopped during epoch 35 when that experiment was closed. Its
+architecture, migration rules,
 screen comparison, raw-hour metric definition, and reproduction commands are
 documented in
 [`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
@@ -65,9 +72,22 @@ Screen results live under `evaluation_results/independent_temporal/screens/`;
 the selected full confirmation lives under
 `evaluation_results/independent_temporal/confirmation_learned_time_independent_4_cls70_e34/`.
 
+The state-aware runs were seeded from that epoch-34 checkpoint and continued
+through epoch 38 without modifying the frozen Transformer or historical prefix
+path. Four variants were screened at epochs 35, 36, and 38; four informative
+checkpoints received the full paired confirmation. The joint epoch-36
+checkpoint improves all five primary aggregate means and is the selected
+successor. Its architecture, tensor-scope audit, ablations, diagnostics, and
+Receipt support-budget results are in
+[`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). Screen
+results live under `evaluation_results/prefix_attention/screens/`; full results
+live under `evaluation_results/prefix_attention/confirmations/`.
+
 Historical manifest folders contain their resolved `training_config.yaml`,
 serialized loader artifacts, and final `model_epoch_*.pth`. Independent
 temporal continuation folders retain both the seeded epoch-33 checkpoint and
 the completed epoch-34 checkpoint so the migration remains reproducible. The
-original manifest is machine-readable at `configs/fmv3/manifest.yaml`; the
-new temporal variants are the explicit YAML files listed above.
+state-aware folders retain the epoch-34 seed and saved continuation checkpoints.
+The original manifest is machine-readable at `configs/fmv3/manifest.yaml`;
+the newer temporal and prefix variants are the explicit YAML files listed
+above.
