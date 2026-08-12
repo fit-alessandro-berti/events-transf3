@@ -45,6 +45,21 @@ temperature `0.10`. Implementation and component diagnostics are in
 `components/prototypical_head.py`; the exact experiment configuration is
 `configs/fmv3/loss_multimetric_gate_aux_005.yaml`.
 
+### How the learned rescaling branches are combined
+
+The four learned time transforms are not averaged uniformly. Each branch owns
+its power, time scale, and neighbor-attention scale; it transforms support
+times, performs soft neighbor regression in that space, and inverts its result
+back to raw hours. The promoted `dynamic` aggregation then computes
+query-specific softmax weights and takes a convex weighted sum of the four
+hour-valued branch predictions. The weights are nonnegative and sum to one.
+
+The evaluator subsequently averages the four experts' head predictions. In
+the full confirmation overlay, it also learns a support-only branch prior and
+blends that calibrated prediction 50/50 with the trained query-dynamic result.
+Thus uniform averaging is used across experts and for the final two-path blend,
+but not across the four learned rescaling branches inside an expert.
+
 The promoted complementary weights are now the defaults in `config.py`, the
 head constructor, and `configs/fmv3/base.yaml`. Historical root configurations
 pin all four weights to zero, and resolved checkpoint configurations remain
