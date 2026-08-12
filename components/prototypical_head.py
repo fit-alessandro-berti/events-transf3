@@ -342,6 +342,31 @@ class PrototypicalHead(nn.Module):
         self.regression_gate_target_temperature = max(
             float(config.get("regression_gate_target_temperature", 0.1)), 1e-4
         )
+        confidence_hidden = max(int(config.get("expert_confidence_hidden_dim", 16)), 1)
+        self.classification_expert_confidence_enabled = _as_bool(
+            config.get("classification_expert_confidence_enabled", False)
+        )
+        self.regression_expert_confidence_enabled = _as_bool(
+            config.get("regression_expert_confidence_enabled", False)
+        )
+        self.classification_expert_confidence = None
+        self.regression_expert_confidence = None
+        if self.classification_expert_confidence_enabled:
+            self.classification_expert_confidence = nn.Sequential(
+                nn.Linear(6, confidence_hidden),
+                nn.GELU(),
+                nn.Linear(confidence_hidden, 1),
+            )
+            nn.init.zeros_(self.classification_expert_confidence[-1].weight)
+            nn.init.zeros_(self.classification_expert_confidence[-1].bias)
+        if self.regression_expert_confidence_enabled:
+            self.regression_expert_confidence = nn.Sequential(
+                nn.Linear(6, confidence_hidden),
+                nn.GELU(),
+                nn.Linear(confidence_hidden, 1),
+            )
+            nn.init.zeros_(self.regression_expert_confidence[-1].weight)
+            nn.init.zeros_(self.regression_expert_confidence[-1].bias)
 
         # Kept for strict compatibility with historical FM-v2 checkpoints.
         self._proto_shrink = nn.Parameter(torch.tensor(-2.0))
@@ -596,6 +621,45 @@ class PrototypicalHead(nn.Module):
         result = (output_logits, classes, confidence, diagnostics)
         return result if return_diagnostics else result[:3]
 
+    def classification_expert_confidence_logit(self, probabilities):
+        """Return a learned per-query expert log weight for class aggregation."""
+        if self.classification_expert_confidence is None:
+            return probabilities.new_zeros(probabilities.size(0))
+        probs = probabilities.float().detach().clamp_min(1e-8)
+        num_classes = max(int(probs.size(-1)), 1)
+        top_values = torch.topk(probs, min(2, num_classes), dim=-1).values
+        top1 = top_values[:, 0]
+        top2 = top_values[:, 1] if num_classes > 1 else top1.new_zeros(top1.shape)
+        margin = top1 - top2
+        entropy = -(probs * torch.log(probs)).sum(dim=-1) / math.log(max(num_classes, 2))
+        class_scale = top1.new_full(
+            top1.shape, math.log1p(float(num_classes)) / math.log(128.0)
+        ).clamp(0.0, 1.0)
+        features = torch.stack(
+            [
+                top1,
+                margin,
+                entropy,
+                1.0 - entropy,
+                class_scale,
+                top1 * margin,
+            ],
+            dim=-1,
+        )
+        return self.classification_expert_confidence(features).squeeze(-1)
+
+    def classification_expert_confidence_loss(self, probabilities, labels):
+        if self.classification_expert_confidence is None:
+            return probabilities.new_tensor(0.0)
+        valid = labels != -100
+        if not valid.any():
+            return probabilities.new_tensor(0.0)
+        selected = probabilities[valid]
+        targets = labels[valid]
+        logit = self.classification_expert_confidence_logit(selected)
+        correctness = (selected.argmax(dim=-1) == targets).float()
+        return F.binary_cross_entropy_with_logits(logit, correctness)
+
     @property
     def regression_outputs_hours(self):
         return self.regression_mode in {"learned_transform_ensemble", "raw_hours_knn"}
@@ -726,6 +790,68 @@ class PrototypicalHead(nn.Module):
             target_weights
             * torch.log(aggregation_weights.clamp_min(1e-8))
         ).sum(dim=0).mean()
+
+    def regression_expert_confidence_logit(self, predictions, confidence, diagnostics):
+        """Return a learned per-query expert log weight for time aggregation."""
+        if self.regression_expert_confidence is None:
+            return predictions.new_zeros(predictions.reshape(-1).shape)
+        predictions = predictions.float().reshape(-1).detach().clamp_min(0.0)
+        confidence = confidence.float().reshape(-1).detach().clamp(0.0, 1.0)
+        std = diagnostics.get("std_hours", diagnostics.get("std"))
+        if std is None:
+            std = torch.zeros_like(predictions)
+        else:
+            std = std.float().reshape(-1).detach().clamp_min(0.0)
+        similarities = diagnostics.get("similarities")
+        if similarities is None or similarities.numel() == 0:
+            max_similarity = torch.zeros_like(predictions)
+            similarity_std = torch.zeros_like(predictions)
+            entropy = torch.ones_like(predictions)
+        else:
+            sims = similarities.float().detach()
+            max_similarity = sims.max(dim=1).values.clamp(-1.0, 1.0)
+            similarity_std = sims.std(dim=1, correction=0).clamp_min(0.0)
+            weights = F.softmax(sims, dim=1)
+            entropy = -(
+                weights * torch.log(weights.clamp_min(1e-8))
+            ).sum(dim=1) / math.log(max(sims.size(1), 2))
+        features = torch.stack(
+            [
+                torch.log1p(predictions).clamp(0.0, 20.0) / 20.0,
+                torch.log1p(std).clamp(0.0, 20.0) / 20.0,
+                confidence,
+                max_similarity,
+                entropy,
+                torch.tanh(similarity_std),
+            ],
+            dim=-1,
+        )
+        return self.regression_expert_confidence(features).squeeze(-1)
+
+    def regression_expert_confidence_loss(
+        self,
+        predictions,
+        labels,
+        confidence,
+        diagnostics,
+        labels_in_output_space=False,
+    ):
+        if self.regression_expert_confidence is None:
+            return predictions.new_tensor(0.0)
+        targets = (
+            labels.float()
+            if labels_in_output_space
+            else self.regression_labels_to_output(labels)
+        ).reshape(-1)
+        predictions_f = predictions.float().reshape(-1)
+        logit = self.regression_expert_confidence_logit(
+            predictions_f, confidence, diagnostics
+        )
+        scale = targets.detach().abs().clamp_min(1.0)
+        reliability = torch.exp(
+            -((predictions_f.detach() - targets.detach()).abs() / scale).clamp(0.0, 20.0)
+        )
+        return F.binary_cross_entropy_with_logits(logit, reliability)
 
     def regression_loss(
         self,

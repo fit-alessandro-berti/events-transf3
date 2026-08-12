@@ -297,6 +297,19 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     progress_bar_task = f"retrieval_{task_type}"
     retrieval_k_train = int(config.get("retrieval_train_k", 5))
     retrieval_batch_size = int(config.get("retrieval_train_batch_size", 64))
+    head_cfg = config.get("fmv3_head", {})
+    cls_confidence_w = float(
+        head_cfg.get(
+            "classification_expert_confidence_loss_weight",
+            config.get("classification_expert_confidence_loss_weight", 0.0),
+        )
+    )
+    reg_confidence_w = float(
+        head_cfg.get(
+            "regression_expert_confidence_loss_weight",
+            config.get("regression_expert_confidence_loss_weight", 0.0),
+        )
+    )
 
     if len(task_data_pool) < retrieval_batch_size:
         return None, progress_bar_task
@@ -396,6 +409,7 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
         regression_targets = []
         regression_branch_predictions = []
         regression_aggregation_weights = []
+        regression_confidence_losses = []
         # Group queries by k_eff so we preserve per-query neighborhood size
         # while still running the expensive head in batched mode.
         groups = defaultdict(list)
@@ -413,20 +427,30 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             support_embeddings = all_embeddings[neighbors]
             support_labels_tensor = labels_float[neighbors]
             query_embeddings = all_embeddings[query_idx]
-            if use_regression_gate_aux:
-                prediction, _, diagnostics = model.proto_head.forward_regression_batched(
+            if use_regression_gate_aux or reg_confidence_w > 0:
+                prediction, confidence, diagnostics = model.proto_head.forward_regression_batched(
                     support_embeddings,
                     support_labels_tensor,
                     query_embeddings,
                     return_diagnostics=True,
                     augmentation_factor=time_scale_factor,
                 )
-                regression_branch_predictions.append(
-                    diagnostics["branch_predictions_hours"]
-                )
-                regression_aggregation_weights.append(
-                    diagnostics["aggregation_weights"]
-                )
+                if use_regression_gate_aux:
+                    regression_branch_predictions.append(
+                        diagnostics["branch_predictions_hours"]
+                    )
+                    regression_aggregation_weights.append(
+                        diagnostics["aggregation_weights"]
+                    )
+                if reg_confidence_w > 0:
+                    regression_confidence_losses.append(
+                        model.proto_head.regression_expert_confidence_loss(
+                            prediction,
+                            labels_float[query_idx],
+                            confidence,
+                            diagnostics,
+                        )
+                    )
             else:
                 prediction, _ = model.proto_head.forward_regression_batched(
                     support_embeddings,
@@ -451,6 +475,10 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
                 ),
             )
             queries_processed = 1
+            if regression_confidence_losses:
+                total_loss_for_batch = total_loss_for_batch + (
+                    reg_confidence_w * torch.stack(regression_confidence_losses).mean()
+                )
     else:
         for i in range(retrieval_batch_size):
             query_label = batch_labels[i]
@@ -513,7 +541,7 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             support_labels_tensor = labels_t[support_indices]
             global_embeddings = all_embeddings[pool_indices]
             global_labels = labels_t[pool_indices]
-            logits, proto_classes, _ = model.proto_head.forward_classification(
+            logits, proto_classes, probabilities = model.proto_head.forward_classification(
                 support_embeddings,
                 support_labels_tensor,
                 query_embedding,
@@ -540,6 +568,13 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
                 1.0,
             )
             loss = F.cross_entropy(logits, mapped_label, label_smoothing=smoothing)
+            if cls_confidence_w > 0:
+                loss = loss + cls_confidence_w * (
+                    model.proto_head.classification_expert_confidence_loss(
+                        probabilities,
+                        mapped_label,
+                    )
+                )
 
             if loss is not None and not torch.isnan(loss):
                 total_loss_for_batch = total_loss_for_batch + loss

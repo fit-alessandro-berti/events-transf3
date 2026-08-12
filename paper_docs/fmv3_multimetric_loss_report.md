@@ -116,6 +116,71 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
   --device cuda:0
 ```
 
+### Learned per-expert confidence ablation
+
+A second post-promotion ablation adds two small confidence heads to each expert:
+one predicts a general reliability logit for the expert's classification
+posterior, and one predicts a reliability logit for the expert's remaining-time
+prediction. At inference, the four expert outputs are aggregated with a
+softmax over these learned logits instead of the uniform expert average. The
+confidence heads are initialized to zero-logit output, so the checkpoint starts
+from the selected model's uniform aggregation behavior.
+
+The run trains only these new heads from the selected epoch-38 checkpoint:
+`configs/fmv3/expert_confidence_heads.yaml` writes to
+`checkpoints/fmv3/expert_confidence_heads/`. The final epoch-40 checkpoint has
+1,032 trainable parameters in the confidence heads.
+
+The ablation is **not promoted**. It produces a very small regression gain, but
+slightly lowers the primary classification accuracy-style metrics on the full
+five-log confirmation:
+
+| Model | Balanced accuracy | Accuracy | Macro-F1 | NLL | ECE-10 | MAE (h) | RMSE (h) | Median AE (h) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Selected epoch 38 | **0.447740** | **0.709221** | **0.419179** | 3.055258 | 0.170634 | 1,109.409 | 1,659.620 | 744.362 |
+| Expert confidence epoch 39 | 0.447631 | 0.709208 | 0.419098 | 3.055216 | 0.170586 | 1,109.323 | 1,659.541 | 744.301 |
+| Expert confidence epoch 40 | 0.447260 | 0.709200 | 0.418929 | **3.055162** | **0.170365** | **1,109.237** | **1,659.464** | **744.239** |
+| Epoch 40 minus selected | -0.000480 | -0.000020 | -0.000250 | -0.000096 | -0.000268 | -0.172 | -0.156 | -0.124 |
+
+On epoch 40, paired regression rows improve for MAE on 153/200 rows and RMSE
+on 112/200 rows. Classification calibration also improves slightly, but the
+classification decision metrics move in the wrong direction: balanced accuracy
+improves on only 18/200 rows and ties on 167/200 rows, with a negative mean
+delta. The learned expert weights are real but mild rather than decisive:
+epoch-40 full-confirmation mean classification weights are
+`[0.257895, 0.239091, 0.258187, 0.244826]`; mean regression weights are
+`[0.241001, 0.249266, 0.249912, 0.259820]`.
+
+The result should therefore be kept as an ablation rather than made the stable
+`selected.yaml` target. It suggests that expert-level calibration may help
+remaining-time aggregation marginally, but this formulation is too weak and
+too mixed to justify replacing the selected uniform expert aggregation.
+
+Reproduce with:
+
+```bash
+mkdir -p checkpoints/fmv3/expert_confidence_heads
+cp checkpoints/fmv3/loss_multimetric_gate_aux_005/model_epoch_38.pth \
+   checkpoints/fmv3/loss_multimetric_gate_aux_005/training_artifacts.pth \
+   checkpoints/fmv3/loss_multimetric_gate_aux_005/training_config.pth \
+   checkpoints/fmv3/loss_multimetric_gate_aux_005/training_config.yaml \
+   checkpoints/fmv3/expert_confidence_heads/
+
+CUDA_VISIBLE_DEVICES=0 python main.py \
+  --config configs/fmv3/expert_confidence_heads.yaml \
+  --checkpoint_dir checkpoints/fmv3/expert_confidence_heads \
+  --resume \
+  --stop_after_epoch 40
+
+CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/expert_confidence_heads \
+  --checkpoint_epoch 40 \
+  --eval_config configs/fmv3/expert_confidence_confirmation_eval.yaml \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/expert_confidence/confirmations/expert_confidence_e40 \
+  --device cuda:0
+```
+
 ## Controlled retraining protocol
 
 The promoted model and matched control both start from the byte-identical selected

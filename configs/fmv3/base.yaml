@@ -81,6 +81,11 @@ fmv3_head:
   regression_loss_reference_hours: 100.0
   regression_gate_aux_weight: 0.0
   regression_gate_target_temperature: 0.1
+  classification_expert_confidence_enabled: false
+  regression_expert_confidence_enabled: false
+  expert_confidence_hidden_dim: 16
+  classification_expert_confidence_loss_weight: 0.0
+  regression_expert_confidence_loss_weight: 0.0
 fmv3_training:
   episode_mix:
     balanced: 0.20
@@ -124,6 +129,7 @@ fmv3_evaluation:
   regression_calibration_rmse_weight: 0.5
   regression_calibration_exclude_same_case: false
   regression_calibration_mix: 1.0
+  expert_aggregation_diagnostics: false
   evaluation_profiles:
     - name: main
       retrieval_modes: [configured]

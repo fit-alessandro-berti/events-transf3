@@ -9,6 +9,7 @@ def configure_trainable_scope(model, scope):
     elif selected in {
         "time_transform",
         "regression_gate",
+        "expert_confidence",
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",
@@ -24,6 +25,11 @@ def configure_trainable_scope(model, scope):
                 allowed = (
                     "proto_head.time_transform_bank.dynamic_gate." in name
                     or name.endswith("proto_head.time_transform_bank.aggregation_logits")
+                )
+            elif selected == "expert_confidence":
+                allowed = (
+                    "proto_head.classification_expert_confidence." in name
+                    or "proto_head.regression_expert_confidence." in name
                 )
             elif selected == "temporal_joint":
                 allowed = (
@@ -46,6 +52,7 @@ def configure_trainable_scope(model, scope):
     constrained = {
         "time_transform",
         "regression_gate",
+        "expert_confidence",
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",

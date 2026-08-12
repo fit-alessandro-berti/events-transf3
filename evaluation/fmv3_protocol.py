@@ -559,7 +559,7 @@ def _predict_classification_fixed_k(
     embeddings_device = [embedding.to(device) for embedding in embeddings_by_expert]
     k_eff = min(int(retrieval_k), len(support_indices))
 
-    expert_probabilities, abstain_probabilities = [], []
+    expert_probabilities, abstain_probabilities, expert_confidence_logits = [], [], []
     for expert, embeddings in zip(experts, embeddings_device):
         expert_queries = embeddings[query_indices_device]
         expert_pool = embeddings[support_indices_device]
@@ -577,12 +577,26 @@ def _predict_classification_fixed_k(
         )
         expert_probabilities.append(probabilities)
         abstain_probabilities.append(abstain)
+        if expert.proto_head.classification_expert_confidence_enabled:
+            expert_confidence_logits.append(
+                expert.proto_head.classification_expert_confidence_logit(probabilities)
+            )
+        else:
+            expert_confidence_logits.append(probabilities.new_zeros(probabilities.size(0)))
     reference_queries = embeddings_device[0][query_indices_device]
     reference_pool = embeddings_device[0][support_indices_device]
     reference_positions = torch.topk(reference_queries @ reference_pool.t(), k_eff, dim=1).indices
     local_labels = labels_device[support_indices_device][reference_positions]
-    mean_probs = torch.stack(expert_probabilities).mean(dim=0)
-    mean_abstain = torch.stack(abstain_probabilities).mean(dim=0)
+    stacked_probabilities = torch.stack(expert_probabilities)
+    stacked_abstain = torch.stack(abstain_probabilities)
+    if any(expert.proto_head.classification_expert_confidence_enabled for expert in experts):
+        expert_weights = F.softmax(torch.stack(expert_confidence_logits), dim=0)
+        mean_probs = (expert_weights.unsqueeze(-1) * stacked_probabilities).sum(dim=0)
+        mean_abstain = (expert_weights * stacked_abstain).sum(dim=0)
+    else:
+        expert_weights = None
+        mean_probs = stacked_probabilities.mean(dim=0)
+        mean_abstain = stacked_abstain.mean(dim=0)
     best_conf, best_idx = mean_probs.max(dim=1)
     predicted = torch.as_tensor(prediction_classes, device=device)[best_idx]
     abstain_mask = mean_abstain > best_conf
@@ -597,7 +611,7 @@ def _predict_classification_fixed_k(
         [support_counts.get(int(value), 0) > 0 for value in true.tolist()], device=device
     )
     retrieval_covered = (local_labels == true.unsqueeze(1)).any(dim=1)
-    return {
+    result = {
         "y_true": true.cpu().tolist(),
         "y_pred": predicted.cpu().tolist(),
         "probabilities": mean_probs[:, metric_columns].cpu().numpy(),
@@ -606,6 +620,11 @@ def _predict_classification_fixed_k(
         "retrieval_covered": retrieval_covered.cpu().tolist(),
         "support_counts": dict(support_counts),
     }
+    if expert_weights is not None:
+        result["classification_expert_confidence_weights_mean"] = (
+            expert_weights.mean(dim=1).cpu().tolist()
+        )
+    return result
 
 
 @torch.no_grad()
@@ -890,16 +909,25 @@ def predict_regression(
     expert_stds = []
     expert_branch_predictions = []
     expert_aggregation_weights = []
+    expert_confidence_logits = []
     for expert, embeddings in zip(experts, embeddings_device):
         query = F.normalize(embeddings[query_indices_device], p=2, dim=1)
         pool = F.normalize(embeddings[support_indices_device], p=2, dim=1)
         positions = torch.topk(query @ pool.t(), k_eff, dim=1).indices
         local = pool[positions]
         local_targets = labels_device[support_indices_device][positions]
-        prediction, _, diagnostics = expert.proto_head.forward_regression_batched(
+        prediction, confidence, diagnostics = expert.proto_head.forward_regression_batched(
             local, local_targets, query, return_diagnostics=True
         )
         expert_predictions.append(prediction)
+        if expert.proto_head.regression_expert_confidence_enabled:
+            expert_confidence_logits.append(
+                expert.proto_head.regression_expert_confidence_logit(
+                    prediction, confidence, diagnostics
+                )
+            )
+        else:
+            expert_confidence_logits.append(prediction.new_zeros(prediction.numel()))
         if expert.proto_head.regression_outputs_hours:
             expert_stds.append(diagnostics["std_hours"])
             if "branch_predictions_hours" in diagnostics:
@@ -910,12 +938,24 @@ def predict_regression(
         reference[query_indices_device] @ reference[support_indices_device].t(), k_eff, dim=1
     ).indices
     neighbor_targets = labels_device[support_indices_device][reference_positions]
-    mean_prediction = torch.stack(expert_predictions).mean(dim=0)
+    stacked_predictions = torch.stack(expert_predictions)
+    if any(expert.proto_head.regression_expert_confidence_enabled for expert in experts):
+        expert_weights = F.softmax(torch.stack(expert_confidence_logits), dim=0)
+        mean_prediction = (expert_weights * stacked_predictions).sum(dim=0)
+    else:
+        expert_weights = None
+        mean_prediction = stacked_predictions.mean(dim=0)
     transformed_truth = labels_device[query_indices_device].cpu().numpy()
     truths = inverse_transform_time(transformed_truth)
     if experts[0].proto_head.regression_outputs_hours:
         if calibrated_weights is not None:
-            mean_branches = torch.stack(expert_branch_predictions).mean(dim=0)
+            stacked_branches = torch.stack(expert_branch_predictions)
+            if expert_weights is None:
+                mean_branches = stacked_branches.mean(dim=0)
+            else:
+                mean_branches = (
+                    expert_weights.unsqueeze(1) * stacked_branches
+                ).sum(dim=0)
             calibrated_prediction = (
                 calibrated_weights[:, None] * mean_branches
             ).sum(dim=0)
@@ -929,9 +969,15 @@ def predict_regression(
             )
             calibration_diagnostics["calibration_mix"] = calibration_mix
         predictions = mean_prediction.cpu().numpy()
-        stacked_predictions = torch.stack(expert_predictions)
-        within_variance = torch.stack(expert_stds).square().mean(dim=0)
-        between_variance = stacked_predictions.var(dim=0, correction=0)
+        stacked_stds = torch.stack(expert_stds)
+        if expert_weights is None:
+            within_variance = stacked_stds.square().mean(dim=0)
+            between_variance = stacked_predictions.var(dim=0, correction=0)
+        else:
+            within_variance = (expert_weights * stacked_stds.square()).sum(dim=0)
+            between_variance = (
+                expert_weights * (stacked_predictions - mean_prediction.unsqueeze(0)).square()
+            ).sum(dim=0)
         std_hours = torch.sqrt((within_variance + between_variance).clamp_min(1e-8)).cpu().numpy()
         lower = np.maximum(0.0, predictions - 1.645 * std_hours)
         upper = predictions + 1.645 * std_hours
@@ -943,7 +989,16 @@ def predict_regression(
         upper = inverse_transform_time(transformed_prediction + 1.645 * transformed_std)
     branch_diagnostics = None
     if expert_branch_predictions:
-        mean_branches = torch.stack(expert_branch_predictions).mean(dim=0).cpu().numpy()
+        stacked_branches = torch.stack(expert_branch_predictions)
+        if expert_weights is None:
+            mean_branch_tensor = stacked_branches.mean(dim=0)
+            mean_aggregation_tensor = torch.stack(expert_aggregation_weights).mean(dim=0)
+        else:
+            mean_branch_tensor = (expert_weights.unsqueeze(1) * stacked_branches).sum(dim=0)
+            mean_aggregation_tensor = (
+                expert_weights.unsqueeze(1) * torch.stack(expert_aggregation_weights)
+            ).sum(dim=0)
+        mean_branches = mean_branch_tensor.cpu().numpy()
         truth_array = np.asarray(truths, dtype=float)
         branch_diagnostics = {
             "branch_mae_hours": np.mean(
@@ -952,8 +1007,8 @@ def predict_regression(
             "branch_rmse_hours": np.sqrt(
                 np.mean((mean_branches - truth_array[None, :]) ** 2, axis=1)
             ).tolist(),
-            "mean_aggregation_weights": torch.stack(expert_aggregation_weights)
-            .mean(dim=(0, 2))
+            "mean_aggregation_weights": mean_aggregation_tensor
+            .mean(dim=1)
             .cpu()
             .tolist(),
             "oracle_branch_mae_hours": float(
@@ -961,6 +1016,10 @@ def predict_regression(
             ),
             **calibration_diagnostics,
         }
+        if expert_weights is not None:
+            branch_diagnostics["regression_expert_confidence_weights_mean"] = (
+                expert_weights.mean(dim=1).cpu().tolist()
+            )
     return truths.tolist(), predictions.tolist(), lower.tolist(), upper.tolist(), branch_diagnostics
 
 
@@ -1135,6 +1194,15 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                             "structured_tau": float(eval_cfg.get("structured_tau", 2.0)),
                                             **structured_diagnostics,
                                         }
+                                        if (
+                                            eval_cfg.get("expert_aggregation_diagnostics", False)
+                                            and "classification_expert_confidence_weights_mean" in prediction
+                                        ):
+                                            row["expert_aggregation_diagnostics"] = {
+                                                "classification_expert_confidence_weights_mean": prediction[
+                                                    "classification_expert_confidence_weights_mean"
+                                                ]
+                                            }
                                         rows.append(row)
                                         with output_jsonl.open("a", encoding="utf-8") as handle:
                                             handle.write(json.dumps(row, sort_keys=True) + "\n")

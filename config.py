@@ -151,6 +151,11 @@ CONFIG ={
 'regression_loss_reference_hours':100.0,
 'regression_gate_aux_weight':0.0,
 'regression_gate_target_temperature':0.1,
+'classification_expert_confidence_enabled':False,
+'regression_expert_confidence_enabled':False,
+'expert_confidence_hidden_dim':16,
+'classification_expert_confidence_loss_weight':0.0,
+'regression_expert_confidence_loss_weight':0.0,
 },
 'fmv3_training':{
 'episode_mix':{'balanced':1.0},
@@ -190,6 +195,7 @@ CONFIG ={
 'regression_calibration_rmse_weight':0.5,
 'regression_calibration_exclude_same_case':False,
 'regression_calibration_mix':1.0,
+'expert_aggregation_diagnostics':False,
 'evaluation_profiles':[
 {'name':'main','retrieval_modes':['configured'],'prior_modes':['balanced','natural'],'prior_strengths':[1.0],'retrieval_k':[5,20,50]},
 ],

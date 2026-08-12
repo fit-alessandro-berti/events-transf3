@@ -1,0 +1,4 @@
+extends: prefix_attention_confirmation_eval.yaml
+experiment_name: expert_confidence_confirmation
+fmv3_evaluation:
+  expert_aggregation_diagnostics: true

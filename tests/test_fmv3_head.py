@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from components.pretrained_event_embedder import PretrainedEventEmbedder
+from components.moe_model import MoEModel
 from components.prototypical_head import LearnedTimeTransformBank, PrototypicalHead
 from components.temporal_adapter import (
     IndependentTemporalInputEncoder,
@@ -265,6 +266,78 @@ class FMV3HeadTests(unittest.TestCase):
             predictions, torch.sqrt(torch.tensor([10.0, 300.0]))
         )
         self.assertTrue(torch.isfinite(loss))
+
+    def test_expert_confidence_heads_are_neutral_and_trainable(self):
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=4,
+            regression_scale_augmentation=False,
+            classification_expert_confidence_enabled=True,
+            regression_expert_confidence_enabled=True,
+        )
+        probabilities = torch.tensor([[0.8, 0.2], [0.4, 0.6]])
+        cls_logits = head.classification_expert_confidence_logit(probabilities)
+        torch.testing.assert_close(cls_logits, torch.zeros(2))
+        cls_loss = head.classification_expert_confidence_loss(
+            probabilities, torch.tensor([0, 0])
+        )
+
+        support = torch.tensor(
+            [[1.0, 0.0], [0.8, 0.2], [0.1, 0.9], [-0.8, 0.2]]
+        )
+        labels = torch.sqrt(torch.tensor([1.0, 10.0, 100.0, 10_000.0]))
+        query = torch.tensor([[0.7, 0.3], [0.0, 1.0]])
+        predictions, confidence, diagnostics = head.forward_regression(
+            support, labels, query, return_diagnostics=True
+        )
+        reg_logits = head.regression_expert_confidence_logit(
+            predictions, confidence, diagnostics
+        )
+        torch.testing.assert_close(reg_logits, torch.zeros(2))
+        reg_loss = head.regression_expert_confidence_loss(
+            predictions,
+            torch.sqrt(torch.tensor([2.0, 80.0])),
+            confidence,
+            diagnostics,
+        )
+        (cls_loss + reg_loss).backward()
+        self.assertTrue(any(
+            p.grad is not None and torch.isfinite(p.grad).all()
+            for p in head.classification_expert_confidence.parameters()
+        ))
+        self.assertTrue(any(
+            p.grad is not None and torch.isfinite(p.grad).all()
+            for p in head.regression_expert_confidence.parameters()
+        ))
+
+    def test_moe_aggregation_uses_learned_expert_confidence_logits(self):
+        moe = MoEModel(num_experts=0, strategy="learned")
+        labels = torch.tensor([0])
+        class_outputs = [
+            (
+                torch.empty(1, 2),
+                labels,
+                torch.tensor([[0.9, 0.1]]),
+                torch.tensor([2.0]),
+            ),
+            (
+                torch.empty(1, 2),
+                labels,
+                torch.tensor([[0.1, 0.9]]),
+                torch.tensor([-2.0]),
+            ),
+        ]
+        predictions, _, _ = moe._aggregate_outputs(
+            class_outputs, "classification", labels
+        )
+        self.assertGreater(predictions[0, 0].item(), 0.8)
+
+        reg_outputs = [
+            (torch.tensor([10.0]), torch.tensor([10.0]), torch.tensor([0.2]), torch.tensor([-2.0])),
+            (torch.tensor([20.0]), torch.tensor([10.0]), torch.tensor([0.2]), torch.tensor([2.0])),
+        ]
+        prediction, _, _ = moe._aggregate_outputs(reg_outputs, "regression", labels)
+        self.assertGreater(prediction.item(), 18.0)
 
     def test_scale_augmentation_range_and_eval_identity(self):
         bank = LearnedTimeTransformBank(
@@ -846,6 +919,31 @@ class FMV3HeadTests(unittest.TestCase):
         self.assertTrue(all(
             "proto_head.time_transform_bank.dynamic_gate." in name
             or name.endswith("proto_head.time_transform_bank.aggregation_logits")
+            for name in trainable
+        ))
+        self.assertTrue(all(
+            parameter.requires_grad == (name in trainable)
+            for name, parameter in model.named_parameters()
+        ))
+
+    def test_expert_confidence_scope_trains_only_confidence_heads(self):
+        class TinyExpert(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = nn.Linear(2, 2)
+                self.proto_head = PrototypicalHead(
+                    classification_expert_confidence_enabled=True,
+                    regression_expert_confidence_enabled=True,
+                )
+
+        model = nn.ModuleDict({"expert": TinyExpert()})
+        trainable = configure_trainable_scope(model, "expert_confidence")
+        self.assertTrue(trainable)
+        self.assertTrue(any("classification_expert_confidence" in name for name in trainable))
+        self.assertTrue(any("regression_expert_confidence" in name for name in trainable))
+        self.assertTrue(all(
+            "proto_head.classification_expert_confidence." in name
+            or "proto_head.regression_expert_confidence." in name
             for name in trainable
         ))
         self.assertTrue(all(

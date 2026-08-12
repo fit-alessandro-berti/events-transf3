@@ -1,0 +1,10 @@
+extends: selected.yaml
+experiment_name: expert_confidence_heads
+epochs: 40
+trainable_scope: expert_confidence
+fmv3_head:
+  classification_expert_confidence_enabled: true
+  regression_expert_confidence_enabled: true
+  expert_confidence_hidden_dim: 16
+  classification_expert_confidence_loss_weight: 1.0
+  regression_expert_confidence_loss_weight: 1.0

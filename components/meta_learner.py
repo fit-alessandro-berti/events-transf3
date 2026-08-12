@@ -22,6 +22,8 @@ class MetaLearner (nn .Module ):
         self .d_model =d_model
         # Side-channel for episodic regression: branch diagnostics used by gate-aux.
         self .last_regression_diagnostics =None
+        self .last_expert_confidence_logit =None
+        self .last_regression_base_confidence =None
         if self .strategy =='pretrained':
             self .embedding_dim =kwargs ['embedding_dim']
             self .embedder =PretrainedEventEmbedder (
@@ -85,14 +87,19 @@ class MetaLearner (nn .Module ):
         device =all_encoded .device
         if task_type =='classification':
             self .last_regression_diagnostics =None
+            self .last_expert_confidence_logit =None
+            self .last_regression_base_confidence =None
             support_labels =torch .LongTensor ([s [1 ]for s in support_set ]).to (device )
             query_labels =torch .LongTensor ([q [1 ]for q in query_set ]).to (device )
             predictions ,proto_classes ,confidence =self .proto_head .forward_classification (support_features ,support_labels ,query_features )
             if predictions is None :return None ,None ,None
+            self .last_expert_confidence_logit =self .proto_head .classification_expert_confidence_logit (confidence )
             label_map ={orig_label .item ():new_label for new_label ,orig_label in enumerate (proto_classes )}
             mapped_labels =torch .tensor ([label_map .get (l .item (),-100 )for l in query_labels ],device =device ,dtype =torch .long )
             return predictions ,mapped_labels ,confidence
         elif task_type =='regression':
+            self .last_expert_confidence_logit =None
+            self .last_regression_base_confidence =None
             support_labels =torch .as_tensor ([s [1 ]for s in support_set ],dtype =torch .float32 ,device =device )
             query_labels =torch .as_tensor ([q [1 ]for q in query_set ],dtype =torch .float32 ,device =device )
             # Diagnostics are always materialised inside the head; request them so
@@ -101,5 +108,8 @@ class MetaLearner (nn .Module ):
             support_features ,support_labels ,query_features ,
             return_diagnostics =True ,augmentation_factor =time_scale_factor )
             self .last_regression_diagnostics =diagnostics
+            self .last_regression_base_confidence =confidence
+            self .last_expert_confidence_logit =self .proto_head .regression_expert_confidence_logit (
+            predictions ,confidence ,diagnostics )
             return predictions ,self .proto_head .regression_labels_to_output (query_labels ),confidence
         else :raise ValueError (f"Unknown task type: {task_type }")

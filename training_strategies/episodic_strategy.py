@@ -1,4 +1,5 @@
 import random
+import torch
 import torch .nn .functional as F
 from utils .data_utils import create_episode
 def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_labels ):
@@ -26,9 +27,16 @@ def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_
     predictions ,true_labels ,_ =model (support_set ,query_set ,task_type )
     if predictions is None :
         return None ,progress_bar_task
+    head_cfg =config .get ('fmv3_head',{})
     if task_type =='classification':
         smoothing =min (max (float (config .get ('classification_label_smoothing',0.05 )),0.0 ),1.0 )
         loss =F .cross_entropy (predictions ,true_labels ,ignore_index =-100 ,label_smoothing =smoothing )
+        confidence_w =float (head_cfg .get ('classification_expert_confidence_loss_weight',0.0 ))
+        if confidence_w >0:
+            log_probs =F .log_softmax (predictions ,dim =-1 )
+            probabilities =torch .exp (log_probs )
+            loss =loss +confidence_w *model .proto_head .classification_expert_confidence_loss (
+            probabilities ,true_labels )
     else :
         branch_predictions =None
         aggregation_weights =None
@@ -47,4 +55,12 @@ def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_
         branch_predictions =branch_predictions ,
         aggregation_weights =aggregation_weights ,
         )
+        confidence_w =float (head_cfg .get ('regression_expert_confidence_loss_weight',0.0 ))
+        if confidence_w >0 and diagnostics is not None:
+            base_confidence =getattr (model ,'last_regression_base_confidence',None )
+            if base_confidence is None:
+                base_confidence =torch .ones_like (predictions .reshape (-1 ))
+            loss =loss +confidence_w *model .proto_head .regression_expert_confidence_loss (
+            predictions .squeeze (),true_labels ,base_confidence ,diagnostics ,
+            labels_in_output_space =True )
     return loss ,progress_bar_task

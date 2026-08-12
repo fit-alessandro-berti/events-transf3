@@ -62,6 +62,7 @@ The final end-to-end comparison is in
 | `prefix_state_attention_joint`, epoch 36 | Same joint scope after a second continuation epoch | Selected Stage-6 architecture; predecessor to promoted model |
 | Original state-aware epoch-38 checkpoints | End-of-schedule candidates without the promoted loss | Rejected by development screen |
 | `loss_multimetric_gate_aux_005`, epoch 38 | Epoch-36 continuation with the multi-metric primary loss and 0.05 gate auxiliary | **Selected current checkpoint** |
+| `expert_confidence_heads`, epochs 39--40 | Confidence-only continuation from the selected checkpoint; learns per-expert aggregation logits for classification and regression | Full-confirmation ablation; not promoted |
 
 The selected independent-temporal predecessor completed epoch 34 and was
 intentionally stopped during epoch 35 when that experiment was closed. Its
@@ -79,13 +80,15 @@ path. Four variants were screened at epochs 35, 36, and 38; four informative
 checkpoints received the full paired confirmation. Joint epoch 36 became the
 Stage-6 architecture base. The promoted loss experiment then continued that
 exact checkpoint through epoch 38 and is now the selected repository model.
-Its promotion evidence and Road Traffic limitation are in
+Its promotion evidence, Road Traffic limitation, raw-hour no-rescaling
+ablation, and learned per-expert confidence ablation are in
 [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md); the
 architecture audit remains in
 [`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). Screen
 results live under `evaluation_results/prefix_attention/screens/` and
 `evaluation_results/loss_multimetric/screens/`; full results live under their
-corresponding `confirmations/` directories.
+corresponding `confirmations/` directories. The confidence-head ablation
+results live under `evaluation_results/expert_confidence/`.
 
 `configs/fmv3/selected.yaml` is the stable configuration alias for the
 promoted checkpoint; it resolves to `loss_multimetric_gate_aux_005` with
