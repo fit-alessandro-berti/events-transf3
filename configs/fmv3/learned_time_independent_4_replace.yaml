@@ -1,0 +1,4 @@
+extends: learned_time_independent_4.yaml
+experiment_name: learned_time_independent_4_replace
+fmv3_head:
+  temporal_replace_legacy_inputs: true

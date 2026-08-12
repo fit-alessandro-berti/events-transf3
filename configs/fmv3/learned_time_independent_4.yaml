@@ -1,0 +1,23 @@
+extends: learned_time_4_dynamic.yaml
+experiment_name: learned_time_independent_4
+epochs: 45
+lr: 0.003
+weight_decay: 0.0
+classification_task_probability: 0.50
+trainable_scope: temporal_joint
+fmv3_head:
+  regression_time_input_transforms: false
+  temporal_input_transforms: true
+  temporal_replace_legacy_inputs: false
+  temporal_start_num_transforms: 4
+  temporal_start_power_min: 0.05
+  temporal_start_power_max: 1.50
+  temporal_start_scale_min_hours: 0.016666666666666666
+  temporal_start_scale_max_hours: 10000.0
+  temporal_start_residual_logit: -3.0
+  temporal_previous_num_transforms: 4
+  temporal_previous_power_min: 0.05
+  temporal_previous_power_max: 1.50
+  temporal_previous_scale_min_hours: 0.0002777777777777778
+  temporal_previous_scale_max_hours: 1000.0
+  temporal_previous_residual_logit: -3.0

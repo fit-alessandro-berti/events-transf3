@@ -1,6 +1,13 @@
 # FM-v3 learned temporal-transform architecture and evaluation
 
-## Outcome
+> **Historical architecture.** This report records the epoch-33 shared,
+> regression-only temporal adapter and its full paired result. It is retained
+> for reproducibility, but it is no longer the current input architecture. The
+> successor uses separate start-clock and previous-event-clock components as
+> input to both classification and regression; see
+> [`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
+
+## Historical outcome
 
 The selected epoch-33 temporal FM-v3 beats the strongest fixed square-root
 baseline on both full-protocol remaining-time metrics across 200 paired rows:

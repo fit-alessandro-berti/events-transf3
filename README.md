@@ -151,35 +151,52 @@ zero for an unseen context, leaving the foundation-model prediction unchanged.
 The primary full-protocol comparison is documented in
 `paper_docs/structured_fmv3_report.md`.
 
-### Learned remaining-time architecture
+### Independent learned temporal architecture
 
-The selected regression head no longer commits to a fixed square-root or log
-target. It learns four monotone power/scale transforms, applies matching
-multi-scale transforms to both elapsed time from case start and time from the
-previous event, and combines a trained query gate with a support-only branch
-prior. MAE and RMSE are evaluated after inversion in raw hours. The
-classification path bypasses these additions exactly.
+The current architecture gives each observable prefix clock its own learned
+component: one bank for elapsed time from case start and a parameter-disjoint
+bank for time since the previous event. Their learned residuals are part of the
+event representation used by both next-activity classification and
+remaining-time regression. The selected variant augments the two legacy
+`log1p` clock coordinates with learned residuals, retaining the logged
+coordinates in parallel; the full confirmation found this residual design
+stronger for regression than complete replacement. Cost keeps its existing
+numerical path.
 
-The architecture, equations, ablations, per-log results, metric units, and
-limitations are documented in
-[`paper_docs/fmv3_time_transform_report.md`](paper_docs/fmv3_time_transform_report.md).
-The full component-level history is kept in
-[`paper_docs/fmv3_architecture_changes.md`](paper_docs/fmv3_architecture_changes.md).
+The regression head is a third independent learned component. It learns four
+monotone target transforms and returns every branch to raw hours before
+aggregation. Consequently, MAE and RMSE are computed in raw hours—not in
+square-root or log space.
 
-Reproduce the selected full evaluation with:
+“Time from the end” is not an input feature: the true time until case end is
+the remaining-time label, so passing it to either task would leak the answer.
+The second observable prefix clock is `time_from_previous`.
+
+Start with
+[`paper_docs/fmv3_independent_temporal_report.md`](paper_docs/fmv3_independent_temporal_report.md)
+for the current design, evaluation, ablations, and reproduction commands. The
+full component history is in
+[`paper_docs/fmv3_architecture_changes.md`](paper_docs/fmv3_architecture_changes.md),
+while
+[`paper_docs/fmv3_time_transform_report.md`](paper_docs/fmv3_time_transform_report.md)
+records the superseded shared, regression-only temporal adapter.
+
+Reproduce the selected confirmation with:
 
 ```bash
 python evaluate_fmv3.py \
-  --checkpoint_dir checkpoints/fmv3/learned_time_4_temporal \
-  --checkpoint_epoch 33 \
-  --eval_config configs/fmv3/time_transform_confirmation_eval.yaml \
-  --output_dir evaluation_results/time_transform/learned_temporal_time_transform
+  --checkpoint_dir checkpoints/fmv3/learned_time_independent_4_cls70 \
+  --checkpoint_epoch 34 \
+  --eval_config configs/fmv3/independent_temporal_confirmation_eval.yaml \
+  --output_dir evaluation_results/independent_temporal/confirmation_learned_time_independent_4_cls70_e34
 ```
 
-The selected model reaches 1,113.7193-hour MAE and 1,661.9432-hour RMSE,
-improving the fixed-sqrt baseline by 12.1228 and 3.7551 hours respectively.
-Classification balanced accuracy, accuracy, and macro-F1 remain exactly
-unchanged.
+On the 200-row full paired regression protocol, the selected checkpoint reaches
+1,113.1992-hour MAE and 1,661.3121-hour RMSE. It improves the fixed-sqrt
+baseline by 12.6429 and 4.3861 hours, and the previous learned temporal model by
+0.5201 and 0.6310 hours. Classification balanced accuracy changes from
+0.446293 to 0.445968, ordinary accuracy from 0.708601 to 0.708158, and macro-F1
+from 0.417745 to 0.417730; this small tradeoff is reported rather than hidden.
 
 The three-way corrected baseline/control/FM-v3 evaluation manifest is
 `configs/fmv3/improved_evaluation_manifest.yaml`.

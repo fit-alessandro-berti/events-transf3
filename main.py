@@ -141,8 +141,8 @@ def main ():
         load_state_dict_compatible (model ,torch .load (latest_checkpoint_path ,map_location =device ))
     trainable_scope =str (CONFIG .get ('trainable_scope','all')).lower ()
     trainable_parameters =configure_trainable_scope (model ,trainable_scope )
-    if trainable_scope =='time_transform':
-        print ("🔒 Frozen encoder/classification parameters; training learned time-transform banks only.")
+    if trainable_scope in {'time_transform','temporal_joint'}:
+        print ("🔒 Frozen backbone; training only the selected learned temporal modules.")
         print (f"  - Trainable tensors: {len (trainable_parameters )}")
     print (f"Model has {sum (p .numel ()for p in model .parameters ()if p .requires_grad ):,} trainable parameters.")
     print ("\n--- Phase 4: Starting Model Training ---")

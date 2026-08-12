@@ -107,9 +107,12 @@ accumulate.
 This classification experiment is a no-gradient target-memory augmentation of
 the already trained corrected checkpoint; remaining-time predictions were
 deliberately unchanged in this historical comparison. The later temporal
-transform report evaluates that task separately. The same five logs were used for architectural
-screening, so a publication claim still requires confirmation on additional
-untouched logs or a nested development/test split.
+reports evaluate that task separately. The current independent temporal input
+architecture also feeds classification; see
+[`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
+The same five logs were used for architectural screening, so a publication
+claim still requires confirmation on additional untouched logs or a nested
+development/test split.
 
 ## Reproduction
 

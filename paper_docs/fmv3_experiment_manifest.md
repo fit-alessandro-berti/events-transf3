@@ -46,4 +46,28 @@ and the implementation audit are in `paper_docs/fmv3_improvement_report.md`.
 The final end-to-end comparison is in
 `paper_docs/structured_fmv3_report.md`.
 
-Every folder contains its resolved `training_config.yaml`, serialized loader artifacts, and one final `model_epoch_*.pth`. The manifest is machine-readable at `configs/fmv3/manifest.yaml`.
+## Temporal architecture sequence
+
+| Checkpoint or variant | Purpose | Status |
+|---|---|---|
+| `learned_time_4_temporal`, epoch 33 | Shared two-clock adapter used only by regression plus four learned target transforms | Superseded input architecture; historical full result retained |
+| `learned_time_independent_4`, epoch 34 | Separate four-branch start/previous encoders used by both tasks; legacy logged clocks retained | Screen ablation |
+| `learned_time_independent_8`, epoch 34 | Eight-branch capacity ablation for both independent input clocks | Screen ablation |
+| `learned_time_independent_4_cls70`, epoch 34 | Four-branch architecture with 70% classification training episodes | **Selected current temporal architecture** |
+| `learned_time_independent_4_replace`, epoch 34 | Separate four-branch input encoders for both tasks; old logged clock coordinates removed | Classification-favoring full-confirmation ablation |
+
+The selected run completed epoch 34 and was intentionally stopped during
+epoch 35 when the experiment was closed. Its architecture, migration rules,
+screen comparison, raw-hour metric definition, and reproduction commands are
+documented in
+[`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
+Screen results live under `evaluation_results/independent_temporal/screens/`;
+the selected full confirmation lives under
+`evaluation_results/independent_temporal/confirmation_learned_time_independent_4_cls70_e34/`.
+
+Historical manifest folders contain their resolved `training_config.yaml`,
+serialized loader artifacts, and final `model_epoch_*.pth`. Independent
+temporal continuation folders retain both the seeded epoch-33 checkpoint and
+the completed epoch-34 checkpoint so the migration remains reproducible. The
+original manifest is machine-readable at `configs/fmv3/manifest.yaml`; the
+new temporal variants are the explicit YAML files listed above.

@@ -1,17 +1,19 @@
-# FM-v3 architecture changes: from FM-v2 to structured and temporal FM-v3
+# FM-v3 architecture changes: from FM-v2 to structured and independent temporal FM-v3
 
 This document is the source of truth for the architecture currently selected
 for the paper. It explains what changed, why each change was made, which parts
 were trained, which parts are inference-only, and which experiments were
 rejected. Numerical results live in
 [`fmv3_improvement_report.md`](fmv3_improvement_report.md) and
-[`structured_fmv3_report.md`](structured_fmv3_report.md). The subsequent
-remaining-time redesign and its paired results are in
-[`fmv3_time_transform_report.md`](fmv3_time_transform_report.md).
+[`structured_fmv3_report.md`](structured_fmv3_report.md). The historical
+shared temporal adapter is recorded in
+[`fmv3_time_transform_report.md`](fmv3_time_transform_report.md); its current,
+fully independent successor is documented in
+[`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
 
 ## Short version
 
-The final system is not the original `06_full_fmv3` model. It has two selected
+The final system is not the original `06_full_fmv3` model. It has three selected
 layers:
 
 1. **Corrected FM-v3 checkpoint:** retain FM-v2's reliable centered local
@@ -23,43 +25,50 @@ layers:
    class-balanced, target-log transition memory keyed by the last one to three
    activities. The transition branch backs off to shorter contexts and is
    automatically suppressed when its context has little or no support.
-3. **Learned temporal remaining-time head:** pass both elapsed time from case
-   start and time since the previous event through a regression-only learned
-   multi-scale adapter, predict raw hours through four learned monotone target
-   transforms, and combine a query-specific gate with a support-only branch
-   prior. Training uses shared scale augmentation for the two input clocks and
-   the remaining-time target.
+3. **Independent learned temporal representation:** give elapsed time from
+   case start and time since the previous event separate power/scale banks,
+   projection MLPs, and residual gates. Add both residuals to the legacy logged
+   coordinates and feed the resulting event representation to both
+   classification and regression. The regression head remains a third
+   independent component with four learned monotone target transforms, a
+   query-specific gate, and a support-only branch prior.
 
 The Transformer encoder and its four-expert mixture remain the learned
 representation backbone. The structured transition memory remains
-classification-only. The temporal adapter and target-transform bank are
-regression-only, so their parameters and forward path cannot change
-classification output.
+classification-only. The two temporal input encoders are shared by both task
+paths and can change classification output; only the target-transform bank is
+regression-only.
 
-## Five-stage comparison
+## Six-stage comparison
 
-| Dimension | FM-v2 baseline | Original full FM-v3 | Corrected FM-v3 | Structured FM-v3 | Temporal-transform FM-v3 |
-|---|---|---|---|---|---|
-| Encoder | Four Transformer experts | Same backbone, continued training | Same backbone, continued from FM-v2 epoch 20 | Frozen corrected epoch-23 checkpoint | Frozen corrected encoder plus regression-only temporal residual |
-| Local geometry | Neighborhood-centered cosine | Uncentered cosine | Neighborhood-centered cosine restored | Same as corrected FM-v3 | Same classifier; regression retrieval uses temporal-adapted embeddings |
-| Local aggregation | Summed soft-kNN mass | Log-sum-exp with learned count normalization | Log-sum-exp with fixed $\gamma=0$ | Same as corrected FM-v3 | Same classifier; four regression transform branches |
-| Candidate labels | Local top-k only | Full support pool | Full support pool, but global evidence used only for locally missing labels | Neural candidates plus structured transition evidence | Same classification rule |
-| Global combination | None | Learned/fixed global-local fusion for all classes | Margin-gated coverage fallback | Same fallback inside $p_{FM}$ | Same classification rule; dual-gated regression combination |
-| Class prior | Implicit local frequency | Explicit balanced/natural mode | Balanced | Balanced neural head plus uniform structured class prior | Same classification prior |
-| Abstention | None | Learned missing-pool abstention | Removed | Removed | Removed |
-| Target-log adaptation | Embedding retrieval | Embedding retrieval and prototypes | Corrected retrieval and prototypes | Corrected neural memory plus order-1--3 transition memory | Labeled-support branch calibration for regression |
-| Target gradients | None | None | None | None | None at adaptation time |
-| Remaining-time target rule | Fixed square-root neighbor regression | Same | Same | Same | Four learned monotone branches, inverted to raw hours |
-| Prefix timing inputs | Fixed `log1p` coordinates | Same | Same | Same | Fixed coordinates plus learned multi-scale elapsed/inter-event adapter |
-| Status | Authoritative baseline | Rejected combined design | Selected neural base | **Selected classifier** | **Selected remaining-time head** |
+| Dimension | FM-v2 baseline | Original full FM-v3 | Corrected FM-v3 | Structured FM-v3 | Historical temporal FM-v3 | Independent temporal FM-v3 |
+|---|---|---|---|---|---|---|
+| Encoder | Four Transformer experts | Same backbone, continued training | Same backbone, continued from FM-v2 epoch 20 | Frozen corrected epoch-23 checkpoint | Frozen encoder plus shared regression-only temporal residual | Frozen encoder plus two independent temporal residuals used by both tasks |
+| Local geometry | Neighborhood-centered cosine | Uncentered cosine | Neighborhood-centered cosine restored | Same as corrected FM-v3 | Classification unchanged; regression uses adapted embeddings | Both tasks use independently temporal-adapted embeddings |
+| Local aggregation | Summed soft-kNN mass | Log-sum-exp with learned count normalization | Log-sum-exp with fixed $\gamma=0$ | Same as corrected FM-v3 | Same classifier; four regression transform branches | Same heads; changed shared event representation |
+| Candidate labels | Local top-k only | Full support pool | Full support pool, but global evidence used only for locally missing labels | Neural candidates plus structured transition evidence | Same classification rule | Same classification rule, new temporal embeddings |
+| Global combination | None | Learned/fixed global-local fusion for all classes | Margin-gated coverage fallback | Same fallback inside $p_{FM}$ | Same classification; dual regression combination | Same head-level combinations |
+| Class prior | Implicit local frequency | Explicit balanced/natural mode | Balanced | Balanced neural head plus uniform structured class prior | Same classification prior | Same classification prior |
+| Abstention | None | Learned missing-pool abstention | Removed | Removed | Removed | Removed |
+| Target-log adaptation | Embedding retrieval | Embedding retrieval and prototypes | Corrected retrieval and prototypes | Corrected neural memory plus order-1--3 transition memory | Labeled-support branch calibration for regression | Same, with both tasks retrieving in the new temporal representation |
+| Target gradients | None | None | None | None | None at adaptation time | None at adaptation time |
+| Remaining-time target rule | Fixed square-root neighbor regression | Same | Same | Same | Four learned monotone branches, inverted to raw hours | Same independent target bank |
+| Prefix timing inputs | Fixed `log1p` coordinates | Same | Same | Same | Fixed coordinates plus one shared two-clock regression adapter | Fixed coordinates plus separate start/previous banks active for both tasks |
+| Status | Authoritative baseline | Rejected combined design | Selected neural base | Selected structured classifier | Superseded temporal input design | **Selected current temporal architecture** |
 
 ## Architecture at a glance
 
 ```mermaid
 flowchart LR
-    Q[Query prefix] --> E[Four pretrained Transformer experts]
-    S[Labeled target support cases] --> SE[Support embeddings per expert]
-    E --> R[Expert-specific cosine top-k retrieval]
+    Q[Query prefix] --> E[Base event features]
+    TS[Time from start] --> IS[Independent start-clock encoder]
+    TP[Time from previous] --> IP[Independent previous-clock encoder]
+    E --> TE[Temporally augmented event representation]
+    IS --> TE
+    IP --> TE
+    TE --> TR[Four pretrained Transformer experts]
+    S[Labeled target support cases] --> SE[Temporally augmented support embeddings per expert]
+    TR --> R[Expert-specific cosine top-k retrieval]
     SE --> R
     R --> L[Centered local class evidence]
     SE --> G[Full-pool class prototypes]
@@ -68,9 +77,9 @@ flowchart LR
     C --> A[Mean posterior across experts: p_FM]
 
     S --> T[Order 1-3 activity-transition counts]
-    Q --> X[Recent activity suffix]
+    Q --> RS[Recent activity suffix]
     T --> B[Longest-match suffix backoff]
-    X --> B
+    RS --> B
     B --> P[Balanced structured posterior: p_str]
     B --> W[Support-count reliability]
 
@@ -80,15 +89,12 @@ flowchart LR
     F --> Y[Next-activity prediction]
 ```
 
-The regression path is separate:
+The regression head after the shared temporal representation is separate:
 
 ```mermaid
 flowchart LR
-    Q[Query prefix clocks] --> I[Four learned power/scale maps per clock]
-    I --> E[Regression-only residual into frozen expert encoder]
-    S[Labeled support prefixes] --> SE[Temporal-adapted support embeddings]
-    E --> R[Expert-specific top-50 retrieval]
-    SE --> R
+    Q[Temporally augmented query embedding] --> R[Expert-specific top-50 retrieval]
+    S[Temporally augmented support embeddings] --> R
     R --> B[Four learned monotone target branches]
     B --> D[Trained query-specific gate]
     S --> C[Self-excluded support calibration]
@@ -118,14 +124,15 @@ The following are not new architectural claims:
   gradient-free for both tasks.
 - The selected structured branch operates only on next-activity
   classification.
-- The selected temporal-transform branch operates only on remaining-time
-  regression. It does not alter activity/resource encoding or classifier
-  evidence.
+- The regression target-transform bank operates only on remaining-time
+  regression. The two independent temporal input encoders alter the shared
+  event representation and therefore feed both classifier and regressor.
 
-This distinction matters: neither improvement increases encoder depth or
-width. Classification gains come from how target support memory is queried;
-remaining-time gains come from learned input/target geometry and support-only
-branch adaptation around the frozen encoder.
+This distinction matters: neither improvement increases Transformer depth or
+width. Classification now gains from both structured support memory and the
+learned temporal input representation. Remaining-time gains combine that
+representation with learned target geometry and support-only branch adaptation
+around the frozen backbone.
 
 ## Stage 0: FM-v2 baseline
 
@@ -421,7 +428,11 @@ Support-absent labels still receive zero evidence. For deployment, this fixed
 universe should come from the declared process schema or observed target-log
 vocabulary; it is not learned by the transition counts.
 
-## Stage 4: learned temporal input and target geometry
+## Stage 4: historical shared temporal input and target geometry
+
+Stage 4 is the fully evaluated predecessor. Its output target bank remains in
+the current model, but its shared input adapter and regression-only routing are
+superseded by Stage 5.
 
 ### 4.1 Why transform the two prefix clocks
 
@@ -515,13 +526,57 @@ predictions and targets after inversion in raw hours. Neither metric is
 computed in sqrt space or log space. The only square operation is the one-time
 conversion of legacy stored labels back to hours.
 
+## Stage 5: independent temporal inputs shared by both tasks
+
+The current architecture keeps the learned regression target bank from Stage
+4 but replaces the input adapter. `time_from_start` and
+`time_from_previous` now have completely separate `LearnedScalarTimeEncoder`
+instances. They share no powers, scales, projection weights, or residual gate.
+The start-clock scale grid begins at one minute and extends to 10,000 hours;
+the previous-event grid begins at one second and extends to 1,000 hours.
+
+Each component applies the same monotone bounded family from Section 4.1 to
+its own scalar input, passes its branch vector through its own bias-free MLP,
+and produces a gated 256-dimensional residual. The two residuals are added to
+the base event projection. Because this addition is unconditional whenever
+`temporal_input_transforms: true`, the resulting representation is consumed by
+both classification and regression. There is no regression-only task gate on
+the new input path.
+
+The selected `learned_time_independent_4_cls70` variant retains the two old
+`log1p` clock coordinates in the common numerical input and supplements them
+with the independent learned residuals. A `replace` ablation removes the fixed
+coordinates and obtains the strongest classification result, but its full
+regression RMSE is 0.0404 hours worse than fixed sqrt. The selected residual
+design is the only new variant that improves both MAE and RMSE over both the
+fixed-sqrt baseline and the previous learned temporal model. The cost
+coordinate remains unchanged.
+
+The true time until the case ends is never an input. It is the remaining-time
+label and depends on future events, so exposing it would create target leakage.
+Here “the other end” of the observable prefix timing is represented by time
+since the previous event, not by time to the future final event.
+
+Training uses the new `temporal_joint` scope. Only the two input encoders and
+the regression output bank are trainable; the frozen backbone and existing
+heads remain unchanged. Across four experts, the selected four-branch model
+has 70,284 trainable parameters. Classification loss reaches both input
+encoders, while regression loss reaches both input encoders and the output
+bank. The epoch-34 screen nominated the replacement variant, but confirmation
+of all saved variants selected the 70%-classification residual design. It
+slightly reduces classification means while improving both full-protocol
+raw-hour regression errors over both references. Exact results and the
+early-stop boundary are in
+[`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
+
 ## Final classification inference algorithm
 
 For each target log and support budget:
 
 1. Split support and query by case; a case cannot occur in both sets.
-2. Encode every materialized support/query prefix independently with each of
-   the four experts.
+2. Encode both prefix clocks with their independent learned components, add
+   both residuals to every event, and run each materialized support/query
+   prefix independently through all four frozen Transformer experts.
 3. For each expert, retrieve its own $k=20$ cosine-nearest support prefixes.
 4. Compute centered local evidence and full-pool global prototypes.
 5. Apply coverage fallback only to labels missing from that expert's local
@@ -543,8 +598,8 @@ structured weight was 0.606.
 
 For the same case-disjoint target support/query split:
 
-1. Encode support and query prefixes with each frozen expert plus its
-   regression-only temporal residual.
+1. Encode support and query prefixes with the same two independent temporal
+   input components used by classification, followed by each frozen expert.
 2. Retrieve the 50 nearest support prefixes independently in each expert's
    embedding space.
 3. Run all four learned target transforms, their neighbor-attention scales,
@@ -573,7 +628,10 @@ For the same case-disjoint target support/query split:
 | Order-1--3 structured transition memory | No | Yes | Yes |
 | Reliability-gated posterior mixture | No | Yes | Yes |
 | Four learned target transforms | Yes | Yes | Yes |
-| Learned elapsed/inter-event residual | Yes | Yes | Yes |
+| Historical shared regression-only clock residual | Yes | Yes | **Superseded** |
+| Independent start-clock and previous-event residuals | Yes | Yes, both tasks | Yes |
+| Retention of legacy logged clocks beside independent residuals | Yes | Yes, both tasks | Yes |
+| Replacement of legacy logged clock coordinates | Yes | Yes, both tasks | **Ablation** |
 | Shared temporal scale augmentation | Yes | No | Yes |
 | Query-specific regression gate | Yes | Yes | Yes |
 | Support-only regression branch prior | No | Yes | Yes |
@@ -586,6 +644,7 @@ For the same case-disjoint target support/query split:
 | Corrected FM-v2 evaluator | 0.4136 | 0.6762 | 0.3936 | Re-evaluated neural baseline |
 | Corrected FM-v3 | 0.4194 | 0.6837 | 0.3986 | Training, head, and evaluator corrections |
 | Structured FM-v3 | 0.4463 | 0.7086 | 0.4177 | Corrected checkpoint plus structured inference memory |
+| Independent temporal FM-v3 | 0.4460 | 0.7082 | 0.4177 | Both learned clocks feed the classifier; small tradeoff for the selected regression checkpoint |
 
 The corrected checkpoint contributes +0.0059 balanced accuracy over FM-v2.
 Structured memory then contributes +0.0269 over corrected FM-v3, for a total
@@ -598,18 +657,20 @@ therefore supports a predictive-performance claim, not a stronger calibration
 or selective-risk claim. Calibration should be fitted separately using only a
 dedicated validation set.
 
-The selected regression redesign is evaluated on the same 200 paired
+The current regression redesign is evaluated on the same 200 paired
 support/query rows used by the strongest fixed-sqrt baseline:
 
 | Remaining-time model | MAE (hours) | RMSE (hours) |
 |---|---:|---:|
 | Fixed sqrt baseline | 1,125.8421 | 1,665.6983 |
-| Learned temporal-transform FM-v3 | **1,113.7193** | **1,661.9432** |
-| Delta | **-12.1228** | **-3.7551** |
+| Historical shared temporal adapter | 1,113.7193 | 1,661.9432 |
+| **Independent temporal FM-v3** | **1,113.1992** | **1,661.3121** |
+| Current minus fixed sqrt | **-12.6429** | **-4.3861** |
+| Current minus historical learned model | **-0.5201** | **-0.6310** |
 
 Per-log and per-budget results, including the smallest-budget regressions, are
 reported in
-[`fmv3_time_transform_report.md`](fmv3_time_transform_report.md).
+[`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
 
 ## Rejected or non-final alternatives
 
@@ -626,8 +687,13 @@ The following remain useful ablations but are not part of the selected method:
 - elapsed-time-bucket structured keys;
 - a structured remaining-time median branch, which gave only a small aggregate
   screen improvement and regressed Billing;
-- eight target/input branches, which did not improve the joint MAE/RMSE screen;
-- replacing rather than supplementing the legacy logged timing coordinates;
+- the historical shared two-clock, regression-only input adapter, now retained
+  only for checkpoint compatibility;
+- eight input/target branches, which did not improve the full confirmation;
+- replacing the legacy logged clock coordinates, which gave the strongest
+  classification result but missed the fixed-sqrt RMSE by 0.0404 hours;
+- 50% rather than 70% classification episode sampling for the four-branch
+  residual design, which was slightly weaker on full MAE and RMSE;
 - the query gate alone, which protected RMSE but regressed MAE;
 - the support branch prior alone, which improved MAE but slightly regressed
   full-protocol RMSE.
@@ -645,12 +711,15 @@ being mistaken for the final architecture.
 | Case-disjoint protocol, per-expert retrieval, structured memory, and fusion | [`evaluation/fmv3_protocol.py`](../evaluation/fmv3_protocol.py) |
 | Corrected checkpoint configuration | [`configs/fmv3/corrected_fmv3.yaml`](../configs/fmv3/corrected_fmv3.yaml) |
 | Structured inference overlay | [`configs/fmv3/structured_memory_eval.yaml`](../configs/fmv3/structured_memory_eval.yaml) |
-| Regression temporal input adapter | [`components/temporal_adapter.py`](../components/temporal_adapter.py) |
+| Independent start/previous temporal input encoders and legacy adapter | [`components/temporal_adapter.py`](../components/temporal_adapter.py) |
 | Learned target-transform bank and query gate | [`components/prototypical_head.py`](../components/prototypical_head.py) |
 | Four-branch temporal training configuration | [`configs/fmv3/learned_time_4_temporal.yaml`](../configs/fmv3/learned_time_4_temporal.yaml) |
 | Temporal confirmation overlay | [`configs/fmv3/time_transform_confirmation_eval.yaml`](../configs/fmv3/time_transform_confirmation_eval.yaml) |
+| Selected independent temporal training configuration | [`configs/fmv3/learned_time_independent_4_cls70.yaml`](../configs/fmv3/learned_time_independent_4_cls70.yaml) |
+| Independent temporal screen overlay | [`configs/fmv3/independent_temporal_screen_eval.yaml`](../configs/fmv3/independent_temporal_screen_eval.yaml) |
+| Independent temporal confirmation overlay | [`configs/fmv3/independent_temporal_confirmation_eval.yaml`](../configs/fmv3/independent_temporal_confirmation_eval.yaml) |
 | Unit tests for fallback and structured memory | [`tests/test_fmv3_protocol.py`](../tests/test_fmv3_protocol.py) |
-| Unit tests for transform inversion, gradients, scope, and classifier isolation | [`tests/test_fmv3_head.py`](../tests/test_fmv3_head.py) |
+| Unit tests for transform inversion, gradients, independent scopes, and both-task routing | [`tests/test_fmv3_head.py`](../tests/test_fmv3_head.py) |
 | Full structured result generator | [`generate_structured_fmv3_report.py`](../generate_structured_fmv3_report.py) |
 
 ## Reproduction and validity boundary

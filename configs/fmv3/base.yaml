@@ -37,6 +37,22 @@ fmv3_head:
   regression_input_scale_min_hours: 0.0002777777777777778
   regression_input_scale_max_hours: 10000.0
   regression_input_residual_logit: -2.0
+  # New architecture: fully independent learned elapsed/inter-event encoders.
+  # Disabled by default so historical checkpoints retain their exact graph.
+  temporal_input_transforms: false
+  temporal_replace_legacy_inputs: false
+  temporal_start_num_transforms: 4
+  temporal_start_power_min: 0.05
+  temporal_start_power_max: 1.50
+  temporal_start_scale_min_hours: 0.016666666666666666
+  temporal_start_scale_max_hours: 10000.0
+  temporal_start_residual_logit: -3.0
+  temporal_previous_num_transforms: 4
+  temporal_previous_power_min: 0.05
+  temporal_previous_power_max: 1.50
+  temporal_previous_scale_min_hours: 0.0002777777777777778
+  temporal_previous_scale_max_hours: 1000.0
+  temporal_previous_residual_logit: -3.0
   regression_mae_weight: 0.5
   regression_rmse_weight: 0.5
 fmv3_training:

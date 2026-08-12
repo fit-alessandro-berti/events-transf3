@@ -39,21 +39,32 @@ def create_model (config ,loader ,device ):
         model .set_char_vocab (loader .char_to_id )
     return model
 def load_state_dict_compatible (model ,state_dict ):
-    """Load a checkpoint while allowing initialization of a new time bank only."""
+    """Load checkpoints across explicit temporal-architecture migrations."""
     incompatible =model .load_state_dict (state_dict ,strict =False )
     allowed_missing =[
     key for key in incompatible .missing_keys
     if '.proto_head.time_transform_bank.'in key
     or '.embedder.time_input_adapter.'in key
+    or '.embedder.temporal_input_encoder.'in key
+    ]
+    migrating_to_independent_inputs =any (
+    '.embedder.temporal_input_encoder.'in key for key in allowed_missing )
+    allowed_unexpected =[
+    key for key in incompatible .unexpected_keys
+    if migrating_to_independent_inputs and '.embedder.time_input_adapter.'in key
     ]
     disallowed_missing =sorted (set (incompatible .missing_keys )-set (allowed_missing ))
-    if disallowed_missing or incompatible .unexpected_keys :
+    disallowed_unexpected =sorted (
+    set (incompatible .unexpected_keys )-set (allowed_unexpected ))
+    if disallowed_missing or disallowed_unexpected :
         raise RuntimeError (
         f"Checkpoint mismatch. Missing={disallowed_missing}; "
-        f"unexpected={incompatible .unexpected_keys}"
+        f"unexpected={disallowed_unexpected}"
         )
     if allowed_missing :
-        print (f"🆕 Initialized {len (allowed_missing )} learned time-transform parameters from config.")
+        print (f"🆕 Initialized {len (allowed_missing )} learned temporal parameters from config.")
+    if allowed_unexpected :
+        print (f"♻️ Ignored {len (allowed_unexpected )} superseded shared-adapter parameters.")
     return incompatible
 def load_model_weights (model ,checkpoint_dir ,device ,epoch_num =None ):
     if not os .path .isdir (checkpoint_dir ):

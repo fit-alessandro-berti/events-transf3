@@ -1,0 +1,15 @@
+# Two-task development screen for independent temporal input encoders.
+# Smaller than confirmation: use only for architecture/checkpoint selection.
+extends: time_transform_confirmation_eval.yaml
+experiment_name: independent_temporal_screen
+fmv3_evaluation:
+  tasks: [classification, regression]
+  case_budgets: [1, 4, 16, 64, 128]
+  support_scenarios: [natural]
+  repetitions: 2
+  test_case_fraction: 0.30
+  max_test_cases: 50
+  max_query_prefixes: 500
+  embedding_batch_size: 128
+  include_full_budget: false
+  retrieval_k: [20]

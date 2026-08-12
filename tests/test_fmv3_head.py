@@ -7,7 +7,10 @@ import torch.nn as nn
 
 from components.pretrained_event_embedder import PretrainedEventEmbedder
 from components.prototypical_head import LearnedTimeTransformBank, PrototypicalHead
-from components.temporal_adapter import LearnedTemporalInputAdapter
+from components.temporal_adapter import (
+    IndependentTemporalInputEncoder,
+    LearnedTemporalInputAdapter,
+)
 from utils.parameter_utils import configure_trainable_scope
 
 
@@ -362,6 +365,142 @@ class FMV3HeadTests(unittest.TestCase):
         regression = temporal(events, use_time_adapter=True)
         torch.testing.assert_close(classification, expected, atol=0.0, rtol=0.0)
         self.assertFalse(torch.equal(regression, expected))
+
+    def test_independent_clock_encoders_have_disjoint_parameters_and_shapes(self):
+        encoder = IndependentTemporalInputEncoder(
+            16,
+            temporal_start_num_transforms=3,
+            temporal_previous_num_transforms=5,
+        )
+        self.assertEqual(encoder.start_time_encoder.num_transforms, 3)
+        self.assertEqual(encoder.previous_time_encoder.num_transforms, 5)
+        start_parameters = {
+            parameter.data_ptr()
+            for parameter in encoder.start_time_encoder.parameters()
+        }
+        previous_parameters = {
+            parameter.data_ptr()
+            for parameter in encoder.previous_time_encoder.parameters()
+        }
+        self.assertTrue(start_parameters)
+        self.assertTrue(previous_parameters)
+        self.assertTrue(start_parameters.isdisjoint(previous_parameters))
+
+        seconds = torch.tensor([[3600.0, 60.0], [7200.0, 1800.0]])
+        before = encoder.transformed_features(seconds)
+        with torch.no_grad():
+            encoder.start_time_encoder.power_logits.add_(0.5)
+        after = encoder.transformed_features(seconds)
+        self.assertFalse(torch.equal(before["time_from_start"], after["time_from_start"]))
+        torch.testing.assert_close(
+            before["time_from_previous"],
+            after["time_from_previous"],
+            atol=0.0,
+            rtol=0.0,
+        )
+
+    def test_independent_temporal_features_feed_both_tasks(self):
+        legacy = PretrainedEventEmbedder(4, 3, 16, dropout=0.0)
+        temporal = PretrainedEventEmbedder(
+            4,
+            3,
+            16,
+            dropout=0.0,
+            time_input_config={
+                "temporal_input_transforms": True,
+                "temporal_start_num_transforms": 3,
+                "temporal_previous_num_transforms": 5,
+            },
+        )
+        temporal.load_state_dict(legacy.state_dict(), strict=False)
+        events = pd.DataFrame(
+            {
+                "activity_embedding": [
+                    np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                    np.asarray([0.0, 1.0, 0.0, 0.0], dtype=np.float32),
+                ],
+                "resource_embedding": [
+                    np.asarray([0.0, 0.0, 1.0, 0.0], dtype=np.float32),
+                    np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+                ],
+                "cost": [10.0, 20.0],
+                "time_from_start": [3600.0, 7200.0],
+                "time_from_previous": [60.0, 1800.0],
+            }
+        )
+        legacy.eval()
+        temporal.eval()
+        fixed = legacy(events, use_time_adapter=False)
+        classification = temporal(events, use_time_adapter=False)
+        regression = temporal(
+            events, use_time_adapter=True, time_scale_factor=torch.tensor(1.0)
+        )
+        self.assertFalse(torch.equal(classification, fixed))
+        torch.testing.assert_close(classification, regression, atol=0.0, rtol=0.0)
+
+        classification.sum().backward()
+        self.assertIsNotNone(
+            temporal.temporal_input_encoder.start_time_encoder.power_logits.grad
+        )
+        self.assertIsNotNone(
+            temporal.temporal_input_encoder.previous_time_encoder.power_logits.grad
+        )
+
+    def test_input_clocks_and_output_target_use_three_independent_banks(self):
+        encoder = IndependentTemporalInputEncoder(
+            16,
+            temporal_start_num_transforms=3,
+            temporal_previous_num_transforms=5,
+        )
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=7,
+        )
+        self.assertEqual(encoder.start_time_encoder.power_logits.numel(), 3)
+        self.assertEqual(encoder.previous_time_encoder.power_logits.numel(), 5)
+        self.assertEqual(head.time_transform_bank.power_logits.numel(), 7)
+        parameter_sets = [
+            {parameter.data_ptr() for parameter in module.parameters()}
+            for module in (
+                encoder.start_time_encoder,
+                encoder.previous_time_encoder,
+                head.time_transform_bank,
+            )
+        ]
+        self.assertTrue(parameter_sets[0].isdisjoint(parameter_sets[1]))
+        self.assertTrue(parameter_sets[0].isdisjoint(parameter_sets[2]))
+        self.assertTrue(parameter_sets[1].isdisjoint(parameter_sets[2]))
+
+    def test_temporal_joint_scope_trains_both_clocks_and_output_bank_only(self):
+        class TinyExpert(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = nn.Linear(2, 2)
+                self.embedder = nn.Module()
+                self.embedder.temporal_input_encoder = IndependentTemporalInputEncoder(
+                    8,
+                    temporal_start_num_transforms=3,
+                    temporal_previous_num_transforms=5,
+                )
+                self.proto_head = PrototypicalHead(
+                    regression_mode="learned_transform_ensemble",
+                    regression_num_transforms=7,
+                )
+
+        model = nn.ModuleDict({"expert": TinyExpert()})
+        trainable = configure_trainable_scope(model, "temporal_joint")
+        self.assertTrue(any("start_time_encoder" in name for name in trainable))
+        self.assertTrue(any("previous_time_encoder" in name for name in trainable))
+        self.assertTrue(any("time_transform_bank" in name for name in trainable))
+        self.assertTrue(all(
+            "embedder.temporal_input_encoder." in name
+            or "proto_head.time_transform_bank." in name
+            for name in trainable
+        ))
+        self.assertTrue(all(
+            parameter.requires_grad == (name in trainable)
+            for name, parameter in model.named_parameters()
+        ))
 
 
 if __name__ == "__main__":
