@@ -240,6 +240,32 @@ class FMV3HeadTests(unittest.TestCase):
             self.assertIsNotNone(parameter.grad)
             self.assertTrue(torch.isfinite(parameter.grad).all())
 
+    def test_raw_hours_regression_ablation_uses_direct_weighted_mean(self):
+        head = PrototypicalHead(regression_mode="raw_hours_knn")
+        with torch.no_grad():
+            head.reg_logit_scale.fill_(1.0)
+        support = torch.tensor(
+            [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]], dtype=torch.float32
+        )
+        labels = torch.sqrt(torch.tensor([1.0, 25.0, 400.0]))
+        query = torch.tensor([[0.6, 0.4], [0.0, 1.0]], dtype=torch.float32)
+        predictions, _, diagnostics = head.forward_regression(
+            support, labels, query, return_diagnostics=True
+        )
+        self.assertTrue(head.regression_outputs_hours)
+        self.assertFalse(head.regression_uses_time_transform_bank)
+        self.assertIsNone(head.time_transform_bank)
+        self.assertNotIn("branch_predictions_hours", diagnostics)
+        targets = labels.square().unsqueeze(0).expand(query.size(0), -1)
+        torch.testing.assert_close(
+            predictions,
+            (diagnostics["attention"] * targets).sum(dim=1),
+        )
+        loss = head.regression_loss(
+            predictions, torch.sqrt(torch.tensor([10.0, 300.0]))
+        )
+        self.assertTrue(torch.isfinite(loss))
+
     def test_scale_augmentation_range_and_eval_identity(self):
         bank = LearnedTimeTransformBank(
             num_transforms=4,

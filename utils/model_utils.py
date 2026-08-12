@@ -52,7 +52,10 @@ def load_state_dict_compatible (model ,state_dict ):
     '.embedder.temporal_input_encoder.'in key for key in allowed_missing )
     allowed_unexpected =[
     key for key in incompatible .unexpected_keys
-    if migrating_to_independent_inputs and '.embedder.time_input_adapter.'in key
+    if (
+    (migrating_to_independent_inputs and '.embedder.time_input_adapter.'in key)
+    or '.proto_head.time_transform_bank.'in key
+    )
     ]
     disallowed_missing =sorted (set (incompatible .missing_keys )-set (allowed_missing ))
     disallowed_unexpected =sorted (
@@ -65,7 +68,7 @@ def load_state_dict_compatible (model ,state_dict ):
     if allowed_missing :
         print (f"🆕 Initialized {len (allowed_missing )} learned adapter parameters from config.")
     if allowed_unexpected :
-        print (f"♻️ Ignored {len (allowed_unexpected )} superseded shared-adapter parameters.")
+        print (f"♻️ Ignored {len (allowed_unexpected )} checkpoint parameters not used by current config.")
     return incompatible
 def load_model_weights (model ,checkpoint_dir ,device ,epoch_num =None ):
     if not os .path .isdir (checkpoint_dir ):

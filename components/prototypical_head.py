@@ -283,7 +283,11 @@ class PrototypicalHead(nn.Module):
         self.logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
         self.logit_scale.requires_grad_(self.learn_temperature)
         self.reg_logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
-        self.regression_mode = str(config.get("regression_mode", "sqrt_knn"))
+        self.regression_mode = str(config.get("regression_mode", "sqrt_knn")).lower()
+        self.regression_mode = {
+            "raw_knn": "raw_hours_knn",
+            "raw_prediction": "raw_hours_knn",
+        }.get(self.regression_mode, self.regression_mode)
         self.time_transform_bank = None
         if self.regression_mode == "learned_transform_ensemble":
             self.time_transform_bank = LearnedTimeTransformBank(
@@ -594,7 +598,11 @@ class PrototypicalHead(nn.Module):
 
     @property
     def regression_outputs_hours(self):
-        return self.regression_mode == "learned_transform_ensemble"
+        return self.regression_mode in {"learned_transform_ensemble", "raw_hours_knn"}
+
+    @property
+    def regression_uses_time_transform_bank(self):
+        return self.time_transform_bank is not None
 
     def regression_labels_to_output(self, labels):
         labels = labels.float()
@@ -744,7 +752,7 @@ class PrototypicalHead(nn.Module):
           task values (``sqrt(hours)`` for remaining time). They are converted
           with :meth:`regression_labels_to_output` before the metric.
         - ``labels_in_output_space=True``: ``labels`` are already in the head's
-          output unit (raw hours for ``learned_transform_ensemble``).
+          output unit (raw hours for raw-hour regression modes).
 
         Predictions must always be in the head's output unit. Under AMP the
         primary metric is computed in float32 for stable RMSE/median scaling.
@@ -794,12 +802,22 @@ class PrototypicalHead(nn.Module):
         centered_support = _l2_normalize(support - center)
         centered_query = _l2_normalize(query - center.squeeze(1))
         similarities = torch.einsum("qd,qkd->qk", centered_query, centered_support)
-        if self.regression_outputs_hours:
+        if self.regression_uses_time_transform_bank:
             support_hours = self.regression_labels_to_output(support_labels)
             prediction, diagnostics = self.time_transform_bank.predict(
                 similarities, support_hours, augmentation_factor=augmentation_factor
             )
             std = diagnostics["std_hours"]
+        elif self.regression_outputs_hours:
+            scale = self.reg_logit_scale.clamp(1.0, 100.0)
+            weights = F.softmax(similarities * scale, dim=1)
+            targets = self.regression_labels_to_output(support_labels)
+            if targets.ndim == 1:
+                targets = targets.unsqueeze(0).expand(query.size(0), -1)
+            prediction = (weights * targets).sum(dim=1)
+            variance = (weights * (targets - prediction.unsqueeze(1)).square()).sum(dim=1)
+            std = torch.sqrt(variance + 1e-8)
+            diagnostics = {"attention": weights, "std_hours": std}
         else:
             scale = self.reg_logit_scale.clamp(1.0, 100.0)
             weights = F.softmax(similarities * scale, dim=1)

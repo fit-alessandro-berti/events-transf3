@@ -1,0 +1,22 @@
+[
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.4164133738601824,
+      "128": 0.6805302262749071,
+      "16": 0.5528605200945627,
+      "2": 0.4396757852077001,
+      "32": 0.6161398176291794,
+      "4": 0.45720027017899356,
+      "64": 0.6817460317460318,
+      "8": 0.4651367781155016
+    },
+    "cases_to_90pct_max_budget": 32,
+    "experiment": "raw_hours_knn_ablation",
+    "log": "roadtraffic_10000",
+    "log2_case_budget_auc": 0.5373187147199305,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  }
+]

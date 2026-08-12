@@ -318,7 +318,7 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     batch_case_ids = np.array([t[2] for t in batch_tasks_raw], dtype=object)
 
     time_scale_factor =None
-    if task_type =="regression"and model .proto_head .regression_outputs_hours :
+    if task_type =="regression"and model .proto_head .regression_uses_time_transform_bank :
         time_scale_factor =model .proto_head .time_transform_bank .sample_augmentation_factor (
             next (model .parameters ()))
     all_embeddings = model._process_batch(

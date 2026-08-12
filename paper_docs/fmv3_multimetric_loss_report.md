@@ -65,6 +65,57 @@ head constructor, and `configs/fmv3/base.yaml`. Historical root configurations
 pin all four weights to zero, and resolved checkpoint configurations remain
 authoritative, so earlier two-term experiments stay reproducible.
 
+### Raw-hour no-rescaling ablation
+
+A simple inference-time ablation replaces the learned transform bank with
+`regression_mode: raw_hours_knn`. It keeps the same selected epoch-38 embeddings
+and prefix projection, converts the stored `sqrt(hours)` labels back to raw
+hours, then predicts a single softmax-weighted mean of neighbor remaining-time
+hours. It uses no learned target rescaling branches, no dynamic branch gate, and
+no support-only branch calibration. Loading this ablation from the selected
+checkpoint intentionally ignores the 40 superseded transform-bank tensors.
+
+The ablation is not better on the established five-log confirmation. It leaves
+classification exactly unchanged, but worsens all primary regression errors:
+
+| Head | MAE (h) | RMSE (h) | Median AE (h) | Normalized MAE |
+|---|---:|---:|---:|---:|
+| Selected learned-transform head | **1,109.409** | **1,659.620** | **744.362** | **0.843444** |
+| Raw-hour soft-kNN ablation | 1,188.114 | 1,692.908 | 852.999 | 0.994541 |
+| Raw minus selected | +78.705 | +33.288 | +108.636 | +0.151097 |
+
+Paired regression rows favor the selected head for MAE on 137/200 rows, RMSE
+on 106/200 rows, and median absolute error on 158/200 rows. The per-log MAE
+deltas are also nonnegative on every original log: billing +175.281 h,
+helpdesk +0.000 h, receipt +19.959 h, roadtraffic100traces +25.594 h, and
+sepsis +156.347 h.
+
+The separate Road Traffic 10,000-case check is mixed rather than dominant:
+classification again stays unchanged, raw-hour soft-kNN changes MAE by
++14.259 h, RMSE by -52.099 h, and median absolute error by +142.428 h. This
+suggests the raw average can soften some extreme errors on that one
+distribution, but it is not a replacement for the learned rescaling head.
+
+Reproduce with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/loss_multimetric_gate_aux_005 \
+  --checkpoint_epoch 38 \
+  --eval_config configs/fmv3/raw_hours_knn_ablation.yaml \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/raw_hours_knn/confirmations/raw_hours_knn_ablation_e38 \
+  --device cuda:0
+
+CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/loss_multimetric_gate_aux_005 \
+  --checkpoint_epoch 38 \
+  --eval_config configs/fmv3/raw_hours_knn_ablation.yaml \
+  --logs roadtraffic_10000 \
+  --output_dir evaluation_results/raw_hours_knn/confirmations/raw_hours_knn_ablation_e38_roadtraffic_10000 \
+  --device cuda:0
+```
+
 ## Controlled retraining protocol
 
 The promoted model and matched control both start from the byte-identical selected

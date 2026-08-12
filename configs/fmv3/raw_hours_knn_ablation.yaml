@@ -1,0 +1,4 @@
+extends: prefix_attention_confirmation_eval.yaml
+experiment_name: raw_hours_knn_ablation
+fmv3_head:
+  regression_mode: raw_hours_knn

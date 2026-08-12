@@ -877,7 +877,7 @@ def predict_regression(
     calibrated_weights = None
     calibration_diagnostics = {}
     if (
-        experts[0].proto_head.regression_outputs_hours
+        experts[0].proto_head.regression_uses_time_transform_bank
         and eval_cfg.get("regression_support_calibration", False)
         and support_case_ids is not None
     ):
@@ -902,8 +902,9 @@ def predict_regression(
         expert_predictions.append(prediction)
         if expert.proto_head.regression_outputs_hours:
             expert_stds.append(diagnostics["std_hours"])
-            expert_branch_predictions.append(diagnostics["branch_predictions_hours"])
-            expert_aggregation_weights.append(diagnostics["aggregation_weights"])
+            if "branch_predictions_hours" in diagnostics:
+                expert_branch_predictions.append(diagnostics["branch_predictions_hours"])
+                expert_aggregation_weights.append(diagnostics["aggregation_weights"])
     reference = F.normalize(embeddings_device[0], p=2, dim=1)
     reference_positions = torch.topk(
         reference[query_indices_device] @ reference[support_indices_device].t(), k_eff, dim=1

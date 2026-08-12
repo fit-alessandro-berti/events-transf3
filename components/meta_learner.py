@@ -75,7 +75,7 @@ class MetaLearner (nn .Module ):
         all_seqs =support_seqs +query_seqs
         if not all_seqs :return None ,None ,None
         time_scale_factor =None
-        if task_type =='regression'and self .proto_head .regression_outputs_hours :
+        if task_type =='regression'and self .proto_head .regression_uses_time_transform_bank :
             time_scale_factor =self .proto_head .time_transform_bank .sample_augmentation_factor (
             next (self .parameters ()))
         all_encoded =self ._process_batch (

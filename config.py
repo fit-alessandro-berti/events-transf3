@@ -104,7 +104,7 @@ CONFIG ={
 'abstain_label':-101,
 'abstain_bias':0.0,
 'abstain_slope':2.0,
-'regression_mode':'sqrt_knn', # sqrt_knn, learned_transform_ensemble
+'regression_mode':'sqrt_knn', # sqrt_knn, raw_hours_knn, learned_transform_ensemble
 'regression_num_transforms':8,
 'regression_transform_aggregation':'learned', # learned, mean
 'regression_power_min':0.05,

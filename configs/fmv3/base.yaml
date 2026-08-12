@@ -24,6 +24,10 @@ classification_label_smoothing: 0.05
 trainable_scope: all
 fmv3_head:
   regression_mode: sqrt_knn
+  # Regression modes:
+  # - sqrt_knn: historical soft-kNN in stored sqrt(hours) space
+  # - raw_hours_knn: soft-kNN directly averaged in raw hours, no transform bank
+  # - learned_transform_ensemble: learned monotone target branches in raw hours
   regression_num_transforms: 8
   regression_transform_aggregation: learned
   regression_power_min: 0.05
