@@ -333,15 +333,39 @@ def _structured_prediction(
     }
 
 
-def _fuse_structured_prediction(base, structured, class_universe, weight, tau, fusion):
+def _fuse_structured_prediction(
+    base,
+    structured,
+    class_universe,
+    weight,
+    tau,
+    fusion,
+    low_support_threshold=0,
+    low_support_weight=None,
+    low_support_tau=None,
+):
     base_probabilities = np.asarray(base["probabilities"], dtype=np.float64)
     structured_probabilities = np.asarray(structured["probabilities"], dtype=np.float64)
     base_probabilities /= base_probabilities.sum(axis=1, keepdims=True).clip(min=1e-12)
     structured_probabilities /= structured_probabilities.sum(axis=1, keepdims=True).clip(min=1e-12)
     support = np.asarray(structured["structured_context_support"], dtype=np.float64)
-    tau = max(float(tau), 0.0)
-    reliability = np.ones_like(support) if tau == 0.0 else support / (support + tau)
-    effective_weight = np.clip(float(weight) * reliability, 0.0, 1.0)[:, None]
+    support_counts = structured.get("support_counts") or base.get("support_counts") or {}
+    total_support = int(sum(int(count) for count in support_counts.values()))
+    selected_weight = float(weight)
+    selected_tau = float(tau)
+    low_support_threshold = int(low_support_threshold)
+    if 0 < low_support_threshold and total_support <= low_support_threshold:
+        if low_support_weight is not None:
+            selected_weight = float(low_support_weight)
+        if low_support_tau is not None:
+            selected_tau = float(low_support_tau)
+    selected_tau = max(selected_tau, 0.0)
+    reliability = (
+        np.ones_like(support)
+        if selected_tau == 0.0
+        else support / (support + selected_tau)
+    )
+    effective_weight = np.clip(selected_weight * reliability, 0.0, 1.0)[:, None]
     effective_weight[support <= 0] = 0.0
     if fusion == "mixture":
         probabilities = (
@@ -369,6 +393,9 @@ def _fuse_structured_prediction(base, structured, class_universe, weight, tau, f
             structured["structured_selected_order"], dtype=np.int64
         ).tolist()
     fused["structured_effective_weight"] = effective_weight[:, 0].tolist()
+    fused["structured_total_support"] = total_support
+    fused["structured_selected_weight"] = selected_weight
+    fused["structured_selected_tau"] = selected_tau
     return fused
 
 
@@ -713,6 +740,11 @@ def predict_classification(
             float(eval_cfg.get("structured_weight", 0.5)),
             float(eval_cfg.get("structured_tau", 2.0)),
             fusion,
+            low_support_threshold=int(
+                eval_cfg.get("structured_low_support_threshold", 0)
+            ),
+            low_support_weight=eval_cfg.get("structured_low_support_weight"),
+            low_support_tau=eval_cfg.get("structured_low_support_tau"),
         )
     if retrieval_mode == "dynamic_expanded_local":
         return _predict_classification_dynamic_batched(

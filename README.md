@@ -151,6 +151,14 @@ zero for an unseen context, leaving the foundation-model prediction unchanged.
 The primary full-protocol comparison is documented in
 `paper_docs/structured_fmv3_report.md`.
 
+For the current selected epoch-38 checkpoint, an additional low-support
+structured-memory overlay strengthens that suffix branch only when the support
+pool has at most eight prefixes. This improves the five-log full
+classification confirmation from balanced accuracy `0.447740` to `0.451092`
+and ordinary accuracy from `0.709221` to `0.717033`; the case-budget-1
+balanced-accuracy gain is `+0.020244`. Use
+`configs/fmv3/structured_low_support_confirmation_eval.yaml` to reproduce it.
+
 ### Promoted multi-metric state-aware model
 
 **Outcome:** the selected model is now the epoch-38 multi-metric continuation.

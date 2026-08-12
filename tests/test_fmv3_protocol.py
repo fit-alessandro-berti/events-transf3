@@ -152,6 +152,47 @@ class FMV3ProtocolTests(unittest.TestCase):
         np.testing.assert_allclose(fused["probabilities"][1], [0.5, 0.5])
         self.assertEqual(fused["structured_effective_weight"], [0.0, 0.5])
 
+    def test_structured_fusion_can_override_low_support_weight(self):
+        base = {
+            "y_true": [1],
+            "y_pred": [0],
+            "probabilities": np.asarray([[0.8, 0.2]]),
+            "confidences": [0.8],
+            "support_counts": {0: 2, 1: 1},
+        }
+        structured = {
+            "probabilities": np.asarray([[0.2, 0.8]]),
+            "structured_context_support": [1.0],
+            "support_counts": {0: 2, 1: 1},
+        }
+        base_fused = _fuse_structured_prediction(
+            base,
+            structured,
+            [0, 1],
+            weight=0.75,
+            tau=0.5,
+            fusion="mixture",
+            low_support_threshold=0,
+            low_support_weight=1.0,
+            low_support_tau=0.25,
+        )
+        low_support_fused = _fuse_structured_prediction(
+            base,
+            structured,
+            [0, 1],
+            weight=0.75,
+            tau=0.5,
+            fusion="mixture",
+            low_support_threshold=8,
+            low_support_weight=1.0,
+            low_support_tau=0.25,
+        )
+        self.assertAlmostEqual(base_fused["structured_effective_weight"][0], 0.5)
+        self.assertAlmostEqual(low_support_fused["structured_effective_weight"][0], 0.8)
+        self.assertEqual(low_support_fused["structured_total_support"], 3)
+        self.assertEqual(low_support_fused["structured_selected_weight"], 1.0)
+        self.assertEqual(low_support_fused["structured_selected_tau"], 0.25)
+
 
 if __name__ == "__main__":
     unittest.main()

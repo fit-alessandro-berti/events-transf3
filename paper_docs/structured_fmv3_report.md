@@ -46,6 +46,49 @@ memory covers **93.3%** of queries, chooses suffix order
 **2.55** on average, and receives mean effective mixture
 weight **0.606** after support shrinkage.
 
+### Low-support refinement on the current selected checkpoint
+
+A later small inference-only refinement targets the lowest-data regime without
+changing trained weights. The standard fusion remains
+`0.75 * n(s) / (n(s) + 0.5)`, but when the labeled support pool has at most
+eight prefixes it temporarily uses a stronger low-support setting:
+`1.0 * n(s) / (n(s) + 0.25)`. This threshold was chosen because, in the
+five-log screen, case-budget 1 contained only 2--7 support prefixes while
+case-budget 4 started at 9 support prefixes. The refinement is implemented by
+`structured_low_support_threshold`, `structured_low_support_weight`, and
+`structured_low_support_tau`; the default threshold is zero, so historical
+evaluations are unchanged unless the overlay enables it.
+
+On the current selected epoch-38 checkpoint, the full classification-only
+confirmation improves the primary classification metrics while leaving all
+medium/high-support rows identical:
+
+| Evaluation overlay | Balanced accuracy | Accuracy | Macro-F1 | NLL | ECE-10 |
+|---|---:|---:|---:|---:|---:|
+| Selected structured fusion | 0.447740 | 0.709221 | 0.419179 | **3.055258** | **0.170634** |
+| Low-support adaptive fusion | **0.451092** | **0.717033** | **0.422542** | 3.063743 | 0.184301 |
+| Adaptive minus selected | +0.003351 | +0.007812 | +0.003363 | +0.008485 | +0.013667 |
+
+The improvement is concentrated where intended. At case budget 1, balanced
+accuracy changes by **+0.020244**, ordinary accuracy by **+0.046329**, and
+macro-F1 by **+0.021149**. At case budget 2, the changes are **+0.006568**,
+**+0.016167**, and **+0.005754**. Rows at budgets 8 and above are exactly
+unchanged; one budget-4 support pool crossed the prefix threshold but did not
+change predictions. Calibration metrics worsen slightly, so this refinement is
+a decision-quality improvement for low support, not a calibration improvement.
+
+Reproduce with:
+
+```bash
+python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/loss_multimetric_gate_aux_005 \
+  --checkpoint_epoch 38 \
+  --eval_config configs/fmv3/structured_low_support_confirmation_eval.yaml \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/structured_tuning/confirmations/adaptive_low_support_w100_tau025_thr8 \
+  --set 'fmv3_evaluation.tasks=[classification]'
+```
+
 ## Classification means
 
 | variant                   |   balanced_accuracy |   accuracy |   macro_f1 |   zero_recall_fraction |    nll |   multiclass_brier |   ece_10 |   aurc |

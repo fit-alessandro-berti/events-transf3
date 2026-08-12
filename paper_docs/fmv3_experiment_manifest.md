@@ -63,6 +63,7 @@ The final end-to-end comparison is in
 | Original state-aware epoch-38 checkpoints | End-of-schedule candidates without the promoted loss | Rejected by development screen |
 | `loss_multimetric_gate_aux_005`, epoch 38 | Epoch-36 continuation with the multi-metric primary loss and 0.05 gate auxiliary | **Selected current checkpoint** |
 | `expert_confidence_heads`, epochs 39--40 | Confidence-only continuation from the selected checkpoint; learns per-expert aggregation logits for classification and regression | Full-confirmation ablation; not promoted |
+| `structured_low_support_*_eval` | Evaluation-only structured-memory schedule that increases suffix-memory fusion only when support has at most eight prefixes | Promoted low-support classification overlay |
 
 The selected independent-temporal predecessor completed epoch 34 and was
 intentionally stopped during epoch 35 when that experiment was closed. Its
@@ -84,11 +85,14 @@ Its promotion evidence, Road Traffic limitation, raw-hour no-rescaling
 ablation, and learned per-expert confidence ablation are in
 [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md); the
 architecture audit remains in
-[`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). Screen
+[`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). The
+low-support structured-memory refinement is documented in
+[`structured_fmv3_report.md`](structured_fmv3_report.md). Screen
 results live under `evaluation_results/prefix_attention/screens/` and
 `evaluation_results/loss_multimetric/screens/`; full results live under their
 corresponding `confirmations/` directories. The confidence-head ablation
-results live under `evaluation_results/expert_confidence/`.
+results live under `evaluation_results/expert_confidence/`; low-support
+structured-memory tuning lives under `evaluation_results/structured_tuning/`.
 
 `configs/fmv3/selected.yaml` is the stable configuration alias for the
 promoted checkpoint; it resolves to `loss_multimetric_gate_aux_005` with

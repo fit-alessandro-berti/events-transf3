@@ -1,0 +1,86 @@
+[
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.3301470588235294,
+      "128": 0.582313725490196,
+      "16": 0.45503393665158376,
+      "4": 0.3751131221719457,
+      "64": 0.5269766214177979
+    },
+    "cases_to_90pct_max_budget": 64,
+    "experiment": "prefix_attention_screen",
+    "log": "billing",
+    "log2_case_budget_auc": 0.43886613876319763,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_product",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.2847985347985348,
+      "128": 0.3553785103785104,
+      "16": 0.34255189255189256,
+      "4": 0.29753357753357756,
+      "64": 0.3507753357753357
+    },
+    "cases_to_90pct_max_budget": 16,
+    "experiment": "prefix_attention_screen",
+    "log": "helpdesk",
+    "log2_case_budget_auc": 0.324117390545962,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_product",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.15461722488038276,
+      "128": 0.5361562998405104,
+      "16": 0.4151993620414673,
+      "4": 0.21421850079744814,
+      "64": 0.4533492822966507
+    },
+    "cases_to_90pct_max_budget": 128,
+    "experiment": "prefix_attention_screen",
+    "log": "receipt",
+    "log2_case_budget_auc": 0.33736500341763503,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_product",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.5902777777777778,
+      "16": 0.8175505050505051,
+      "4": 0.7421085858585859,
+      "43": 0.8194444444444444
+    },
+    "cases_to_90pct_max_budget": 4,
+    "experiment": "prefix_attention_screen",
+    "log": "roadtraffic100traces",
+    "log2_case_budget_auc": 0.7481093787531773,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_product",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.19973621627153576,
+      "128": 0.5330527689016673,
+      "16": 0.46027967505815154,
+      "4": 0.3670066020399343,
+      "64": 0.4905326080498746
+    },
+    "cases_to_90pct_max_budget": 64,
+    "experiment": "prefix_attention_screen",
+    "log": "sepsis",
+    "log2_case_budget_auc": 0.4080905809990504,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_product",
+    "support_scenario": "natural"
+  }
+]

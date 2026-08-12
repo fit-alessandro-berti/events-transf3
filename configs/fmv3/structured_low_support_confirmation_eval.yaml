@@ -1,0 +1,6 @@
+extends: prefix_attention_confirmation_eval.yaml
+experiment_name: structured_low_support_confirmation
+fmv3_evaluation:
+  structured_low_support_threshold: 8
+  structured_low_support_weight: 1.0
+  structured_low_support_tau: 0.25
