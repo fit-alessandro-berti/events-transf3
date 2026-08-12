@@ -61,9 +61,11 @@ The final end-to-end comparison is in
 | `prefix_state_attention_joint`, epoch 35 | Prefix adapter plus both clock encoders and regression bank | Full-confirmation checkpoint candidate |
 | `prefix_state_attention_joint`, epoch 36 | Same joint scope after a second continuation epoch | Selected Stage-6 architecture; predecessor to promoted model |
 | Original state-aware epoch-38 checkpoints | End-of-schedule candidates without the promoted loss | Rejected by development screen |
-| `loss_multimetric_gate_aux_005`, epoch 38 | Epoch-36 continuation with the multi-metric primary loss and 0.05 gate auxiliary | **Selected current checkpoint** |
-| `expert_confidence_heads`, epochs 39--40 | Confidence-only continuation from the selected checkpoint; learns per-expert aggregation logits for classification and regression | Full-confirmation ablation; not promoted |
+| `loss_multimetric_gate_aux_005`, epoch 38 | Epoch-36 continuation with the multi-metric primary loss and 0.05 gate auxiliary | **Selected base checkpoint** |
+| `expert_confidence_heads`, epochs 39--40 | Confidence-only continuation from the selected checkpoint; learns per-expert aggregation logits for classification and regression | Symmetric two-head ablation rejected; regression-only endpoint promoted |
 | `structured_low_support_*_eval` | Evaluation-only structured-memory schedule that increases suffix-memory fusion only when support has at most eight prefixes | Promoted low-support classification overlay |
+| `regression_confidence_low_support_confirmation_eval` | Expert-confidence epoch-40 checkpoint with classification confidence disabled, regression confidence enabled, and low-support structured classification overlay | **Current best endpoint** |
+| `raw_prediction_regression_confidence_confirmation_eval` | Current endpoint with the learned remaining-time transform bank bypassed in favor of direct raw-hour soft-kNN prediction | Rejected; worsens MAE, RMSE, median AE, normalized MAE, and R² |
 
 The selected independent-temporal predecessor completed epoch 34 and was
 intentionally stopped during epoch 35 when that experiment was closed. Its
@@ -80,9 +82,11 @@ through epoch 38 without modifying the frozen Transformer or historical prefix
 path. Four variants were screened at epochs 35, 36, and 38; four informative
 checkpoints received the full paired confirmation. Joint epoch 36 became the
 Stage-6 architecture base. The promoted loss experiment then continued that
-exact checkpoint through epoch 38 and is now the selected repository model.
-Its promotion evidence, Road Traffic limitation, raw-hour no-rescaling
-ablation, and learned per-expert confidence ablation are in
+exact checkpoint through epoch 38 and is now the selected base model. A later
+endpoint uses the epoch-40 regression-confidence head while disabling the
+classification-confidence head. Its promotion evidence, Road Traffic
+limitation, raw-hour no-rescaling ablation, support-calibration mix sweep, and
+learned per-expert confidence ablations are in
 [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md); the
 architecture audit remains in
 [`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). The
@@ -93,10 +97,14 @@ results live under `evaluation_results/prefix_attention/screens/` and
 corresponding `confirmations/` directories. The confidence-head ablation
 results live under `evaluation_results/expert_confidence/`; low-support
 structured-memory tuning lives under `evaluation_results/structured_tuning/`.
+Raw no-rescaling regression ablations live under
+`evaluation_results/raw_hours_knn/confirmations/`.
 
 `configs/fmv3/selected.yaml` is the stable configuration alias for the
-promoted checkpoint; it resolves to `loss_multimetric_gate_aux_005` with
-`selected_checkpoint_epoch: 38`.
+promoted base checkpoint; it resolves to `loss_multimetric_gate_aux_005` with
+`selected_checkpoint_epoch: 38`. The current best endpoint uses
+`checkpoints/fmv3/expert_confidence_heads/model_epoch_40.pth` with
+`configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`.
 
 Historical manifest folders contain their resolved `training_config.yaml`,
 serialized loader artifacts, and final `model_epoch_*.pth`. Independent

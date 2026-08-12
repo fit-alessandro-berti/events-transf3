@@ -18,7 +18,7 @@ in [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md).
 
 ## Short version
 
-The final system is not the original `06_full_fmv3` model. It has five selected
+The final system is not the original `06_full_fmv3` model. It has six selected
 layers:
 
 1. **Corrected FM-v3 checkpoint:** retain FM-v2's reliable centered local
@@ -47,6 +47,11 @@ layers:
    MAE, and bias terms plus transform-gate supervision. This is the promoted
    checkpoint because it improves the established five-log benchmark; its
    worse mean/RMSE result on `roadtraffic_10000` remains a stated limitation.
+6. **Regression-only expert confidence endpoint:** continue only the tiny
+   expert-confidence heads through epoch 40, but deploy only the regression
+   confidence head. The learned classification-confidence head is disabled
+   because it slightly lowers decision metrics; the low-support structured
+   classifier remains the classification endpoint.
 
 The six-layer Transformer encoder and its four-expert mixture remain the frozen
 representation backbone. The structured transition memory remains
@@ -71,7 +76,7 @@ gives the two tasks different final prefix vectors.
 | Target gradients | None | None | None | None | None at adaptation time | None at adaptation time | None at adaptation time | None at adaptation time |
 | Remaining-time target rule | Fixed square-root neighbor regression | Same | Same | Same | Four learned monotone branches, inverted to raw hours | Same independent target bank | Same bank, jointly continued with prefix adapter | Same bank trained with promoted multi-metric loss and gate auxiliary |
 | Prefix timing inputs | Fixed `log1p` coordinates | Same | Same | Same | Fixed coordinates plus one shared two-clock regression adapter | Fixed coordinates plus separate start/previous banks active for both tasks | Same two clocks plus ordinal attention recency | Same |
-| Status | Authoritative baseline | Rejected combined design | Selected neural base | Selected structured classifier | Superseded temporal input design | Earlier predecessor | Architecture predecessor | **Selected current checkpoint** |
+| Status | Authoritative baseline | Rejected combined design | Selected neural base | Selected structured classifier | Superseded temporal input design | Earlier predecessor | Architecture predecessor | **Selected base checkpoint; current endpoint adds regression-only confidence** |
 
 ## Architecture at a glance
 
@@ -780,11 +785,13 @@ For the same case-disjoint target support/query split:
 3. Run all four learned target transforms, their neighbor-attention scales,
    and inverse maps to obtain branch predictions in hours.
 4. Produce the trained query-specific convex prediction in each expert and
-   average across experts.
+   aggregate across experts. The selected base checkpoint uses a uniform
+   expert average; the current endpoint uses the epoch-40 regression-confidence
+   logits as learned expert weights.
 5. On labeled support prefixes only, repeat retrieval with the predicted
    prefix itself excluded and estimate the target-log branch prior.
-6. Average each branch across experts, apply the support prior, and form the
-   calibrated prediction.
+6. Aggregate each branch across experts with the same expert weights, apply
+   the support prior, and form the calibrated prediction.
 7. Average the query-gated and support-calibrated predictions 50/50 and report
    raw hours.
 
@@ -885,6 +892,9 @@ The following remain useful ablations but are not part of the selected method:
 - the query gate alone, which protected RMSE but regressed MAE;
 - the support branch prior alone, which improved MAE but slightly regressed
   full-protocol RMSE;
+- direct raw-hour soft-kNN prediction without the learned remaining-time
+  transform bank, which worsened MAE, RMSE, median AE, normalized MAE, and R²
+  on the current endpoint confirmation;
 - a state-aware path with near-zero recency, which confirmed that the explicit
   last state drives much of the classification gain but was weaker overall;
 - prefix-only continuation without joint clock/target-bank updates;
@@ -916,6 +926,8 @@ being mistaken for the final architecture.
 | Stage-6 state-aware joint training configuration | [`configs/fmv3/prefix_state_attention_joint.yaml`](../configs/fmv3/prefix_state_attention_joint.yaml) |
 | **Canonical selected configuration** | [`configs/fmv3/selected.yaml`](../configs/fmv3/selected.yaml) |
 | Promoted experiment configuration | [`configs/fmv3/loss_multimetric_gate_aux_005.yaml`](../configs/fmv3/loss_multimetric_gate_aux_005.yaml) |
+| Current regression-confidence endpoint overlay | [`configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`](../configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml) |
+| Rejected raw-prediction regression ablation overlay | [`configs/fmv3/raw_prediction_regression_confidence_confirmation_eval.yaml`](../configs/fmv3/raw_prediction_regression_confidence_confirmation_eval.yaml) |
 | State-aware development overlay | [`configs/fmv3/prefix_attention_screen_eval.yaml`](../configs/fmv3/prefix_attention_screen_eval.yaml) |
 | State-aware confirmation overlay | [`configs/fmv3/prefix_attention_confirmation_eval.yaml`](../configs/fmv3/prefix_attention_confirmation_eval.yaml) |
 | Prefix compatibility, masking, task-gradient, and scope tests | [`tests/test_event_encoder.py`](../tests/test_event_encoder.py) |

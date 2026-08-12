@@ -2,24 +2,36 @@
 
 ## Decision
 
-**Promotion decision: select the epoch-38 multi-metric checkpoint as the
-current repository model.** The decision is based on its paired improvement on
-the established five-log benchmark: balanced accuracy, macro-F1, raw-hour MAE,
-RMSE, and median absolute error all improve over epoch 36. The separately
-evaluated 10,000-case Road Traffic log remains an explicit transfer limitation:
-its mean MAE and RMSE worsen even though classification is unchanged and median
-absolute error improves. Promotion does not erase or override that evidence.
+**Promotion decision: select the epoch-38 multi-metric checkpoint as the base
+repository model, and use the epoch-40 regression-confidence endpoint for the
+current best evaluation stack.** The base-checkpoint decision is based on its
+paired improvement on the established five-log benchmark: balanced accuracy,
+macro-F1, raw-hour MAE, RMSE, and median absolute error all improve over epoch
+36. The later endpoint keeps that classifier path, adds the promoted
+low-support structured-memory overlay for classification, and uses only the
+regression expert-confidence head from epoch 40. The separately evaluated
+10,000-case Road Traffic log remains an explicit transfer limitation: its mean
+MAE and RMSE worsen even though classification is unchanged and median absolute
+error improves. Promotion does not erase or override that evidence.
 
 The promoted artifact is
 `checkpoints/fmv3/loss_multimetric_gate_aux_005/model_epoch_38.pth`. New work
 should start from this checkpoint and its resolved training artifacts unless
 the experiment deliberately uses epoch 36 as an ablation control. The stable
-configuration entry point is `configs/fmv3/selected.yaml`.
+base configuration entry point is `configs/fmv3/selected.yaml`.
+
+The current best endpoint is
+`checkpoints/fmv3/expert_confidence_heads/model_epoch_40.pth` evaluated with
+`configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`. That
+overlay deliberately disables the learned classification-confidence head and
+keeps the learned regression-confidence head.
 
 This conclusion separates two claims:
 
 - **Verified repository-benchmark improvement:** yes, on the original five
-  evaluation logs and paired rows.
+  evaluation logs and paired rows; the endpoint improves the base selected
+  stack on balanced accuracy, accuracy, macro-F1, MAE, RMSE, median absolute
+  error, and R².
 - **Verified cross-log robustness:** not yet; mean and tail regression errors
   worsen on the later, much larger Road Traffic log.
 
@@ -68,27 +80,42 @@ authoritative, so earlier two-term experiments stay reproducible.
 ### Raw-hour no-rescaling ablation
 
 A simple inference-time ablation replaces the learned transform bank with
-`regression_mode: raw_hours_knn`. It keeps the same selected epoch-38 embeddings
-and prefix projection, converts the stored `sqrt(hours)` labels back to raw
-hours, then predicts a single softmax-weighted mean of neighbor remaining-time
-hours. It uses no learned target rescaling branches, no dynamic branch gate, and
-no support-only branch calibration. Loading this ablation from the selected
-checkpoint intentionally ignores the 40 superseded transform-bank tensors.
+`regression_mode: raw_hours_knn` / `raw_prediction`. It converts stored
+`sqrt(hours)` labels back to raw hours, then predicts a single
+similarity-weighted mean of neighbor remaining-time hours. It uses no learned
+target rescaling branches, no dynamic branch gate, and no support-only branch
+calibration.
 
-The ablation is not better on the established five-log confirmation. It leaves
-classification exactly unchanged, but worsens all primary regression errors:
+The ablation is not better on the established five-log confirmation. On the
+current endpoint checkpoint, `raw_prediction` keeps the low-support classifier
+overlay and learned regression expert-confidence aggregation, but bypasses the
+remaining-time transform bank. Loading this ablation intentionally ignores the
+unused transform-bank and disabled classification-confidence tensors. It leaves
+classification exactly unchanged and worsens every primary regression metric:
+
+| Head | MAE (h) | RMSE (h) | Median AE (h) | Normalized MAE | R² |
+|---|---:|---:|---:|---:|---:|
+| Current endpoint: learned transforms + regression confidence | **1,109.237** | **1,659.464** | **744.239** | **0.843233** | **-0.214383** |
+| Raw prediction + regression confidence | 1,188.004 | 1,692.760 | 852.759 | 0.994489 | -0.282032 |
+| Raw minus current endpoint | +78.767 | +33.296 | +108.520 | +0.151256 | -0.067648 |
+
+Paired regression rows favor the current endpoint for MAE on 137/200 rows,
+RMSE on 106/200 rows, median absolute error on 157/200 rows, and R² on
+106/200 rows. The degradation is not just an ultra-low-data effect:
+for budgets ≥4, raw prediction changes MAE/RMSE/median AE by
++100.336/+41.930/+139.247 h; for budgets ≥8, it changes them by
++93.461/+29.247/+128.063 h. Per-log MAE deltas are nonnegative on every
+original log: billing +175.423 h, helpdesk +0.000 h, receipt +19.983 h,
+roadtraffic100traces +25.569 h, and sepsis +156.495 h.
+
+The same conclusion already held when isolating the selected epoch-38 base
+checkpoint without the confidence continuation:
 
 | Head | MAE (h) | RMSE (h) | Median AE (h) | Normalized MAE |
 |---|---:|---:|---:|---:|
-| Selected learned-transform head | **1,109.409** | **1,659.620** | **744.362** | **0.843444** |
+| Selected epoch-38 learned-transform head | **1,109.409** | **1,659.620** | **744.362** | **0.843444** |
 | Raw-hour soft-kNN ablation | 1,188.114 | 1,692.908 | 852.999 | 0.994541 |
-| Raw minus selected | +78.705 | +33.288 | +108.636 | +0.151097 |
-
-Paired regression rows favor the selected head for MAE on 137/200 rows, RMSE
-on 106/200 rows, and median absolute error on 158/200 rows. The per-log MAE
-deltas are also nonnegative on every original log: billing +175.281 h,
-helpdesk +0.000 h, receipt +19.959 h, roadtraffic100traces +25.594 h, and
-sepsis +156.347 h.
+| Raw minus selected epoch-38 base | +78.705 | +33.288 | +108.636 | +0.151097 |
 
 The separate Road Traffic 10,000-case check is mixed rather than dominant:
 classification again stays unchanged, raw-hour soft-kNN changes MAE by
@@ -96,7 +123,19 @@ classification again stays unchanged, raw-hour soft-kNN changes MAE by
 suggests the raw average can soften some extreme errors on that one
 distribution, but it is not a replacement for the learned rescaling head.
 
-Reproduce with:
+Reproduce the current-endpoint raw-prediction ablation with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/expert_confidence_heads \
+  --checkpoint_epoch 40 \
+  --eval_config configs/fmv3/raw_prediction_regression_confidence_confirmation_eval.yaml \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/raw_hours_knn/confirmations/raw_prediction_regression_confidence_e40 \
+  --device cuda:0
+```
+
+Reproduce the earlier epoch-38 raw-hour ablation with:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
@@ -131,9 +170,9 @@ The run trains only these new heads from the selected epoch-38 checkpoint:
 `checkpoints/fmv3/expert_confidence_heads/`. The final epoch-40 checkpoint has
 1,032 trainable parameters in the confidence heads.
 
-The ablation is **not promoted**. It produces a very small regression gain, but
-slightly lowers the primary classification accuracy-style metrics on the full
-five-log confirmation:
+The symmetric two-head ablation is **not promoted**. It produces a very small
+regression gain, but slightly lowers the primary classification accuracy-style
+metrics on the full five-log confirmation:
 
 | Model | Balanced accuracy | Accuracy | Macro-F1 | NLL | ECE-10 | MAE (h) | RMSE (h) | Median AE (h) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -153,8 +192,57 @@ epoch-40 full-confirmation mean classification weights are
 
 The result should therefore be kept as an ablation rather than made the stable
 `selected.yaml` target. It suggests that expert-level calibration may help
-remaining-time aggregation marginally, but this formulation is too weak and
-too mixed to justify replacing the selected uniform expert aggregation.
+remaining-time aggregation marginally, but the classification-confidence half
+of this formulation is too mixed to justify replacing the selected uniform
+classification expert aggregation.
+
+#### Regression-only confidence endpoint
+
+A follow-up endpoint keeps the epoch-40 regression confidence head but disables
+the classification confidence head at load time. It is combined with the
+already promoted low-support structured-memory classifier. Loading prints
+`Ignored 16 checkpoint parameters not used by current config`, corresponding
+to the disabled classification-confidence tensors; the regression-confidence
+tensors remain active.
+
+This endpoint is a small Pareto improvement over the base selected stack on the
+original five-log confirmation:
+
+| Endpoint | Balanced accuracy | Accuracy | Macro-F1 | MAE (h) | RMSE (h) | Median AE (h) | R² |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Base selected epoch 38 | 0.447740 | 0.709221 | 0.419179 | 1,109.409 | 1,659.620 | 744.362 | -0.214691 |
+| Low-support structured + regression confidence | **0.451092** | **0.717033** | **0.422542** | **1,109.237** | **1,659.464** | **744.239** | **-0.214383** |
+| Endpoint minus base selected | +0.003351 | +0.007812 | +0.003363 | -0.172 | -0.156 | -0.124 | +0.000308 |
+
+The classification metrics are exactly identical to the selected low-support
+structured overlay because classification expert confidence is disabled. The
+regression rows keep the epoch-40 gains: MAE improves on 153/200 paired rows,
+RMSE and R² improve on 112/200 rows, and median absolute error improves on
+133/200 rows. In the support range now used for continued work, budget ≥4 rows
+change by MAE **-0.188 h**, RMSE **-0.170 h**, and R² **+0.000307**; budget ≥8
+rows change by MAE **-0.099 h**, RMSE **-0.063 h**, and R² **+0.000146**.
+
+Reproduce the endpoint with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/expert_confidence_heads \
+  --checkpoint_epoch 40 \
+  --eval_config configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/expert_confidence/confirmations/regression_confidence_low_support_e40 \
+  --device cuda:0
+```
+
+#### Support-calibration mix sweep
+
+The evaluation-time branch prior was also swept by changing
+`regression_calibration_mix`. Stronger support-only calibration improves
+MAE/median error but trades off RMSE and R², so it is not promoted. On the full
+confirmation, mix `0.75` changes MAE by **-6.969 h** but RMSE by **+2.948 h**
+and R² by **-0.005796**. Mix `1.0` changes MAE by **-10.945 h** but RMSE by
+**+8.294 h** and R² by **-0.014606**. Because the target includes R², the
+selected endpoint keeps the established `regression_calibration_mix: 0.5`.
 
 Reproduce with:
 

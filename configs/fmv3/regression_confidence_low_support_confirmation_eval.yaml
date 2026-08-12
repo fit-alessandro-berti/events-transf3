@@ -1,0 +1,18 @@
+# Current best evaluation endpoint for the expert-confidence epoch-40 checkpoint.
+#
+# Use with:
+#   --checkpoint_dir checkpoints/fmv3/expert_confidence_heads
+#   --checkpoint_epoch 40
+#
+# The regression confidence head is retained because it improves MAE, RMSE, and
+# R² together. The classification confidence head is deliberately disabled: the
+# low-support structured overlay already improves classification decisions, and
+# the learned classification confidence logits slightly reduce balanced
+# accuracy and macro-F1 on the full confirmation.
+extends: structured_low_support_confirmation_eval.yaml
+experiment_name: regression_confidence_low_support_confirmation
+fmv3_head:
+  classification_expert_confidence_enabled: false
+  regression_expert_confidence_enabled: true
+fmv3_evaluation:
+  expert_aggregation_diagnostics: true

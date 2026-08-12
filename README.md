@@ -167,14 +167,19 @@ epoch-36 checkpoint on balanced accuracy, macro-F1, MAE, and RMSE; ordinary
 accuracy has a small tradeoff. Higher is better for the first three columns;
 lower is better for MAE and RMSE.
 
-Canonical configuration: `configs/fmv3/selected.yaml`. Selected checkpoint:
-`checkpoints/fmv3/loss_multimetric_gate_aux_005/model_epoch_38.pth`.
+Canonical base configuration: `configs/fmv3/selected.yaml`. Selected base
+checkpoint:
+`checkpoints/fmv3/loss_multimetric_gate_aux_005/model_epoch_38.pth`. Current
+best endpoint:
+`checkpoints/fmv3/expert_confidence_heads/model_epoch_40.pth` evaluated with
+`configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`.
 
 | Model | Balanced accuracy | Accuracy | Macro-F1 | MAE (h) | RMSE (h) |
 |---|---:|---:|---:|---:|---:|
 | Previous state-aware model, epoch 36 | 0.447473 | **0.709352** | 0.418885 | 1,112.2914 | 1,660.6820 |
-| **Promoted multi-metric model, epoch 38** | **0.447740** | 0.709221 | **0.419179** | **1,109.4089** | **1,659.6200** |
-| Change | **+0.000268** | -0.000131 | **+0.000294** | **-2.8824** | **-1.0620** |
+| **Promoted multi-metric base, epoch 38** | **0.447740** | 0.709221 | **0.419179** | **1,109.4089** | **1,659.6200** |
+| Current endpoint: low-support structured + regression confidence | **0.451092** | **0.717033** | **0.422542** | **1,109.2369** | **1,659.4643** |
+| Endpoint change vs epoch-38 base | **+0.003351** | **+0.007812** | **+0.003363** | **-0.1721** | **-0.1557** |
 
 The current architecture keeps parameter-disjoint learned components for the
 two observable prefix clocks: elapsed time from case start and time since the
@@ -195,6 +200,9 @@ monotone target transforms and returns every branch to raw hours before
 aggregation. Its promoted primary objective combines MAE, RMSE, Huber,
 log-RMSE, relative-MAE, and bias control, plus transform-gate supervision.
 Reported MAE and RMSE remain raw-hour metrics—not square-root or log metrics.
+The direct raw-hour soft-kNN replacement was tested as a no-rescaling ablation
+and rejected because it worsens MAE, RMSE, median AE, normalized MAE, and R² on
+the current endpoint confirmation.
 
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.
@@ -214,7 +222,7 @@ and
 [`paper_docs/fmv3_time_transform_report.md`](paper_docs/fmv3_time_transform_report.md)
 records the superseded shared, regression-only temporal adapter.
 
-Reproduce the selected confirmation with:
+Reproduce the base selected confirmation with:
 
 ```bash
 python evaluate_fmv3.py \

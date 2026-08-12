@@ -1,0 +1,14 @@
+# Raw no-rescaling ablation for the current regression-confidence endpoint.
+#
+# Use with:
+#   --checkpoint_dir checkpoints/fmv3/expert_confidence_heads
+#   --checkpoint_epoch 40
+#
+# This keeps the current low-support classifier overlay and learned
+# per-expert regression confidence aggregation, but bypasses the learned
+# remaining-time transform bank. Stored sqrt(hours) labels are converted back
+# to hours and averaged directly by similarity-weighted soft-kNN.
+extends: regression_confidence_low_support_confirmation_eval.yaml
+experiment_name: raw_prediction_regression_confidence_confirmation
+fmv3_head:
+  regression_mode: raw_prediction
