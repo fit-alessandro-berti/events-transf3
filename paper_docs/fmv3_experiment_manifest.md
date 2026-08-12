@@ -64,6 +64,7 @@ The final end-to-end comparison is in
 | `loss_multimetric_gate_aux_005`, epoch 38 | Epoch-36 continuation with the multi-metric primary loss and 0.05 gate auxiliary | **Selected base checkpoint** |
 | `expert_confidence_heads`, epochs 39--40 | Confidence-only continuation from the selected checkpoint; learns per-expert aggregation logits for classification and regression | Symmetric two-head ablation rejected; regression-only endpoint promoted |
 | `structured_low_support_*_eval` | Evaluation-only structured-memory schedule that increases suffix-memory fusion only when support has at most eight prefixes | Promoted low-support classification overlay |
+| `structured_tuning/screens/endpoint_thr{16,32,64}_w100_tau025` | Current endpoint with the stronger structured suffix rule extended beyond the eight-prefix cutoff | Rejected; threshold extension lowers overall classification metrics |
 | `regression_confidence_low_support_confirmation_eval` | Expert-confidence epoch-40 checkpoint with classification confidence disabled, regression confidence enabled, and low-support structured classification overlay | **Current best endpoint** |
 | `raw_prediction_regression_confidence_confirmation_eval` | Current endpoint with the learned remaining-time transform bank bypassed in favor of direct raw-hour soft-kNN prediction | Rejected; worsens MAE, RMSE, median AE, normalized MAE, and R² |
 

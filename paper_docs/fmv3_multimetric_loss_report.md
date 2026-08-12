@@ -234,6 +234,19 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
   --device cuda:0
 ```
 
+#### Structured threshold extension screen
+
+The low-support structured classifier was also tested with stronger-rule
+thresholds above the promoted eight-prefix cutoff on the current endpoint. The
+screen used classification-only rows for budgets 1, 4, 8, 16, 32, 64, 128,
+plus eligible full-support rows. Thresholds 16, 32, and 64 all reduce the
+overall decision metrics versus the threshold-8 endpoint. The threshold-64
+variant has a tiny balanced-accuracy gain on budgets ≥8 (`+0.000741`), but it
+also loses accuracy (`-0.002168`), macro-F1 (`-0.002204`), and calibration.
+The endpoint therefore keeps the threshold-8 overlay. Full screen details and
+commands are in
+[`structured_fmv3_report.md`](structured_fmv3_report.md#threshold-extension-screen-on-the-current-endpoint).
+
 #### Support-calibration mix sweep
 
 The evaluation-time branch prior was also swept by changing

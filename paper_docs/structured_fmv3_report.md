@@ -77,6 +77,27 @@ unchanged; one budget-4 support pool crossed the prefix threshold but did not
 change predictions. Calibration metrics worsen slightly, so this refinement is
 a decision-quality improvement for low support, not a calibration improvement.
 
+### Threshold extension screen on the current endpoint
+
+Because subsequent work no longer optimizes only the ultra-small support
+regime, the stronger low-support rule was also screened on the current
+regression-confidence endpoint with thresholds 16, 32, and 64. The test used
+classification-only rows on the same five logs, support scenarios, and
+repetitions, with budgets 1, 4, 8, 16, 32, 64, 128, plus eligible full-support
+rows. It is not promoted.
+
+| Strong-rule threshold | Rows | Balanced accuracy Δ | Accuracy Δ | Macro-F1 Δ | NLL Δ | ECE-10 Δ | Brier Δ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 16 prefixes | 175 | -0.001026 | -0.002051 | -0.000824 | +0.007436 | +0.004425 | +0.003207 |
+| 32 prefixes | 175 | -0.002121 | -0.003546 | -0.002560 | +0.013937 | +0.007777 | +0.006329 |
+| 64 prefixes | 175 | -0.000714 | -0.004476 | -0.002714 | +0.025455 | +0.016212 | +0.012488 |
+
+Threshold 64 gives a very small balanced-accuracy lift when restricted to
+budgets ≥8 (`+0.000741`), but that comes with lower accuracy (`-0.002168`),
+lower macro-F1 (`-0.002204`), and worse NLL/ECE/Brier. The endpoint therefore
+keeps the threshold-8 rule: it captures the low-support decision gain without
+allowing structured suffix counts to perturb medium-support rows.
+
 Reproduce with:
 
 ```bash
@@ -88,6 +109,24 @@ python evaluate_fmv3.py \
   --output_dir evaluation_results/structured_tuning/confirmations/adaptive_low_support_w100_tau025_thr8 \
   --set 'fmv3_evaluation.tasks=[classification]'
 ```
+
+Reproduce the threshold-extension screens by changing the threshold override
+and output directory:
+
+```bash
+python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/expert_confidence_heads \
+  --checkpoint_epoch 40 \
+  --eval_config configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml \
+  --set 'fmv3_evaluation.tasks=[classification]' \
+  --set 'fmv3_evaluation.case_budgets=[1,4,8,16,32,64,128]' \
+  --set fmv3_evaluation.structured_low_support_threshold=64 \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/structured_tuning/screens/endpoint_thr64_w100_tau025
+```
+
+The committed screen artifacts also include the threshold-16 and threshold-32
+directories under `evaluation_results/structured_tuning/screens/`.
 
 ## Classification means
 

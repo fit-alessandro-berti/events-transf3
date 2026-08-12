@@ -158,6 +158,9 @@ classification confirmation from balanced accuracy `0.447740` to `0.451092`
 and ordinary accuracy from `0.709221` to `0.717033`; the case-budget-1
 balanced-accuracy gain is `+0.020244`. Use
 `configs/fmv3/structured_low_support_confirmation_eval.yaml` to reproduce it.
+Extending the stronger suffix rule to thresholds 16, 32, or 64 was screened on
+the current endpoint and rejected because it lowers overall classification
+metrics.
 
 ### Promoted multi-metric state-aware model
 

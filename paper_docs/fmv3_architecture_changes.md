@@ -880,6 +880,9 @@ The following remain useful ablations but are not part of the selected method:
 - product/log-linear FM-structured fusion;
 - resource-conditioned structured keys;
 - elapsed-time-bucket structured keys;
+- extending the stronger low-support structured suffix rule beyond eight
+  support prefixes, which lowers overall classification metrics on the current
+  endpoint;
 - a structured remaining-time median branch, which gave only a small aggregate
   screen improvement and regressed Billing;
 - the historical shared two-clock, regression-only input adapter, now retained
