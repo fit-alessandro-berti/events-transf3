@@ -211,6 +211,8 @@ def _regression_neighbor_contrastive(
         z = F.normalize(z.float(), p=2, dim=1)
         y = y.float().view(-1)
         batch_size = z.size(0)
+        if batch_size == 0:
+            return None
 
         logits = (z @ z.t()) / temp
 
@@ -221,19 +223,24 @@ def _regression_neighbor_contrastive(
 
         log_prob = F.log_softmax(logits, dim=1)
 
-        losses = []
-        for i in range(batch_size):
-            candidates = (~ignore[i]).nonzero(as_tuple=False).squeeze(1)
-            if candidates.numel() == 0:
-                continue
-            diffs = (y[candidates] - y[i]).abs()
-            k_eff = min(pos_k, int(candidates.numel()))
-            positives = candidates[torch.topk(diffs, k_eff, largest=False).indices]
-            losses.append(-log_prob[i, positives].mean())
-
-        if not losses:
+        # Vectorized nearest-target positives: |y_i - y_j| with ignored pairs
+        # pushed to +inf so they never win the top-k over real candidates.
+        diffs = (y.view(-1, 1) - y.view(1, -1)).abs()
+        diffs = diffs.masked_fill(ignore, float("inf"))
+        valid_counts = (~ignore).sum(dim=1)
+        valid = valid_counts > 0
+        if not valid.any():
             return None
-        return torch.stack(losses).mean()
+        k_cap = min(pos_k, batch_size - 1)
+        if k_cap <= 0:
+            return None
+        positive_idx = torch.topk(diffs, k_cap, dim=1, largest=False).indices
+        pos_diffs = diffs.gather(1, positive_idx)
+        pos_log_prob = log_prob.gather(1, positive_idx)
+        pos_valid = torch.isfinite(pos_diffs)
+        pos_counts = pos_valid.sum(dim=1).clamp_min(1).float()
+        loss_per = -(pos_log_prob * pos_valid.float()).sum(dim=1) / pos_counts
+        return loss_per[valid].mean()
 
 
 def _nca_knn_loss(
@@ -368,20 +375,91 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
 
     total_loss_for_batch = 0.0
     queries_processed = 0
-    regression_predictions = []
-    regression_targets = []
+    use_regression_gate_aux = (
+        model.proto_head.regression_outputs_hours
+        and model.proto_head.regression_gate_aux_weight > 0
+    )
 
-    for i in range(retrieval_batch_size):
-        query_label = batch_labels[i]
-        query_case_id = batch_case_ids[i]
-        query_embedding = all_embeddings[i : i + 1]
-
+    if task_type == "regression":
+        # Self-excluded kNN once for the batch, then head forward in groups of
+        # equal neighborhood size (same math as the old per-query loop).
+        labels_float = torch.as_tensor(batch_labels, dtype=torch.float32, device=device)
+        if case_ids_int is None:
+            case_ids_int = _encode_case_ids_to_int(batch_case_ids).to(device)
         with torch.no_grad():
-            query_embedding_norm = all_embeddings_norm_detached[i : i + 1]
-            same_case_indices = np.where(batch_case_ids == query_case_id)[0]
-            mask_tensor = torch.from_numpy(same_case_indices).to(device)
+            sims = all_embeddings_norm_detached @ all_embeddings_norm_detached.t()
+            same_case = case_ids_int.view(-1, 1).eq(case_ids_int.view(1, -1))
+            sims = sims.masked_fill(same_case, float("-inf"))
+            valid_counts = torch.isfinite(sims).sum(dim=1)
 
-        if task_type == "classification":
+        regression_predictions = []
+        regression_targets = []
+        regression_branch_predictions = []
+        regression_aggregation_weights = []
+        # Group queries by k_eff so we preserve per-query neighborhood size
+        # while still running the expensive head in batched mode.
+        groups = defaultdict(list)
+        for query_i in range(retrieval_batch_size):
+            n_valid = int(valid_counts[query_i].item())
+            if n_valid <= 0:
+                continue
+            k_eff = min(retrieval_k_train, n_valid)
+            groups[k_eff].append(query_i)
+
+        for k_eff, query_ids in groups.items():
+            query_idx = torch.as_tensor(query_ids, dtype=torch.long, device=device)
+            with torch.no_grad():
+                neighbors = torch.topk(sims[query_idx], k_eff, dim=1).indices
+            support_embeddings = all_embeddings[neighbors]
+            support_labels_tensor = labels_float[neighbors]
+            query_embeddings = all_embeddings[query_idx]
+            if use_regression_gate_aux:
+                prediction, _, diagnostics = model.proto_head.forward_regression_batched(
+                    support_embeddings,
+                    support_labels_tensor,
+                    query_embeddings,
+                    return_diagnostics=True,
+                    augmentation_factor=time_scale_factor,
+                )
+                regression_branch_predictions.append(
+                    diagnostics["branch_predictions_hours"]
+                )
+                regression_aggregation_weights.append(
+                    diagnostics["aggregation_weights"]
+                )
+            else:
+                prediction, _ = model.proto_head.forward_regression_batched(
+                    support_embeddings,
+                    support_labels_tensor,
+                    query_embeddings,
+                    augmentation_factor=time_scale_factor,
+                )
+            regression_predictions.append(prediction.reshape(-1))
+            regression_targets.append(labels_float[query_idx])
+
+        if regression_predictions:
+            total_loss_for_batch = model.proto_head.regression_loss(
+                torch.cat(regression_predictions, dim=0),
+                torch.cat(regression_targets, dim=0),
+                branch_predictions=(
+                    torch.cat(regression_branch_predictions, dim=1)
+                    if regression_branch_predictions else None
+                ),
+                aggregation_weights=(
+                    torch.cat(regression_aggregation_weights, dim=1)
+                    if regression_aggregation_weights else None
+                ),
+            )
+            queries_processed = 1
+    else:
+        for i in range(retrieval_batch_size):
+            query_label = batch_labels[i]
+            query_case_id = batch_case_ids[i]
+            query_embedding = all_embeddings[i : i + 1]
+
+            with torch.no_grad():
+                query_embedding_norm = all_embeddings_norm_detached[i : i + 1]
+
             if int(query_label) == -100:
                 continue
             with torch.no_grad():
@@ -457,40 +535,15 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             if mapped_label.item() == -100:
                 continue
 
-            loss = F.cross_entropy(logits, mapped_label, label_smoothing=0.05)
-
-        else:
-            neighbor_indices = find_knn_indices(
-                query_embedding_norm,
-                all_embeddings_norm_detached,
-                k=retrieval_k_train,
-                indices_to_mask=mask_tensor,
+            smoothing = min(
+                max(float(config.get("classification_label_smoothing", 0.05)), 0.0),
+                1.0,
             )
-            if neighbor_indices.numel() == 0:
-                continue
+            loss = F.cross_entropy(logits, mapped_label, label_smoothing=smoothing)
 
-            support_embeddings = all_embeddings[neighbor_indices]
-            support_labels_list = batch_labels[neighbor_indices.cpu().numpy()]
-            support_labels_tensor = torch.as_tensor(support_labels_list, dtype=torch.float32, device=device)
-            query_label_tensor = torch.as_tensor([query_label], dtype=torch.float32, device=device)
-
-            prediction, _ = model.proto_head.forward_regression(
-                support_embeddings, support_labels_tensor, query_embedding,
-                augmentation_factor=time_scale_factor,
-            )
-            regression_predictions.append(prediction.reshape(-1)[0])
-            regression_targets.append(query_label_tensor.reshape(-1)[0])
-            loss = None
-
-        if loss is not None and not torch.isnan(loss):
-            total_loss_for_batch = total_loss_for_batch + loss
-            queries_processed += 1
-
-    if task_type == "regression" and regression_predictions:
-        total_loss_for_batch = model.proto_head.regression_loss(
-            torch.stack(regression_predictions), torch.stack(regression_targets)
-        )
-        queries_processed = 1
+            if loss is not None and not torch.isnan(loss):
+                total_loss_for_batch = total_loss_for_batch + loss
+                queries_processed += 1
 
     loss_out = None
     if queries_processed > 0:

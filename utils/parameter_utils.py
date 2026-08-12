@@ -8,6 +8,7 @@ def configure_trainable_scope(model, scope):
             parameter.requires_grad_(True)
     elif selected in {
         "time_transform",
+        "regression_gate",
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",
@@ -18,6 +19,11 @@ def configure_trainable_scope(model, scope):
                 allowed = (
                     "proto_head.time_transform_bank." in name
                     or "embedder.time_input_adapter." in name
+                )
+            elif selected == "regression_gate":
+                allowed = (
+                    "proto_head.time_transform_bank.dynamic_gate." in name
+                    or name.endswith("proto_head.time_transform_bank.aggregation_logits")
                 )
             elif selected == "temporal_joint":
                 allowed = (
@@ -39,6 +45,7 @@ def configure_trainable_scope(model, scope):
     trainable = [name for name, parameter in model.named_parameters() if parameter.requires_grad]
     constrained = {
         "time_transform",
+        "regression_gate",
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",

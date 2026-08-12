@@ -20,6 +20,7 @@ retrieval_contrastive_weight: 0.25
 retrieval_knn_aux_weight: 0.1
 proto_head_lr_mult_after_warmup: 1.0
 classification_task_probability: 0.50
+classification_label_smoothing: 0.05
 trainable_scope: all
 fmv3_head:
   regression_mode: sqrt_knn
@@ -62,6 +63,12 @@ fmv3_head:
   prefix_attention_initial_recency: 0.25
   regression_mae_weight: 0.5
   regression_rmse_weight: 0.5
+  # Defaults preserve historical loss behavior. Lower scale power partially
+  # restores raw-hour weighting; gate supervision is opt-in.
+  regression_loss_scale_power: 1.0
+  regression_loss_reference_hours: 100.0
+  regression_gate_aux_weight: 0.0
+  regression_gate_target_temperature: 0.1
 fmv3_training:
   episode_mix:
     balanced: 0.20

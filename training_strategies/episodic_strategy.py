@@ -27,10 +27,24 @@ def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_
     if predictions is None :
         return None ,progress_bar_task
     if task_type =='classification':
-        loss =F .cross_entropy (predictions ,true_labels ,ignore_index =-100 ,label_smoothing =0.05 )
+        smoothing =min (max (float (config .get ('classification_label_smoothing',0.05 )),0.0 ),1.0 )
+        loss =F .cross_entropy (predictions ,true_labels ,ignore_index =-100 ,label_smoothing =smoothing )
     else :
+        branch_predictions =None
+        aggregation_weights =None
+        diagnostics =getattr (model ,'last_regression_diagnostics',None )
+        if (
+        diagnostics is not None
+        and model .proto_head .regression_outputs_hours
+        and model .proto_head .regression_gate_aux_weight >0
+        ):
+            branch_predictions =diagnostics .get ('branch_predictions_hours')
+            aggregation_weights =diagnostics .get ('aggregation_weights')
         loss =model .proto_head .regression_loss (
         predictions .squeeze (),
-        true_labels ,labels_in_output_space =True
+        true_labels ,
+        labels_in_output_space =True ,
+        branch_predictions =branch_predictions ,
+        aggregation_weights =aggregation_weights ,
         )
     return loss ,progress_bar_task

@@ -1,0 +1,7 @@
+extends: prefix_state_attention_joint.yaml
+experiment_name: loss_partial_scale_075
+epochs: 38
+fmv3_head:
+  regression_loss_scale_power: 0.75
+  regression_loss_reference_hours: 100.0
+

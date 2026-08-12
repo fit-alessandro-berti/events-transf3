@@ -543,6 +543,63 @@ predictions and targets after inversion in raw hours. Neither metric is
 computed in sqrt space or log space. The only square operation is the one-time
 conversion of legacy stored labels back to hours.
 
+### 4.6 Training losses and label spaces
+
+Training optimizes a different object than the reported evaluation metrics, but
+it stays in the same raw-hour unit for learned remaining-time heads.
+
+**Classification (episodic and retrieval).** Cross-entropy on the head logits
+with configurable `classification_label_smoothing` (default `0.05`). Episodic
+steps pass `ignore_index=-100` for queries whose label is absent from the
+support prototype set. Retrieval maps each query onto the episode's prototype
+classes first and skips unmapped labels.
+
+**Remaining-time primary loss (`learned_transform_ensemble`).** A convex
+combination of scale-normalized MAE and RMSE in raw hours:
+
+\[
+\mathcal{L}_{\mathrm{reg}}
+=
+\frac{w_{\mathrm{mae}}\mathrm{MAE}(e/s)+w_{\mathrm{rmse}}\mathrm{RMSE}(e/s)}
+{w_{\mathrm{mae}}+w_{\mathrm{rmse}}},
+\quad
+s = m^{p}\,s_0^{1-p},
+\]
+
+where \(e=\hat y-y\) is the raw-hour residual, \(m\) is the batch median of
+targets (floored at 1 hour), \(p=\) `regression_loss_scale_power` (default
+`1.0`, i.e. pure median scaling), and \(s_0=\)
+`regression_loss_reference_hours` (default `100`). Setting \(p=0\) recovers a
+fixed reference-hour normalizer. Predictions must be in hours; labels are
+either stored `sqrt(hours)` (default, squared on entry) or already-hours when
+`labels_in_output_space=True` (episodic path after `MetaLearner` conversion).
+The primary reduction runs in float32 even under AMP. Legacy `sqrt_knn` still
+uses Huber loss in the stored sqrt unit.
+
+**Optional transform-gate auxiliary.** When
+`regression_gate_aux_weight > 0`, a soft cross-entropy teaches the dynamic
+aggregation weights to put mass on the branch with lowest detached raw-hour
+error. Soft targets use temperature
+`regression_gate_target_temperature` scaled by the per-query mean branch error
+(floored at `1e-4` hours so sub-hour logs still get peaked targets). Branch
+predictions are detached so the aux term cannot move branch outputs merely to
+make selection easier; the primary MAE/RMSE remains authoritative for the
+transform parameters. Both retrieval and episodic strategies attach this term
+when diagnostics are available.
+
+**Retrieval auxiliaries (classification/regression embedding space).** Optional
+supervised contrastive (`retrieval_contrastive_weight`; same-label different-case
+positives for classification, nearest-target positives for regression),
+NCA-style same-label mass (`retrieval_knn_aux_weight`), and VICReg-style
+variance/covariance regularizers (`retrieval_var_weight` /
+`retrieval_cov_weight`). These operate on the projection head and are computed
+in float32 with same-case pairs removed from the denominator.
+
+**Scale augmentation consistency.** One log-uniform factor shared by the
+temporal input path and the remaining-time bank multiplies clocks and support
+targets; predictions are divided by the same factor before the loss, so the
+optimized unit remains original hours.
+
 ## Stage 5: independent temporal inputs shared by both tasks
 
 The Stage-5 architecture keeps the learned regression target bank from Stage

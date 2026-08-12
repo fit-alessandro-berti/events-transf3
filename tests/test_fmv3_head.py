@@ -198,7 +198,10 @@ class FMV3HeadTests(unittest.TestCase):
             diagnostics["aggregation_weights"].sum(dim=0), torch.ones(2)
         )
 
-        loss = head.regression_loss(predictions, torch.tensor([2.0, 80.0]))
+        # Targets are stored sqrt(hours); default conversion squares them to hours.
+        loss = head.regression_loss(
+            predictions, torch.sqrt(torch.tensor([2.0, 80.0]))
+        )
         loss.backward()
         bank = head.time_transform_bank
         for parameter in (
@@ -249,10 +252,307 @@ class FMV3HeadTests(unittest.TestCase):
         torch.testing.assert_close(
             diagnostics["aggregation_weights"].sum(dim=0), torch.ones(2)
         )
-        head.regression_loss(predictions, torch.tensor([2.0, 80.0])).backward()
+        head.regression_loss(
+            predictions, torch.sqrt(torch.tensor([2.0, 80.0]))
+        ).backward()
         self.assertTrue(any(
             parameter.grad is not None
             for parameter in head.time_transform_bank.dynamic_gate.parameters()
+        ))
+
+    def test_regression_gate_auxiliary_prefers_the_best_branch_per_query(self):
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=3,
+            regression_gate_aux_weight=0.1,
+            regression_gate_target_temperature=0.1,
+        )
+        branch_predictions = torch.tensor(
+            [[10.0, 80.0], [40.0, 20.0], [100.0, 100.0]],
+            requires_grad=True,
+        )
+        targets = torch.tensor([10.0, 20.0])
+        aligned_logits = torch.tensor(
+            [[5.0, -5.0], [-5.0, 5.0], [-5.0, -5.0]],
+            requires_grad=True,
+        )
+        misaligned_logits = -aligned_logits.detach()
+        aligned = head.regression_gate_auxiliary_loss(
+            branch_predictions,
+            torch.softmax(aligned_logits, dim=0),
+            targets,
+        )
+        misaligned = head.regression_gate_auxiliary_loss(
+            branch_predictions,
+            torch.softmax(misaligned_logits, dim=0),
+            targets,
+        )
+        self.assertLess(float(aligned.detach()), float(misaligned.detach()))
+        aligned.backward()
+        self.assertIsNotNone(aligned_logits.grad)
+        self.assertGreater(float(aligned_logits.grad.abs().sum()), 0.0)
+        self.assertIsNone(branch_predictions.grad)
+
+    def test_regression_loss_scale_power_preserves_historical_default(self):
+        labels = torch.sqrt(torch.tensor([10.0, 100.0]))
+        predictions = torch.tensor([20.0, 110.0])
+        historical = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=0.5,
+            regression_rmse_weight=0.5,
+        )
+        fixed_reference = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=0.5,
+            regression_rmse_weight=0.5,
+            regression_loss_scale_power=0.0,
+            regression_loss_reference_hours=100.0,
+        )
+        self.assertAlmostEqual(
+            float(historical.regression_loss(predictions, labels)), 1.0, places=5
+        )
+        self.assertAlmostEqual(
+            float(fixed_reference.regression_loss(predictions, labels)), 0.1, places=5
+        )
+
+    def test_regression_loss_rejects_zero_metric_weights(self):
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            PrototypicalHead(
+                regression_mode="learned_transform_ensemble",
+                regression_mae_weight=0.0,
+                regression_rmse_weight=0.0,
+            )
+
+    def test_regression_loss_respects_label_space_flag(self):
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=1.0,
+            regression_rmse_weight=0.0,
+            regression_loss_scale_power=1.0,
+        )
+        predictions = torch.tensor([20.0, 110.0])
+        hours = torch.tensor([10.0, 100.0])
+        sqrt_labels = torch.sqrt(hours)
+        from_sqrt = float(head.regression_loss(predictions, sqrt_labels))
+        from_hours = float(
+            head.regression_loss(
+                predictions, hours, labels_in_output_space=True
+            )
+        )
+        self.assertAlmostEqual(from_sqrt, from_hours, places=5)
+        # Passing already-hours labels without the flag would square them again.
+        wrongly_squared = float(head.regression_loss(predictions, hours))
+        self.assertNotAlmostEqual(from_hours, wrongly_squared, places=3)
+
+    def test_regression_loss_gate_aux_grads_flow_to_gate_not_detached_branches(self):
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=3,
+            regression_transform_aggregation="dynamic",
+            regression_gate_aux_weight=0.2,
+            regression_scale_augmentation=False,
+        )
+        support = torch.tensor(
+            [[1.0, 0.0], [0.8, 0.2], [0.0, 1.0], [-0.5, 0.5]],
+            dtype=torch.float32,
+        )
+        labels = torch.sqrt(torch.tensor([1.0, 4.0, 25.0, 100.0]))
+        query = torch.tensor([[0.9, 0.1], [0.1, 0.9]])
+        predictions, _, diagnostics = head.forward_regression(
+            support, labels, query, return_diagnostics=True
+        )
+        # Hour targets near the predictions keep the primary term finite.
+        targets_hours = predictions.detach() + torch.tensor([1.0, -3.0])
+        loss = head.regression_loss(
+            predictions,
+            targets_hours,
+            labels_in_output_space=True,
+            branch_predictions=diagnostics["branch_predictions_hours"],
+            aggregation_weights=diagnostics["aggregation_weights"],
+        )
+        self.assertTrue(torch.isfinite(loss))
+        loss.backward()
+        gate_grads = [
+            parameter.grad
+            for parameter in head.time_transform_bank.dynamic_gate.parameters()
+            if parameter.grad is not None
+        ]
+        self.assertTrue(gate_grads)
+        self.assertTrue(all(torch.isfinite(g).all() for g in gate_grads))
+        self.assertIsNotNone(head.time_transform_bank.aggregation_logits.grad)
+        self.assertGreater(
+            float(head.time_transform_bank.aggregation_logits.grad.abs().sum()), 0.0
+        )
+
+    def test_regression_gate_aux_stays_peaked_on_short_horizon_errors(self):
+        """Sub-hour branch errors must not be flattened by a 1-hour error floor."""
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=3,
+            regression_gate_aux_weight=1.0,
+            regression_gate_target_temperature=0.1,
+        )
+        # Three branches; branch 0 is clearly best on a 0.1h scale.
+        branch_predictions = torch.tensor(
+            [[0.10, 0.20], [0.40, 0.50], [0.80, 0.90]],
+            dtype=torch.float32,
+        )
+        targets = torch.tensor([0.10, 0.20])
+        aligned = torch.softmax(
+            torch.tensor([[5.0, 5.0], [-5.0, -5.0], [-5.0, -5.0]]), dim=0
+        )
+        misaligned = torch.softmax(
+            torch.tensor([[-5.0, -5.0], [5.0, 5.0], [-5.0, -5.0]]), dim=0
+        )
+        aligned_loss = float(
+            head.regression_gate_auxiliary_loss(branch_predictions, aligned, targets)
+        )
+        misaligned_loss = float(
+            head.regression_gate_auxiliary_loss(
+                branch_predictions, misaligned, targets
+            )
+        )
+        self.assertLess(aligned_loss, misaligned_loss)
+        # Soft targets should put majority mass on the best branch.
+        errors = (branch_predictions - targets.view(1, -1)).abs()
+        scale = errors.mean(dim=0, keepdim=True).clamp_min(1e-4)
+        soft = torch.softmax(
+            -errors / (scale * head.regression_gate_target_temperature), dim=0
+        )
+        self.assertGreater(float(soft[0].min()), 0.5)
+
+    def test_legacy_huber_regression_loss_finite(self):
+        head = PrototypicalHead(regression_mode="sqrt_knn")
+        predictions = torch.tensor([1.5, 2.5], requires_grad=True)
+        labels = torch.tensor([1.0, 3.0])
+        loss = head.regression_loss(predictions, labels)
+        self.assertTrue(torch.isfinite(loss))
+        loss.backward()
+        self.assertIsNotNone(predictions.grad)
+        self.assertTrue(torch.isfinite(predictions.grad).all())
+
+    def test_retrieval_contrastive_helpers_finite_and_grad(self):
+        from training_strategies.retrieval_strategy import (
+            _covariance_loss,
+            _nca_knn_loss,
+            _regression_neighbor_contrastive,
+            _supcon_loss,
+            _variance_loss,
+        )
+
+        torch.manual_seed(0)
+        z = torch.randn(12, 8, requires_grad=True)
+        labels = torch.tensor([0, 0, 1, 1, 2, 2, 0, 1, 2, 0, 1, 2])
+        cases = torch.arange(12)
+        # Distinct cases so same-label pairs remain valid positives.
+        sc = _supcon_loss(z, labels, cases, temperature=0.07)
+        self.assertIsNotNone(sc)
+        self.assertTrue(torch.isfinite(sc))
+        sc.backward(retain_graph=True)
+        self.assertIsNotNone(z.grad)
+        self.assertGreater(float(z.grad.abs().sum()), 0.0)
+
+        z.grad = None
+        nca = _nca_knn_loss(z, labels, cases, temperature=0.07)
+        self.assertIsNotNone(nca)
+        self.assertTrue(torch.isfinite(nca))
+        nca.backward(retain_graph=True)
+        self.assertGreater(float(z.grad.abs().sum()), 0.0)
+
+        z.grad = None
+        y = torch.linspace(0.0, 5.0, 12)
+        reg_c = _regression_neighbor_contrastive(
+            z, y, cases, temperature=0.07, pos_k=2
+        )
+        self.assertIsNotNone(reg_c)
+        self.assertTrue(torch.isfinite(reg_c))
+        reg_c.backward()
+        self.assertGreater(float(z.grad.abs().sum()), 0.0)
+
+        z_det = z.detach()
+        self.assertTrue(torch.isfinite(_variance_loss(z_det)))
+        self.assertTrue(torch.isfinite(_covariance_loss(z_det)))
+
+    def test_vectorized_regression_contrastive_matches_loop_reference(self):
+        """Guard the vectorized neighbor-contrastive against a direct loop oracle.
+
+        Target values are uniquely spaced so nearest-k ties cannot diverge
+        between subset-topk and full-matrix topk.
+        """
+        from training_strategies.retrieval_strategy import (
+            _regression_neighbor_contrastive,
+        )
+
+        torch.manual_seed(3)
+        z = torch.nn.functional.normalize(torch.randn(10, 6), dim=-1)
+        # Random targets avoid equal-distance ties that make top-k index choice
+        # implementation-defined across subset vs full-matrix selection.
+        y = torch.randn(10) * 10.0
+        cases = torch.tensor([0, 1, 0, 2, 3, 4, 5, 1, 6, 7])
+        vectorized = _regression_neighbor_contrastive(z, y, cases, pos_k=2)
+
+        # Independent loop reference (same definition as the original helper).
+        z_n = torch.nn.functional.normalize(z.float(), dim=1)
+        logits = (z_n @ z_n.t()) / 0.07
+        ignore = torch.eye(10, dtype=torch.bool) | cases.view(-1, 1).eq(cases.view(1, -1))
+        logits = logits.masked_fill(ignore, -1e4)
+        log_prob = torch.nn.functional.log_softmax(logits, dim=1)
+        losses = []
+        for i in range(10):
+            candidates = (~ignore[i]).nonzero(as_tuple=False).squeeze(1)
+            if candidates.numel() == 0:
+                continue
+            diffs = (y[candidates] - y[i]).abs()
+            k_eff = min(2, int(candidates.numel()))
+            positives = candidates[torch.topk(diffs, k_eff, largest=False).indices]
+            losses.append(-log_prob[i, positives].mean())
+        reference = torch.stack(losses).mean()
+        self.assertAlmostEqual(float(vectorized), float(reference), places=5)
+
+    def test_batched_regression_neighbors_match_per_query_forward(self):
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=4,
+            regression_transform_aggregation="dynamic",
+            regression_scale_augmentation=False,
+            regression_gate_aux_weight=0.05,
+        )
+        B, K, D = 6, 4, 8
+        support = torch.randn(B, K, D)
+        labels = torch.sqrt(torch.rand(B, K) * 50 + 0.1)
+        query = torch.randn(B, D)
+        pred_b, _, diag_b = head.forward_regression_batched(
+            support, labels, query, return_diagnostics=True
+        )
+        preds = []
+        branches = []
+        weights = []
+        for i in range(B):
+            p, _, d = head.forward_regression(
+                support[i], labels[i], query[i : i + 1], return_diagnostics=True
+            )
+            preds.append(p.reshape(-1)[0])
+            branches.append(d["branch_predictions_hours"])
+            weights.append(d["aggregation_weights"])
+        pred_loop = torch.stack(preds)
+        torch.testing.assert_close(pred_b, pred_loop, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(
+            diag_b["branch_predictions_hours"],
+            torch.cat(branches, dim=1),
+            atol=1e-5,
+            rtol=1e-5,
+        )
+        loss = head.regression_loss(
+            pred_b,
+            labels[:, 0],
+            branch_predictions=diag_b["branch_predictions_hours"],
+            aggregation_weights=diag_b["aggregation_weights"],
+        )
+        self.assertTrue(torch.isfinite(loss))
+        loss.backward()
+        self.assertTrue(any(
+            p.grad is not None and torch.isfinite(p.grad).all()
+            for p in head.time_transform_bank.dynamic_gate.parameters()
         ))
 
     def test_new_regression_bank_cannot_change_classification_logits(self):
@@ -308,6 +608,32 @@ class FMV3HeadTests(unittest.TestCase):
         self.assertTrue(all(
             "proto_head.time_transform_bank." in name
             or "embedder.time_input_adapter." in name
+            for name in trainable
+        ))
+        self.assertTrue(all(
+            parameter.requires_grad == (name in trainable)
+            for name, parameter in model.named_parameters()
+        ))
+
+    def test_regression_gate_scope_trains_only_selector_parameters(self):
+        class TinyExpert(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = nn.Linear(2, 2)
+                self.proto_head = PrototypicalHead(
+                    regression_mode="learned_transform_ensemble",
+                    regression_num_transforms=4,
+                    regression_transform_aggregation="dynamic",
+                )
+
+        model = nn.ModuleDict({"expert": TinyExpert()})
+        trainable = configure_trainable_scope(model, "regression_gate")
+        self.assertTrue(trainable)
+        self.assertTrue(any("dynamic_gate" in name for name in trainable))
+        self.assertTrue(any(name.endswith("aggregation_logits") for name in trainable))
+        self.assertTrue(all(
+            "proto_head.time_transform_bank.dynamic_gate." in name
+            or name.endswith("proto_head.time_transform_bank.aggregation_logits")
             for name in trainable
         ))
         self.assertTrue(all(

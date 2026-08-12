@@ -45,6 +45,7 @@ CONFIG ={
 'episodes_per_epoch':300 ,
 'episodic_label_shuffle':'yes', #no, yes, mixed
 'training_strategy':'retrieval', #episodic, retrieval, mixed
+'classification_label_smoothing':0.05,
 'proto_head_warmup_epochs':3 ,
 'proto_head_lr_mult_after_warmup':0.1 ,
 'retrieval_train_k':32 ,
@@ -139,6 +140,10 @@ CONFIG ={
 'prefix_attention_initial_recency':0.25,
 'regression_mae_weight':0.5,
 'regression_rmse_weight':0.5,
+'regression_loss_scale_power':1.0,
+'regression_loss_reference_hours':100.0,
+'regression_gate_aux_weight':0.0,
+'regression_gate_target_temperature':0.1,
 },
 'fmv3_training':{
 'episode_mix':{'balanced':1.0},

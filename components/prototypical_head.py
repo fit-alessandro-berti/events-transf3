@@ -297,6 +297,23 @@ class PrototypicalHead(nn.Module):
         self.regression_rmse_weight = max(
             float(config.get("regression_rmse_weight", 0.5)), 0.0
         )
+        if self.regression_mae_weight + self.regression_rmse_weight <= 0:
+            raise ValueError(
+                "At least one of regression_mae_weight and "
+                "regression_rmse_weight must be positive"
+            )
+        self.regression_loss_scale_power = min(
+            max(float(config.get("regression_loss_scale_power", 1.0)), 0.0), 1.0
+        )
+        self.regression_loss_reference_hours = max(
+            float(config.get("regression_loss_reference_hours", 100.0)), 1e-4
+        )
+        self.regression_gate_aux_weight = max(
+            float(config.get("regression_gate_aux_weight", 0.0)), 0.0
+        )
+        self.regression_gate_target_temperature = max(
+            float(config.get("regression_gate_target_temperature", 0.1)), 1e-4
+        )
 
         # Kept for strict compatibility with historical FM-v2 checkpoints.
         self._proto_shrink = nn.Parameter(torch.tensor(-2.0))
@@ -561,20 +578,97 @@ class PrototypicalHead(nn.Module):
             return labels.clamp_min(0.0).square()
         return labels
 
-    def regression_loss(self, predictions, labels, labels_in_output_space=False):
-        """Optimize scale-normalized raw-hour MAE and RMSE jointly."""
+    def regression_gate_auxiliary_loss(
+        self, branch_predictions, aggregation_weights, targets
+    ):
+        """Teach the dynamic gate which transform branch fits each query.
+
+        Raw-hour branch errors define a detached soft target. Detaching keeps
+        this auxiliary objective from moving branch predictions merely to make
+        branch selection easier; the primary MAE/RMSE loss remains authoritative
+        for the transform branches. Softmax temperature is
+        ``mean_branch_error * regression_gate_target_temperature`` with a tiny
+        floor (``1e-4`` h) so short-horizon queries stay peaked.
+        """
+        branch_predictions = branch_predictions.float()
+        aggregation_weights = aggregation_weights.float()
+        targets = targets.float().reshape(1, -1)
+        if branch_predictions.shape != aggregation_weights.shape:
+            raise ValueError(
+                "branch_predictions and aggregation_weights must have the same shape"
+            )
+        if branch_predictions.ndim != 2 or branch_predictions.size(1) != targets.size(1):
+            raise ValueError(
+                "Branch diagnostics must have shape [branch, query] matching targets"
+            )
+        branch_errors = (branch_predictions.detach() - targets).abs()
+        # Scale temperature by mean absolute branch error so short-horizon
+        # queries (sub-hour remaining times) still get peaked soft targets.
+        # A 1-hour floor made helpdesk-scale errors nearly uniform.
+        error_scale = branch_errors.mean(dim=0, keepdim=True).clamp_min(1e-4)
+        target_weights = F.softmax(
+            -branch_errors
+            / (error_scale * self.regression_gate_target_temperature),
+            dim=0,
+        )
+        return -(
+            target_weights
+            * torch.log(aggregation_weights.clamp_min(1e-8))
+        ).sum(dim=0).mean()
+
+    def regression_loss(
+        self,
+        predictions,
+        labels,
+        labels_in_output_space=False,
+        branch_predictions=None,
+        aggregation_weights=None,
+    ):
+        """Optimize raw-hour MAE/RMSE and optional transform-gate selection.
+
+        Label units:
+        - ``labels_in_output_space=False`` (default): ``labels`` are the stored
+          task values (``sqrt(hours)`` for remaining time). They are converted
+          with :meth:`regression_labels_to_output` before the metric.
+        - ``labels_in_output_space=True``: ``labels`` are already in the head's
+          output unit (raw hours for ``learned_transform_ensemble``).
+
+        Predictions must always be in the head's output unit. Under AMP the
+        primary metric is computed in float32 for stable RMSE/median scaling.
+        """
         targets = labels.float() if labels_in_output_space else self.regression_labels_to_output(labels)
         if not self.regression_outputs_hours:
             return F.huber_loss(predictions.squeeze(), targets.squeeze())
-        errors = predictions.reshape(-1) - targets.reshape(-1)
-        normalizer = targets.detach().median().clamp_min(1.0)
+        # Keep reduction math in fp32: AMP half can under/overflow large hour
+        # ranges when squaring residuals and taking batch medians.
+        predictions_f = predictions.float().reshape(-1)
+        targets_f = targets.float().reshape(-1)
+        errors = predictions_f - targets_f
+        batch_scale = targets_f.detach().median().clamp_min(1.0)
+        power = self.regression_loss_scale_power
+        normalizer = batch_scale.pow(power) * (
+            self.regression_loss_reference_hours ** (1.0 - power)
+        )
         normalized = errors / normalizer
         mae = normalized.abs().mean()
         rmse = torch.sqrt(normalized.square().mean() + 1e-8)
-        denominator = max(self.regression_mae_weight + self.regression_rmse_weight, 1e-8)
-        return (
+        denominator = self.regression_mae_weight + self.regression_rmse_weight
+        loss = (
             self.regression_mae_weight * mae + self.regression_rmse_weight * rmse
         ) / denominator
+        has_branch_predictions = branch_predictions is not None
+        has_aggregation_weights = aggregation_weights is not None
+        if has_branch_predictions != has_aggregation_weights:
+            raise ValueError(
+                "branch_predictions and aggregation_weights must be provided together"
+            )
+        if has_branch_predictions and self.regression_gate_aux_weight > 0:
+            loss = loss + self.regression_gate_aux_weight * (
+                self.regression_gate_auxiliary_loss(
+                    branch_predictions, aggregation_weights, targets_f
+                )
+            )
+        return loss
 
     def _regression_from_local(
         self, local_support, support_labels, query, augmentation_factor=None

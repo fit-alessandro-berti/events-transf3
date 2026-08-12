@@ -20,6 +20,8 @@ class MetaLearner (nn .Module ):
         nn .LayerNorm (128 ),
         )
         self .d_model =d_model
+        # Side-channel for episodic regression: branch diagnostics used by gate-aux.
+        self .last_regression_diagnostics =None
         if self .strategy =='pretrained':
             self .embedding_dim =kwargs ['embedding_dim']
             self .embedder =PretrainedEventEmbedder (
@@ -82,6 +84,7 @@ class MetaLearner (nn .Module ):
         query_features =all_encoded [len (support_seqs ):]
         device =all_encoded .device
         if task_type =='classification':
+            self .last_regression_diagnostics =None
             support_labels =torch .LongTensor ([s [1 ]for s in support_set ]).to (device )
             query_labels =torch .LongTensor ([q [1 ]for q in query_set ]).to (device )
             predictions ,proto_classes ,confidence =self .proto_head .forward_classification (support_features ,support_labels ,query_features )
@@ -92,8 +95,11 @@ class MetaLearner (nn .Module ):
         elif task_type =='regression':
             support_labels =torch .as_tensor ([s [1 ]for s in support_set ],dtype =torch .float32 ,device =device )
             query_labels =torch .as_tensor ([q [1 ]for q in query_set ],dtype =torch .float32 ,device =device )
-            predictions ,confidence =self .proto_head .forward_regression (
+            # Diagnostics are always materialised inside the head; request them so
+            # episodic training can attach gate-aux without a second forward.
+            predictions ,confidence ,diagnostics =self .proto_head .forward_regression (
             support_features ,support_labels ,query_features ,
-            augmentation_factor =time_scale_factor )
+            return_diagnostics =True ,augmentation_factor =time_scale_factor )
+            self .last_regression_diagnostics =diagnostics
             return predictions ,self .proto_head .regression_labels_to_output (query_labels ),confidence
         else :raise ValueError (f"Unknown task type: {task_type }")

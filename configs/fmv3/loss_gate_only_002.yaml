@@ -1,0 +1,12 @@
+extends: prefix_state_attention_joint.yaml
+experiment_name: loss_gate_only_002
+epochs: 38
+trainable_scope: regression_gate
+classification_task_probability: 0.0
+retrieval_contrastive_weight: 0.0
+retrieval_knn_aux_weight: 0.0
+retrieval_var_weight: 0.0
+retrieval_cov_weight: 0.0
+fmv3_head:
+  regression_gate_aux_weight: 0.02
+  regression_gate_target_temperature: 0.10
