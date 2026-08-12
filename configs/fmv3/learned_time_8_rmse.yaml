@@ -1,0 +1,5 @@
+extends: learned_time_8.yaml
+experiment_name: learned_time_8_rmse
+fmv3_head:
+  regression_mae_weight: 0.25
+  regression_rmse_weight: 0.75

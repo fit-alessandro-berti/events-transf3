@@ -140,12 +140,16 @@ def regression_metrics(y_true, y_pred, lower=None, upper=None):
     median_baseline = np.full_like(y_true, np.median(y_true))
     baseline_mae = float(np.abs(y_true - median_baseline).mean())
     mae = float(errors.mean())
+    rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+    baseline_rmse = float(np.sqrt(np.mean((y_true - median_baseline) ** 2)))
     result = {
         "n_queries": int(len(y_true)),
         "mae_hours": mae,
+        "rmse_hours": rmse,
         "median_absolute_error_hours": float(np.median(errors)),
         "normalized_mae": mae / max(float(np.mean(np.abs(y_true))), 1e-12),
         "mae_skill_vs_median": 1.0 - mae / max(baseline_mae, 1e-12),
+        "rmse_skill_vs_median": 1.0 - rmse / max(baseline_rmse, 1e-12),
         "d2_absolute_error": 1.0 - float(errors.sum()) / max(float(np.abs(y_true - np.median(y_true)).sum()), 1e-12),
         "r2": float(r2_score(y_true, y_pred)) if len(y_true) > 1 else None,
     }

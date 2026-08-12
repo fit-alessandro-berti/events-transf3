@@ -1,0 +1,6 @@
+extends: learned_time_8_dynamic.yaml
+experiment_name: learned_time_8_temporal
+epochs: 33
+fmv3_head:
+  regression_time_input_transforms: true
+  regression_time_replace_legacy: false

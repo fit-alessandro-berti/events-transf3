@@ -5,6 +5,9 @@
 > top. See [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md) for the
 > complete before/after architecture and
 > [`structured_fmv3_report.md`](structured_fmv3_report.md) for the final result.
+> The later learned remaining-time architecture and raw-hour MAE/RMSE
+> confirmation are documented in
+> [`fmv3_time_transform_report.md`](fmv3_time_transform_report.md).
 
 ## Outcome
 

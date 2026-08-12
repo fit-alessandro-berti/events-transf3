@@ -310,7 +310,13 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     batch_labels = np.array([t[1] for t in batch_tasks_raw])
     batch_case_ids = np.array([t[2] for t in batch_tasks_raw], dtype=object)
 
-    all_embeddings = model._process_batch(batch_prefixes)
+    time_scale_factor =None
+    if task_type =="regression"and model .proto_head .regression_outputs_hours :
+        time_scale_factor =model .proto_head .time_transform_bank .sample_augmentation_factor (
+            next (model .parameters ()))
+    all_embeddings = model._process_batch(
+        batch_prefixes, task_type=task_type, time_scale_factor=time_scale_factor
+    )
     z_ssl = model.proj_head(all_embeddings) if hasattr(model, "proj_head") else all_embeddings
     device = all_embeddings.device
 
@@ -362,6 +368,8 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
 
     total_loss_for_batch = 0.0
     queries_processed = 0
+    regression_predictions = []
+    regression_targets = []
 
     for i in range(retrieval_batch_size):
         query_label = batch_labels[i]
@@ -467,13 +475,22 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             query_label_tensor = torch.as_tensor([query_label], dtype=torch.float32, device=device)
 
             prediction, _ = model.proto_head.forward_regression(
-                support_embeddings, support_labels_tensor, query_embedding
+                support_embeddings, support_labels_tensor, query_embedding,
+                augmentation_factor=time_scale_factor,
             )
-            loss = F.huber_loss(prediction.squeeze(), query_label_tensor.squeeze())
+            regression_predictions.append(prediction.reshape(-1)[0])
+            regression_targets.append(query_label_tensor.reshape(-1)[0])
+            loss = None
 
-        if not torch.isnan(loss):
+        if loss is not None and not torch.isnan(loss):
             total_loss_for_batch = total_loss_for_batch + loss
             queries_processed += 1
+
+    if task_type == "regression" and regression_predictions:
+        total_loss_for_batch = model.proto_head.regression_loss(
+            torch.stack(regression_predictions), torch.stack(regression_targets)
+        )
+        queries_processed = 1
 
     loss_out = None
     if queries_processed > 0:

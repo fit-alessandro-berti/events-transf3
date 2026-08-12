@@ -29,5 +29,8 @@ def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_
     if task_type =='classification':
         loss =F .cross_entropy (predictions ,true_labels ,ignore_index =-100 ,label_smoothing =0.05 )
     else :
-        loss =F .huber_loss (predictions .squeeze (),true_labels )
+        loss =model .proto_head .regression_loss (
+        predictions .squeeze (),
+        true_labels ,labels_in_output_space =True
+        )
     return loss ,progress_bar_task

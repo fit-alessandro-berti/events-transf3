@@ -1,0 +1,21 @@
+# Regression-only development screen. This is deliberately smaller than the
+# frozen confirmation protocol and must not be reported as the final result.
+experiment_name: time_transform_screen
+fmv3_evaluation:
+  tasks: [regression]
+  case_budgets: [1, 4, 16, 64, 128]
+  support_scenarios: [natural]
+  repetitions: 2
+  test_case_fraction: 0.30
+  max_test_cases: 50
+  max_query_prefixes: 500
+  embedding_batch_size: 128
+  include_full_budget: false
+  retrieval_k: [20]
+  regression_branch_diagnostics: true
+  regression_support_calibration: true
+  regression_calibration_max_prefixes: 512
+  regression_calibration_temperature: 20.0
+  regression_calibration_mae_weight: 0.5
+  regression_calibration_rmse_weight: 0.5
+  regression_calibration_exclude_same_case: false

@@ -21,7 +21,8 @@ class MetaLearner (nn .Module ):
         self .d_model =d_model
         if self .strategy =='pretrained':
             self .embedding_dim =kwargs ['embedding_dim']
-            self .embedder =PretrainedEventEmbedder (self .embedding_dim ,num_feat_dim ,d_model ,dropout )
+            self .embedder =PretrainedEventEmbedder (
+            self .embedding_dim ,num_feat_dim ,d_model ,dropout ,time_input_config =proto_head_config )
             self .pad_event ={'activity_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'resource_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'activity_id':0 ,'cost':0.0 ,'time_from_start':0.0 ,'time_from_previous':0.0 ,'timestamp':0.0 ,'case_id':'pad'}
         elif self .strategy =='learned':
             self .embedder =LearnedEventEmbedder (
@@ -31,6 +32,7 @@ class MetaLearner (nn .Module ):
             num_feat_dim =num_feat_dim ,
             d_model =d_model ,
             dropout =dropout
+            ,time_input_config =proto_head_config
             )
             self .pad_event ={
             'activity_name':'','resource_name':'','activity_id':-100 ,
@@ -43,7 +45,7 @@ class MetaLearner (nn .Module ):
         if self .strategy =='learned':
             self .embedder .char_to_id =char_to_id
             print ("Character vocabulary set in LearnedEventEmbedder.")
-    def _process_batch (self ,batch_of_sequences ):
+    def _process_batch (self ,batch_of_sequences ,task_type =None ,time_scale_factor =None ):
         device =next (self .parameters ()).device
         max_len =max (len (seq )for seq in batch_of_sequences )if batch_of_sequences else 0
         if max_len ==0 :return torch .empty (0 ,self .d_model ,device =device )
@@ -58,7 +60,9 @@ class MetaLearner (nn .Module ):
             padded_dfs .append (df )
             masks .append (mask )
         batch_df =pd .concat (padded_dfs ,ignore_index =True )
-        all_embeddings =self .embedder (batch_df )
+        all_embeddings =self .embedder (
+        batch_df ,use_time_adapter =(task_type =='regression'),
+        time_scale_factor =time_scale_factor )
         embeddings_reshaped =all_embeddings .view (len (batch_of_sequences ),max_len ,-1 )
         mask_tensor =torch .tensor (masks ,dtype =torch .bool ,device =device )
         return self .encoder (embeddings_reshaped ,src_key_padding_mask =mask_tensor )
@@ -66,7 +70,12 @@ class MetaLearner (nn .Module ):
         support_seqs ,query_seqs =[s [0 ]for s in support_set ],[q [0 ]for q in query_set ]
         all_seqs =support_seqs +query_seqs
         if not all_seqs :return None ,None ,None
-        all_encoded =self ._process_batch (all_seqs )
+        time_scale_factor =None
+        if task_type =='regression'and self .proto_head .regression_outputs_hours :
+            time_scale_factor =self .proto_head .time_transform_bank .sample_augmentation_factor (
+            next (self .parameters ()))
+        all_encoded =self ._process_batch (
+        all_seqs ,task_type =task_type ,time_scale_factor =time_scale_factor )
         support_features =all_encoded [:len (support_seqs )]
         query_features =all_encoded [len (support_seqs ):]
         device =all_encoded .device
@@ -81,6 +90,8 @@ class MetaLearner (nn .Module ):
         elif task_type =='regression':
             support_labels =torch .as_tensor ([s [1 ]for s in support_set ],dtype =torch .float32 ,device =device )
             query_labels =torch .as_tensor ([q [1 ]for q in query_set ],dtype =torch .float32 ,device =device )
-            predictions ,confidence =self .proto_head .forward_regression (support_features ,support_labels ,query_features )
-            return predictions ,query_labels ,confidence
+            predictions ,confidence =self .proto_head .forward_regression (
+            support_features ,support_labels ,query_features ,
+            augmentation_factor =time_scale_factor )
+            return predictions ,self .proto_head .regression_labels_to_output (query_labels ),confidence
         else :raise ValueError (f"Unknown task type: {task_type }")

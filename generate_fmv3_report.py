@@ -207,8 +207,8 @@ def main():
             (regression.support_scenario == "natural")
         ].groupby(["variant", "case_budget"], as_index=False)[
             [
-                "mae_hours", "median_absolute_error_hours", "normalized_mae",
-                "mae_skill_vs_median", "d2_absolute_error", "r2",
+                "mae_hours", "rmse_hours", "median_absolute_error_hours", "normalized_mae",
+                "mae_skill_vs_median", "rmse_skill_vs_median", "d2_absolute_error", "r2",
                 "interval_coverage", "mean_interval_width_hours",
             ]
         ].mean()
@@ -436,7 +436,7 @@ Per-log LSTM variants use natural CE, class-weighted CE, logit adjustment, or Ba
 
 ## Remaining-time results
 
-MAE remains primary. Median absolute error, MAE skill versus the query-set median, D² absolute-error score, R², and empirical interval coverage are supplementary.
+MAE and RMSE are computed in original hours after inverse transformation. Median absolute error, MAE/RMSE skill versus the query-set median, D² absolute-error score, R², and empirical interval coverage are supplementary.
 
 {_markdown_table(regression_table)}
 

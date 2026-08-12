@@ -135,8 +135,10 @@ def main() -> None:
         }
         for metric in [
             "mae_hours",
+            "rmse_hours",
             "median_absolute_error_hours",
             "mae_skill_vs_median",
+            "rmse_skill_vs_median",
             "d2_absolute_error",
             "r2",
         ]

@@ -19,12 +19,14 @@ from evaluation.fmv3_metrics import classification_metrics, regression_metrics
 from time_transf import inverse_transform_time
 
 
-def encode_tasks(expert, tasks, batch_size=128):
+def encode_tasks(expert, tasks, batch_size=128, task_type=None):
     embeddings = []
     with torch.no_grad():
         for start in range(0, len(tasks), batch_size):
             sequences = [item[0] for item in tasks[start : start + batch_size]]
-            embeddings.append(F.normalize(expert._process_batch(sequences), p=2, dim=1).cpu())
+            embeddings.append(F.normalize(
+                expert._process_batch(sequences, task_type=task_type), p=2, dim=1
+            ).cpu())
     return torch.cat(embeddings) if embeddings else torch.empty((0, expert.d_model))
 
 
@@ -785,41 +787,180 @@ def predict_classification(
 
 
 @torch.no_grad()
-def predict_regression(experts, embeddings_by_expert, labels, query_indices, support_indices, retrieval_k):
+def _calibrate_time_transform_weights(
+    experts, embeddings_device, labels_device, support_indices_device,
+    support_case_ids, retrieval_k, eval_cfg,
+):
+    """Fit a convex branch prior using labeled support prefixes only."""
+    num_branches = experts[0].proto_head.time_transform_bank.num_transforms
+    default = torch.stack([
+        expert.proto_head.time_transform_bank.aggregation_weights
+        for expert in experts
+    ]).mean(dim=0)
+    max_prefixes = int(eval_cfg.get("regression_calibration_max_prefixes", 512))
+    if support_indices_device.numel() < 2 or max_prefixes <= 0:
+        return default, {"calibration_prefixes": 0}
+
+    count = min(max_prefixes, int(support_indices_device.numel()))
+    chosen_positions = torch.linspace(
+        0, support_indices_device.numel() - 1, count,
+        device=support_indices_device.device,
+    ).round().long().unique()
+    calibration_indices = support_indices_device[chosen_positions]
+    pool_case_ids = np.asarray(support_case_ids, dtype=object)
+    sampled_case_ids = pool_case_ids[chosen_positions.cpu().numpy()]
+    exclude_same_case = bool(eval_cfg.get("regression_calibration_exclude_same_case", False))
+    expert_branches = []
+    valid_mask = None
+    for expert, embeddings in zip(experts, embeddings_device):
+        query = F.normalize(embeddings[calibration_indices], p=2, dim=1)
+        pool = F.normalize(embeddings[support_indices_device], p=2, dim=1)
+        similarities = query @ pool.t()
+        if exclude_same_case:
+            mask = torch.as_tensor(
+                sampled_case_ids[:, None] == pool_case_ids[None, :],
+                device=similarities.device,
+            )
+        else:
+            mask = calibration_indices[:, None] == support_indices_device[None, :]
+        similarities = similarities.masked_fill(mask, -torch.inf)
+        eligible = (~mask).sum(dim=1)
+        current_valid = eligible > 0
+        if not current_valid.any():
+            return default, {"calibration_prefixes": 0}
+        valid_mask = current_valid if valid_mask is None else (valid_mask & current_valid)
+        k_eff = min(int(retrieval_k), max(1, int(eligible[current_valid].min().item())))
+        positions = torch.topk(similarities, k_eff, dim=1).indices
+        local = pool[positions]
+        local_targets = labels_device[support_indices_device][positions]
+        _, _, diagnostics = expert.proto_head.forward_regression_batched(
+            local, local_targets, query, return_diagnostics=True
+        )
+        expert_branches.append(diagnostics["branch_predictions_hours"])
+    if valid_mask is None or not valid_mask.any():
+        return default, {"calibration_prefixes": 0}
+
+    branches = torch.stack(expert_branches).mean(dim=0)[:, valid_mask]
+    targets = labels_device[calibration_indices][valid_mask].clamp_min(0.0).square()
+    errors = branches - targets.unsqueeze(0)
+    mae = errors.abs().mean(dim=1)
+    rmse = torch.sqrt(errors.square().mean(dim=1).clamp_min(1e-8))
+    mae_weight = float(eval_cfg.get("regression_calibration_mae_weight", 0.5))
+    rmse_weight = float(eval_cfg.get("regression_calibration_rmse_weight", 0.5))
+    denominator = max(mae_weight + rmse_weight, 1e-8)
+    relative_score = (
+        mae_weight * mae / mae.min().clamp_min(1e-8)
+        + rmse_weight * rmse / rmse.min().clamp_min(1e-8)
+    ) / denominator
+    temperature = float(eval_cfg.get("regression_calibration_temperature", 20.0))
+    weights = F.softmax(-temperature * (relative_score - relative_score.min()), dim=0)
+    diagnostics = {
+        "calibration_prefixes": int(valid_mask.sum().item()),
+        "calibration_branch_mae_hours": mae.cpu().tolist(),
+        "calibration_branch_rmse_hours": rmse.cpu().tolist(),
+        "calibration_weights": weights.cpu().tolist(),
+    }
+    return weights, diagnostics
+
+
+@torch.no_grad()
+def predict_regression(
+    experts, embeddings_by_expert, labels, query_indices, support_indices,
+    retrieval_k, support_case_ids=None, eval_cfg=None,
+):
     device = next(experts[0].parameters()).device
     labels_device = labels.to(device).float()
     support_indices_device = torch.as_tensor(support_indices, device=device)
     query_indices_device = torch.as_tensor(query_indices, device=device)
     embeddings_device = [embedding.to(device) for embedding in embeddings_by_expert]
+    eval_cfg = eval_cfg or {}
+    calibrated_weights = None
+    calibration_diagnostics = {}
+    if (
+        experts[0].proto_head.regression_outputs_hours
+        and eval_cfg.get("regression_support_calibration", False)
+        and support_case_ids is not None
+    ):
+        calibrated_weights, calibration_diagnostics = _calibrate_time_transform_weights(
+            experts, embeddings_device, labels_device, support_indices_device,
+            support_case_ids, retrieval_k, eval_cfg,
+        )
     k_eff = min(int(retrieval_k), len(support_indices))
     expert_predictions = []
+    expert_stds = []
+    expert_branch_predictions = []
+    expert_aggregation_weights = []
     for expert, embeddings in zip(experts, embeddings_device):
         query = F.normalize(embeddings[query_indices_device], p=2, dim=1)
         pool = F.normalize(embeddings[support_indices_device], p=2, dim=1)
         positions = torch.topk(query @ pool.t(), k_eff, dim=1).indices
-        neighbor_targets = labels_device[support_indices_device][positions]
         local = pool[positions]
-        center = local.mean(dim=1, keepdim=True)
-        centered_local = F.normalize(local - center, p=2, dim=2)
-        centered_query = F.normalize(query - center.squeeze(1), p=2, dim=1)
-        similarities = torch.einsum("qd,qkd->qk", centered_query, centered_local)
-        weights = F.softmax(
-            similarities * expert.proto_head.reg_logit_scale.clamp(1.0, 100.0), dim=1
+        local_targets = labels_device[support_indices_device][positions]
+        prediction, _, diagnostics = expert.proto_head.forward_regression_batched(
+            local, local_targets, query, return_diagnostics=True
         )
-        expert_predictions.append((weights * neighbor_targets).sum(dim=1))
+        expert_predictions.append(prediction)
+        if expert.proto_head.regression_outputs_hours:
+            expert_stds.append(diagnostics["std_hours"])
+            expert_branch_predictions.append(diagnostics["branch_predictions_hours"])
+            expert_aggregation_weights.append(diagnostics["aggregation_weights"])
     reference = F.normalize(embeddings_device[0], p=2, dim=1)
     reference_positions = torch.topk(
         reference[query_indices_device] @ reference[support_indices_device].t(), k_eff, dim=1
     ).indices
     neighbor_targets = labels_device[support_indices_device][reference_positions]
-    transformed_prediction = torch.stack(expert_predictions).mean(dim=0).cpu().numpy()
+    mean_prediction = torch.stack(expert_predictions).mean(dim=0)
     transformed_truth = labels_device[query_indices_device].cpu().numpy()
-    transformed_std = neighbor_targets.std(dim=1, correction=0).cpu().numpy()
-    predictions = inverse_transform_time(transformed_prediction)
     truths = inverse_transform_time(transformed_truth)
-    lower = inverse_transform_time(np.maximum(0.0, transformed_prediction - 1.645 * transformed_std))
-    upper = inverse_transform_time(transformed_prediction + 1.645 * transformed_std)
-    return truths.tolist(), predictions.tolist(), lower.tolist(), upper.tolist()
+    if experts[0].proto_head.regression_outputs_hours:
+        if calibrated_weights is not None:
+            mean_branches = torch.stack(expert_branch_predictions).mean(dim=0)
+            calibrated_prediction = (
+                calibrated_weights[:, None] * mean_branches
+            ).sum(dim=0)
+            calibration_mix = min(
+                1.0,
+                max(0.0, float(eval_cfg.get("regression_calibration_mix", 1.0))),
+            )
+            mean_prediction = (
+                (1.0 - calibration_mix) * mean_prediction
+                + calibration_mix * calibrated_prediction
+            )
+            calibration_diagnostics["calibration_mix"] = calibration_mix
+        predictions = mean_prediction.cpu().numpy()
+        stacked_predictions = torch.stack(expert_predictions)
+        within_variance = torch.stack(expert_stds).square().mean(dim=0)
+        between_variance = stacked_predictions.var(dim=0, correction=0)
+        std_hours = torch.sqrt((within_variance + between_variance).clamp_min(1e-8)).cpu().numpy()
+        lower = np.maximum(0.0, predictions - 1.645 * std_hours)
+        upper = predictions + 1.645 * std_hours
+    else:
+        transformed_prediction = mean_prediction.cpu().numpy()
+        transformed_std = neighbor_targets.std(dim=1, correction=0).cpu().numpy()
+        predictions = inverse_transform_time(transformed_prediction)
+        lower = inverse_transform_time(np.maximum(0.0, transformed_prediction - 1.645 * transformed_std))
+        upper = inverse_transform_time(transformed_prediction + 1.645 * transformed_std)
+    branch_diagnostics = None
+    if expert_branch_predictions:
+        mean_branches = torch.stack(expert_branch_predictions).mean(dim=0).cpu().numpy()
+        truth_array = np.asarray(truths, dtype=float)
+        branch_diagnostics = {
+            "branch_mae_hours": np.mean(
+                np.abs(mean_branches - truth_array[None, :]), axis=1
+            ).tolist(),
+            "branch_rmse_hours": np.sqrt(
+                np.mean((mean_branches - truth_array[None, :]) ** 2, axis=1)
+            ).tolist(),
+            "mean_aggregation_weights": torch.stack(expert_aggregation_weights)
+            .mean(dim=(0, 2))
+            .cpu()
+            .tolist(),
+            "oracle_branch_mae_hours": float(
+                np.min(np.abs(mean_branches - truth_array[None, :]), axis=0).mean()
+            ),
+            **calibration_diagnostics,
+        }
+    return truths.tolist(), predictions.tolist(), lower.tolist(), upper.tolist(), branch_diagnostics
 
 
 def _bootstrap_balanced_accuracy(prediction_data, tasks, query_indices, universe, repetitions, seed):
@@ -846,6 +987,10 @@ def _bootstrap_balanced_accuracy(prediction_data, tasks, query_indices, universe
 
 def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_plan=None):
     eval_cfg = config.get("fmv3_evaluation", {})
+    requested_tasks = set(eval_cfg.get("tasks", ["classification", "regression"]))
+    unknown_tasks = requested_tasks - {"classification", "regression"}
+    if unknown_tasks:
+        raise ValueError(f"Unknown FM-v3 evaluation tasks: {sorted(unknown_tasks)}")
     seed = int(config.get("seed", 42))
     experts = list(model.experts) if hasattr(model, "experts") else [model]
     all_class_tasks = test_tasks["classification"]
@@ -889,9 +1034,22 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
     class_contexts = [_activity_context(task, structured_order) for task in class_tasks]
     reg_labels = torch.as_tensor([float(item[1]) for item in reg_tasks], dtype=torch.float32)
     universe = sorted({int(class_labels[idx]) for idx in class_query_indices})
-    print(f"[{log_name}] encoding {len(class_tasks)} classification and {len(reg_tasks)} regression prefixes")
-    class_embeddings = [encode_tasks(expert, class_tasks, eval_cfg.get("embedding_batch_size", 128)) for expert in experts]
-    reg_embeddings = [encode_tasks(expert, reg_tasks, eval_cfg.get("embedding_batch_size", 128)) for expert in experts]
+    selected_counts = []
+    class_embeddings = []
+    reg_embeddings = []
+    if "classification" in requested_tasks:
+        selected_counts.append(f"{len(class_tasks)} classification")
+        class_embeddings = [
+            encode_tasks(expert, class_tasks, eval_cfg.get("embedding_batch_size", 128), "classification")
+            for expert in experts
+        ]
+    if "regression" in requested_tasks:
+        selected_counts.append(f"{len(reg_tasks)} regression")
+        reg_embeddings = [
+            encode_tasks(expert, reg_tasks, eval_cfg.get("embedding_batch_size", 128), "regression")
+            for expert in experts
+        ]
+    print(f"[{log_name}] encoding {' and '.join(selected_counts)} prefixes")
 
     rows = []
     for repetition in range(int(eval_cfg.get("repetitions", 5))):
@@ -903,87 +1061,90 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                 reg_support_indices = _task_indices(reg_tasks, selected_cases)
                 if not len(class_support_indices):
                     continue
-                profiles = eval_cfg.get("evaluation_profiles") or [{
-                    "name": "main",
-                    "retrieval_modes": eval_cfg.get("retrieval_modes", ["configured"]),
-                    "prior_modes": eval_cfg.get("prior_modes", ["balanced", "natural"]),
-                    "prior_strengths": eval_cfg.get("prior_strengths", [1.0]),
-                    "retrieval_k": eval_cfg.get("retrieval_k", [5, 20, 50]),
-                }]
-                for profile in profiles:
-                    for retrieval_mode in profile.get("retrieval_modes", ["configured"]):
-                        for prior_mode in profile.get("prior_modes", ["balanced"]):
-                            for prior_strength in profile.get("prior_strengths", [1.0]):
-                                for retrieval_k in profile.get("retrieval_k", [20]):
-                                    prediction = predict_classification(
-                                        experts, class_embeddings, class_labels, class_query_indices,
-                                        class_support_indices, universe, int(retrieval_k), retrieval_mode,
-                                        prior_mode, float(prior_strength), eval_cfg,
-                                        structured_contexts=class_contexts,
-                                    )
-                                    metrics = classification_metrics(
-                                        prediction["y_true"], prediction["y_pred"], prediction["probabilities"],
-                                        universe, prediction["confidences"],
-                                        [class_tasks[int(idx)][2] for idx in class_query_indices],
-                                        prediction["support_counts"], prediction["pool_covered"],
-                                        prediction["retrieval_covered"],
-                                    )
-                                    metrics["balanced_accuracy_ci"] = _bootstrap_balanced_accuracy(
-                                        prediction, class_tasks, class_query_indices, universe,
-                                        int(eval_cfg.get("bootstrap_repetitions", 200)),
-                                        seed + repetition * 1009 + budget + int(retrieval_k),
-                                    )
-                                    structured_diagnostics = {}
-                                    if "structured_context_support" in prediction:
-                                        context_support = np.asarray(
-                                            prediction["structured_context_support"], dtype=float
+                if "classification" in requested_tasks:
+                    profiles = eval_cfg.get("evaluation_profiles") or [{
+                        "name": "main",
+                        "retrieval_modes": eval_cfg.get("retrieval_modes", ["configured"]),
+                        "prior_modes": eval_cfg.get("prior_modes", ["balanced", "natural"]),
+                        "prior_strengths": eval_cfg.get("prior_strengths", [1.0]),
+                        "retrieval_k": eval_cfg.get("retrieval_k", [5, 20, 50]),
+                    }]
+                    for profile in profiles:
+                        for retrieval_mode in profile.get("retrieval_modes", ["configured"]):
+                            for prior_mode in profile.get("prior_modes", ["balanced"]):
+                                for prior_strength in profile.get("prior_strengths", [1.0]):
+                                    for retrieval_k in profile.get("retrieval_k", [20]):
+                                        prediction = predict_classification(
+                                            experts, class_embeddings, class_labels, class_query_indices,
+                                            class_support_indices, universe, int(retrieval_k), retrieval_mode,
+                                            prior_mode, float(prior_strength), eval_cfg,
+                                            structured_contexts=class_contexts,
                                         )
-                                        selected_order = np.asarray(
-                                            prediction["structured_selected_order"], dtype=float
+                                        metrics = classification_metrics(
+                                            prediction["y_true"], prediction["y_pred"], prediction["probabilities"],
+                                            universe, prediction["confidences"],
+                                            [class_tasks[int(idx)][2] for idx in class_query_indices],
+                                            prediction["support_counts"], prediction["pool_covered"],
+                                            prediction["retrieval_covered"],
                                         )
-                                        structured_diagnostics = {
-                                            "structured_context_coverage": float(
-                                                np.mean(context_support > 0)
-                                            ),
-                                            "structured_mean_context_support": float(
-                                                context_support.mean()
-                                            ),
-                                            "structured_mean_selected_order": float(
-                                                selected_order.mean()
-                                            ),
-                                        }
-                                        if "structured_effective_weight" in prediction:
-                                            structured_diagnostics[
-                                                "structured_mean_effective_weight"
-                                            ] = float(
-                                                np.mean(prediction["structured_effective_weight"])
+                                        metrics["balanced_accuracy_ci"] = _bootstrap_balanced_accuracy(
+                                            prediction, class_tasks, class_query_indices, universe,
+                                            int(eval_cfg.get("bootstrap_repetitions", 200)),
+                                            seed + repetition * 1009 + budget + int(retrieval_k),
+                                        )
+                                        structured_diagnostics = {}
+                                        if "structured_context_support" in prediction:
+                                            context_support = np.asarray(
+                                                prediction["structured_context_support"], dtype=float
                                             )
-                                    row = {
-                                        "task": "classification", "log": log_name,
-                                        "experiment": config.get("experiment_name", "unnamed"),
-                                        "evaluation_profile": profile.get("name", "unnamed"),
-                                        "repetition": repetition, "support_scenario": scenario,
-                                        "case_budget": budget, "support_prefixes": int(len(class_support_indices)),
-                                        "retrieval_mode": retrieval_mode, "prior_mode": prior_mode,
-                                        "prior_strength": float(prior_strength),
-                                        "retrieval_k": int(retrieval_k), **metrics,
-                                        "structured_max_order": structured_order,
-                                        "structured_smoothing": float(
-                                            eval_cfg.get("structured_smoothing", 0.5)
-                                        ),
-                                        "structured_weight": float(eval_cfg.get("structured_weight", 0.5)),
-                                        "structured_tau": float(eval_cfg.get("structured_tau", 2.0)),
-                                        **structured_diagnostics,
-                                    }
-                                    rows.append(row)
-                                    with output_jsonl.open("a", encoding="utf-8") as handle:
-                                        handle.write(json.dumps(row, sort_keys=True) + "\n")
+                                            selected_order = np.asarray(
+                                                prediction["structured_selected_order"], dtype=float
+                                            )
+                                            structured_diagnostics = {
+                                                "structured_context_coverage": float(
+                                                    np.mean(context_support > 0)
+                                                ),
+                                                "structured_mean_context_support": float(
+                                                    context_support.mean()
+                                                ),
+                                                "structured_mean_selected_order": float(
+                                                    selected_order.mean()
+                                                ),
+                                            }
+                                            if "structured_effective_weight" in prediction:
+                                                structured_diagnostics[
+                                                    "structured_mean_effective_weight"
+                                                ] = float(
+                                                    np.mean(prediction["structured_effective_weight"])
+                                                )
+                                        row = {
+                                            "task": "classification", "log": log_name,
+                                            "experiment": config.get("experiment_name", "unnamed"),
+                                            "evaluation_profile": profile.get("name", "unnamed"),
+                                            "repetition": repetition, "support_scenario": scenario,
+                                            "case_budget": budget, "support_prefixes": int(len(class_support_indices)),
+                                            "retrieval_mode": retrieval_mode, "prior_mode": prior_mode,
+                                            "prior_strength": float(prior_strength),
+                                            "retrieval_k": int(retrieval_k), **metrics,
+                                            "structured_max_order": structured_order,
+                                            "structured_smoothing": float(
+                                                eval_cfg.get("structured_smoothing", 0.5)
+                                            ),
+                                            "structured_weight": float(eval_cfg.get("structured_weight", 0.5)),
+                                            "structured_tau": float(eval_cfg.get("structured_tau", 2.0)),
+                                            **structured_diagnostics,
+                                        }
+                                        rows.append(row)
+                                        with output_jsonl.open("a", encoding="utf-8") as handle:
+                                            handle.write(json.dumps(row, sort_keys=True) + "\n")
 
-                if len(reg_support_indices):
+                if "regression" in requested_tasks and len(reg_support_indices):
                     regression_k = int(max(eval_cfg.get("retrieval_k", [20])))
-                    truth, pred, lower, upper = predict_regression(
+                    truth, pred, lower, upper, branch_diagnostics = predict_regression(
                         experts, reg_embeddings, reg_labels, reg_query_indices,
                         reg_support_indices, regression_k,
+                        support_case_ids=[reg_tasks[int(idx)][2] for idx in reg_support_indices],
+                        eval_cfg=eval_cfg,
                     )
                     row = {
                         "task": "regression", "log": log_name,
@@ -991,8 +1152,21 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                         "repetition": repetition, "support_scenario": scenario,
                         "case_budget": budget, "support_prefixes": int(len(reg_support_indices)),
                         "retrieval_k": regression_k,
+                        "regression_mode": str(
+                            experts[0].proto_head.regression_mode
+                        ),
+                        "regression_num_transforms": int(
+                            experts[0].proto_head.time_transform_bank.num_transforms
+                            if experts[0].proto_head.time_transform_bank is not None else 1
+                        ),
+                        "regression_transform_aggregation": str(
+                            experts[0].proto_head.time_transform_bank.aggregation
+                            if experts[0].proto_head.time_transform_bank is not None else "single"
+                        ),
                         **regression_metrics(truth, pred, lower, upper),
                     }
+                    if eval_cfg.get("regression_branch_diagnostics", False):
+                        row["regression_branch_diagnostics"] = branch_diagnostics
                     rows.append(row)
                     with output_jsonl.open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(row, sort_keys=True) + "\n")

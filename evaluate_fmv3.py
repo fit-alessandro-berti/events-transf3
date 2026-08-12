@@ -40,9 +40,10 @@ def _write_summary(rows, output_dir: Path):
         "accuracy", "balanced_accuracy", "adjusted_balanced_accuracy", "macro_precision", "macro_f1", "zero_recall_fraction",
         "support_pool_availability", "macro_label_recall_at_k", "macro_retrieval_given_pool",
         "macro_decision_given_retrieval", "nll", "multiclass_brier",
-        "ece_10", "aurc", "mae_hours", "median_absolute_error_hours", "normalized_mae",
-        "mae_skill_vs_median", "d2_absolute_error", "r2", "interval_coverage",
+        "ece_10", "aurc", "mae_hours", "rmse_hours", "median_absolute_error_hours", "normalized_mae",
+        "mae_skill_vs_median", "rmse_skill_vs_median", "d2_absolute_error", "r2", "interval_coverage",
         "mean_interval_width_hours",
+        "regression_mode", "regression_num_transforms", "regression_transform_aggregation",
     ]
     with (output_dir / "results.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")

@@ -1,0 +1,22 @@
+extends: corrected_fmv3.yaml
+experiment_name: learned_time_4
+epochs: 31
+lr: 0.003
+weight_decay: 0.0
+classification_task_probability: 0.0
+trainable_scope: time_transform
+proto_head_warmup_epochs: 0
+proto_head_lr_mult_after_warmup: 1.0
+retrieval_contrastive_weight: 0.0
+retrieval_knn_aux_weight: 0.0
+retrieval_var_weight: 0.0
+retrieval_cov_weight: 0.0
+fmv3_head:
+  regression_mode: learned_transform_ensemble
+  regression_num_transforms: 4
+  regression_transform_aggregation: learned
+  regression_scale_augmentation: true
+  regression_scale_augmentation_min: 0.02
+  regression_scale_augmentation_max: 50.0
+  regression_mae_weight: 0.5
+  regression_rmse_weight: 0.5

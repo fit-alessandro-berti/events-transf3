@@ -151,6 +151,36 @@ zero for an unseen context, leaving the foundation-model prediction unchanged.
 The primary full-protocol comparison is documented in
 `paper_docs/structured_fmv3_report.md`.
 
+### Learned remaining-time architecture
+
+The selected regression head no longer commits to a fixed square-root or log
+target. It learns four monotone power/scale transforms, applies matching
+multi-scale transforms to both elapsed time from case start and time from the
+previous event, and combines a trained query gate with a support-only branch
+prior. MAE and RMSE are evaluated after inversion in raw hours. The
+classification path bypasses these additions exactly.
+
+The architecture, equations, ablations, per-log results, metric units, and
+limitations are documented in
+[`paper_docs/fmv3_time_transform_report.md`](paper_docs/fmv3_time_transform_report.md).
+The full component-level history is kept in
+[`paper_docs/fmv3_architecture_changes.md`](paper_docs/fmv3_architecture_changes.md).
+
+Reproduce the selected full evaluation with:
+
+```bash
+python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/learned_time_4_temporal \
+  --checkpoint_epoch 33 \
+  --eval_config configs/fmv3/time_transform_confirmation_eval.yaml \
+  --output_dir evaluation_results/time_transform/learned_temporal_time_transform
+```
+
+The selected model reaches 1,113.7193-hour MAE and 1,661.9432-hour RMSE,
+improving the fixed-sqrt baseline by 12.1228 and 3.7551 hours respectively.
+Classification balanced accuracy, accuracy, and macro-F1 remain exactly
+unchanged.
+
 The three-way corrected baseline/control/FM-v3 evaluation manifest is
 `configs/fmv3/improved_evaluation_manifest.yaml`.
 
@@ -173,7 +203,7 @@ python main.py \
   --stop_after_epoch 23
 ```
 
-The primary classification endpoint is balanced accuracy. The evaluator also records ordinary accuracy, macro-F1/precision, per-class recall, zero-recall classes, pool and retrieval label coverage, frequency-stratified recall, NLL, multiclass Brier score, reliability bins, risk–coverage curves, and case-bootstrap intervals. Remaining-time outputs include MAE, median absolute error, normalized MAE, MAE skill, D² absolute-error score, R², and interval coverage/width.
+The primary classification endpoint is balanced accuracy. The evaluator also records ordinary accuracy, macro-F1/precision, per-class recall, zero-recall classes, pool and retrieval label coverage, frequency-stratified recall, NLL, multiclass Brier score, reliability bins, risk–coverage curves, and case-bootstrap intervals. Remaining-time outputs include raw-hour MAE and RMSE, median absolute error, normalized MAE, MAE/RMSE skill, D² absolute-error score, R², and interval coverage/width.
 
 ## Simulating new logs (optional)
 

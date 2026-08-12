@@ -1,0 +1,4 @@
+extends: learned_time_8_temporal.yaml
+experiment_name: learned_time_8_temporal_replace
+fmv3_head:
+  regression_time_replace_legacy: true

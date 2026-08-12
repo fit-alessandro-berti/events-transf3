@@ -1,16 +1,18 @@
-# FM-v3 architecture changes: from FM-v2 to structured FM-v3
+# FM-v3 architecture changes: from FM-v2 to structured and temporal FM-v3
 
 This document is the source of truth for the architecture currently selected
 for the paper. It explains what changed, why each change was made, which parts
 were trained, which parts are inference-only, and which experiments were
 rejected. Numerical results live in
 [`fmv3_improvement_report.md`](fmv3_improvement_report.md) and
-[`structured_fmv3_report.md`](structured_fmv3_report.md).
+[`structured_fmv3_report.md`](structured_fmv3_report.md). The subsequent
+remaining-time redesign and its paired results are in
+[`fmv3_time_transform_report.md`](fmv3_time_transform_report.md).
 
 ## Short version
 
 The final system is not the original `06_full_fmv3` model. It has two selected
-stages:
+layers:
 
 1. **Corrected FM-v3 checkpoint:** retain FM-v2's reliable centered local
    decision, use full-pool prototypes only to recover labels absent from the
@@ -21,25 +23,35 @@ stages:
    class-balanced, target-log transition memory keyed by the last one to three
    activities. The transition branch backs off to shorter contexts and is
    automatically suppressed when its context has little or no support.
+3. **Learned temporal remaining-time head:** pass both elapsed time from case
+   start and time since the previous event through a regression-only learned
+   multi-scale adapter, predict raw hours through four learned monotone target
+   transforms, and combine a query-specific gate with a support-only branch
+   prior. Training uses shared scale augmentation for the two input clocks and
+   the remaining-time target.
 
 The Transformer encoder and its four-expert mixture remain the learned
-representation backbone. The structured transition memory adds no target-log
-gradient updates and does not change remaining-time prediction.
+representation backbone. The structured transition memory remains
+classification-only. The temporal adapter and target-transform bank are
+regression-only, so their parameters and forward path cannot change
+classification output.
 
-## Four-stage comparison
+## Five-stage comparison
 
-| Dimension | FM-v2 baseline | Original full FM-v3 | Corrected FM-v3 | Structured FM-v3 |
-|---|---|---|---|---|
-| Encoder | Four Transformer experts | Same backbone, continued training | Same backbone, continued from FM-v2 epoch 20 | Frozen corrected epoch-23 checkpoint |
-| Local geometry | Neighborhood-centered cosine | Uncentered cosine | Neighborhood-centered cosine restored | Same as corrected FM-v3 |
-| Local aggregation | Summed soft-kNN mass | Log-sum-exp with learned count normalization | Log-sum-exp with fixed $\gamma=0$ | Same as corrected FM-v3 |
-| Candidate labels | Local top-k only | Full support pool | Full support pool, but global evidence used only for locally missing labels | Neural candidates plus structured transition evidence |
-| Global combination | None | Learned/fixed global-local fusion for all classes | Margin-gated coverage fallback | Same fallback inside $p_{FM}$ |
-| Class prior | Implicit local frequency | Explicit balanced/natural mode | Balanced | Balanced neural head plus uniform structured class prior |
-| Abstention | None | Learned missing-pool abstention | Removed | Removed |
-| Target-log adaptation | Embedding retrieval | Embedding retrieval and prototypes | Corrected retrieval and prototypes | Corrected neural memory plus order-1--3 transition memory |
-| Target gradients | None | None | None | None |
-| Status | Authoritative baseline | Rejected combined design | Selected neural base | **Selected final classifier** |
+| Dimension | FM-v2 baseline | Original full FM-v3 | Corrected FM-v3 | Structured FM-v3 | Temporal-transform FM-v3 |
+|---|---|---|---|---|---|
+| Encoder | Four Transformer experts | Same backbone, continued training | Same backbone, continued from FM-v2 epoch 20 | Frozen corrected epoch-23 checkpoint | Frozen corrected encoder plus regression-only temporal residual |
+| Local geometry | Neighborhood-centered cosine | Uncentered cosine | Neighborhood-centered cosine restored | Same as corrected FM-v3 | Same classifier; regression retrieval uses temporal-adapted embeddings |
+| Local aggregation | Summed soft-kNN mass | Log-sum-exp with learned count normalization | Log-sum-exp with fixed $\gamma=0$ | Same as corrected FM-v3 | Same classifier; four regression transform branches |
+| Candidate labels | Local top-k only | Full support pool | Full support pool, but global evidence used only for locally missing labels | Neural candidates plus structured transition evidence | Same classification rule |
+| Global combination | None | Learned/fixed global-local fusion for all classes | Margin-gated coverage fallback | Same fallback inside $p_{FM}$ | Same classification rule; dual-gated regression combination |
+| Class prior | Implicit local frequency | Explicit balanced/natural mode | Balanced | Balanced neural head plus uniform structured class prior | Same classification prior |
+| Abstention | None | Learned missing-pool abstention | Removed | Removed | Removed |
+| Target-log adaptation | Embedding retrieval | Embedding retrieval and prototypes | Corrected retrieval and prototypes | Corrected neural memory plus order-1--3 transition memory | Labeled-support branch calibration for regression |
+| Target gradients | None | None | None | None | None at adaptation time |
+| Remaining-time target rule | Fixed square-root neighbor regression | Same | Same | Same | Four learned monotone branches, inverted to raw hours |
+| Prefix timing inputs | Fixed `log1p` coordinates | Same | Same | Same | Fixed coordinates plus learned multi-scale elapsed/inter-event adapter |
+| Status | Authoritative baseline | Rejected combined design | Selected neural base | **Selected classifier** | **Selected remaining-time head** |
 
 ## Architecture at a glance
 
@@ -68,6 +80,24 @@ flowchart LR
     F --> Y[Next-activity prediction]
 ```
 
+The regression path is separate:
+
+```mermaid
+flowchart LR
+    Q[Query prefix clocks] --> I[Four learned power/scale maps per clock]
+    I --> E[Regression-only residual into frozen expert encoder]
+    S[Labeled support prefixes] --> SE[Temporal-adapted support embeddings]
+    E --> R[Expert-specific top-50 retrieval]
+    SE --> R
+    R --> B[Four learned monotone target branches]
+    B --> D[Trained query-specific gate]
+    S --> C[Self-excluded support calibration]
+    C --> P[Log-level branch prior]
+    D --> M[50/50 convex prediction blend]
+    P --> M
+    M --> H[Remaining time in raw hours]
+```
+
 The two memory systems are complementary:
 
 - The **embedding memory** transfers similarity learned across source logs and
@@ -84,15 +114,18 @@ The following are not new architectural claims:
 - The learned configuration still uses four independently trained experts.
 - Activity identifiers remain **log-local**. An identifier has no shared
   semantic meaning across logs.
-- Target adaptation remains gradient-free: target cases populate support
-  memories but do not update model weights.
-- Remaining time still uses the existing embedding-neighbor regression head.
+- Support and query cases remain disjoint, and target-log adaptation remains
+  gradient-free for both tasks.
 - The selected structured branch operates only on next-activity
   classification.
+- The selected temporal-transform branch operates only on remaining-time
+  regression. It does not alter activity/resource encoding or classifier
+  evidence.
 
-This distinction matters: most of the final gain comes from changing how the
-target support memory is queried and combined, not from increasing encoder
-size or retraining a larger backbone.
+This distinction matters: neither improvement increases encoder depth or
+width. Classification gains come from how target support memory is queried;
+remaining-time gains come from learned input/target geometry and support-only
+branch adaptation around the frozen encoder.
 
 ## Stage 0: FM-v2 baseline
 
@@ -388,7 +421,101 @@ Support-absent labels still receive zero evidence. For deployment, this fixed
 universe should come from the declared process schema or observed target-log
 vocabulary; it is not learned by the transition counts.
 
-## Final inference algorithm
+## Stage 4: learned temporal input and target geometry
+
+### 4.1 Why transform the two prefix clocks
+
+The original embedder passed cost, elapsed seconds from the first case event,
+and seconds from the previous event through a fixed `log1p` map. Replacing only
+the remaining-time target would leave the two most relevant timing covariates
+in a different geometry. The selected regression path therefore adds a learned
+adapter for both `time_from_start` and `time_from_previous`; cost deliberately
+stays on the stable fixed path.
+
+For raw seconds $x_f$, feature $f$ is first converted to hours
+$h_f=x_f/3600$. Each of four branches has independently learned positive power
+$p_{f,k}$ and characteristic scale $s_{f,k}$:
+
+$$
+u_{f,k}=\frac{(1+h_f/s_{f,k})^{p_{f,k}}-1}{p_{f,k}},
+\qquad
+\tilde u_{f,k}=\frac{u_{f,k}}{1+u_{f,k}}.
+$$
+
+The rational bound keeps extreme durations finite without breaking
+monotonicity. The eight resulting values (two clocks times four branches) pass
+through a small normalized MLP and enter the event embedding as a learned
+residual. The residual gate starts near 0.12, so the new path begins as a
+conservative correction around the frozen representation.
+
+The selected model retains the original logged clock coordinates underneath
+this residual. A stricter ablation zeroed those two old coordinates for
+regression, but it was materially weaker. Thus both timing variables do pass
+through the new transform; retaining the fixed path is an empirical residual
+design choice, not an omission.
+
+### 4.2 Learned target-transform bank
+
+Remaining-time labels are stored as $\sqrt{\text{hours}}$ in the historical
+task files for checkpoint compatibility. The new head immediately squares
+them back to raw nonnegative hours. For branch $k$ it then learns
+
+$$
+z_k(y)=\frac{(1+y/s_k)^{p_k}-1}{p_k},
+\qquad
+z_k^{-1}(v)=s_k\left[(1+p_kv)^{1/p_k}-1\right].
+$$
+
+This is not a fixed log or square-root target. As $p_k$ approaches zero it
+approaches a log-like map; other learned powers cover square-root-like through
+near-linear regimes. Each branch performs its own soft neighbor regression in
+its transformed space and is inverted before aggregation, so every branch
+prediction is in raw hours.
+
+During training, one factor $a\sim\operatorname{LogUniform}(0.02,50)$ is shared
+by the two prefix clocks and the remaining-time target. Predictions are divided
+by $a$ before loss calculation. This exposes the model to several orders of
+magnitude while preserving the reported unit.
+
+### 4.3 Query gate plus support-only branch prior
+
+A trained dynamic gate scores the four branch predictions separately for each
+query using dimensionless neighborhood statistics, attention concentration,
+branch disagreement, transform power/scale, and similarity summaries. A
+second prior adapts to the target log using labeled support prefixes only:
+
+1. predict up to 512 support prefixes with self-excluded nearest neighbors;
+2. measure each branch's support MAE in raw hours;
+3. turn relative support errors into a branch prior with temperature 100;
+4. make no use of held-out query labels or query errors.
+
+The selected prediction is the equal convex blend of the trained
+query-specific prediction and the support-calibrated branch prediction. The
+former protects tail RMSE; the latter reduces typical absolute error. Both
+components use only learned transform branches—there is no fixed sqrt anchor
+in the new output.
+
+### 4.4 Constrained training and classifier isolation
+
+Training starts from corrected FM-v3 epoch 23 and freezes the character CNN,
+Transformer, classification head, and all existing parameters. Only the four
+experts' temporal input adapters and target-transform banks are trainable. The
+selected four-branch model has 40,776 trainable parameters.
+
+The temporal adapter is called only when `task_type == "regression"`.
+Classification calls the unchanged embedder path, and the unit suite verifies
+bit-exact equality with and without the adapter present. The full confirmation
+also re-evaluates classification to verify that balanced accuracy, ordinary
+accuracy, and macro-F1 are unchanged.
+
+### 4.5 MAE and RMSE unit
+
+Both training diagnostics and final `mae_hours`/`rmse_hours` compare
+predictions and targets after inversion in raw hours. Neither metric is
+computed in sqrt space or log space. The only square operation is the one-time
+conversion of legacy stored labels back to hours.
+
+## Final classification inference algorithm
 
 For each target log and support budget:
 
@@ -412,6 +539,25 @@ Across the full confirmation protocol, structured contexts covered 93.3% of
 queries, the mean selected suffix order was 2.55, and the mean effective
 structured weight was 0.606.
 
+## Final remaining-time inference algorithm
+
+For the same case-disjoint target support/query split:
+
+1. Encode support and query prefixes with each frozen expert plus its
+   regression-only temporal residual.
+2. Retrieve the 50 nearest support prefixes independently in each expert's
+   embedding space.
+3. Run all four learned target transforms, their neighbor-attention scales,
+   and inverse maps to obtain branch predictions in hours.
+4. Produce the trained query-specific convex prediction in each expert and
+   average across experts.
+5. On labeled support prefixes only, repeat retrieval with the predicted
+   prefix itself excluded and estimate the target-log branch prior.
+6. Average each branch across experts, apply the support prior, and form the
+   calibrated prediction.
+7. Average the query-gated and support-calibrated predictions 50/50 and report
+   raw hours.
+
 ## Training-time versus inference-time changes
 
 | Change | Training | Inference | Selected final system? |
@@ -426,6 +572,12 @@ structured weight was 0.606.
 | Learned shrinkage and dynamic global-local gate | Yes | Yes | **Removed** |
 | Order-1--3 structured transition memory | No | Yes | Yes |
 | Reliability-gated posterior mixture | No | Yes | Yes |
+| Four learned target transforms | Yes | Yes | Yes |
+| Learned elapsed/inter-event residual | Yes | Yes | Yes |
+| Shared temporal scale augmentation | Yes | No | Yes |
+| Query-specific regression gate | Yes | Yes | Yes |
+| Support-only regression branch prior | No | Yes | Yes |
+| 50/50 regression prediction blend | No | Yes | Yes |
 
 ## What each result measures
 
@@ -446,6 +598,19 @@ therefore supports a predictive-performance claim, not a stronger calibration
 or selective-risk claim. Calibration should be fitted separately using only a
 dedicated validation set.
 
+The selected regression redesign is evaluated on the same 200 paired
+support/query rows used by the strongest fixed-sqrt baseline:
+
+| Remaining-time model | MAE (hours) | RMSE (hours) |
+|---|---:|---:|
+| Fixed sqrt baseline | 1,125.8421 | 1,665.6983 |
+| Learned temporal-transform FM-v3 | **1,113.7193** | **1,661.9432** |
+| Delta | **-12.1228** | **-3.7551** |
+
+Per-log and per-budget results, including the smallest-budget regressions, are
+reported in
+[`fmv3_time_transform_report.md`](fmv3_time_transform_report.md).
+
 ## Rejected or non-final alternatives
 
 The following remain useful ablations but are not part of the selected method:
@@ -460,7 +625,12 @@ The following remain useful ablations but are not part of the selected method:
 - resource-conditioned structured keys;
 - elapsed-time-bucket structured keys;
 - a structured remaining-time median branch, which gave only a small aggregate
-  screen improvement and regressed Billing.
+  screen improvement and regressed Billing;
+- eight target/input branches, which did not improve the joint MAE/RMSE screen;
+- replacing rather than supplementing the legacy logged timing coordinates;
+- the query gate alone, which protected RMSE but regressed MAE;
+- the support branch prior alone, which improved MAE but slightly regressed
+  full-protocol RMSE.
 
 Documenting these exclusions prevents an ablation or discarded screen from
 being mistaken for the final architecture.
@@ -475,7 +645,12 @@ being mistaken for the final architecture.
 | Case-disjoint protocol, per-expert retrieval, structured memory, and fusion | [`evaluation/fmv3_protocol.py`](../evaluation/fmv3_protocol.py) |
 | Corrected checkpoint configuration | [`configs/fmv3/corrected_fmv3.yaml`](../configs/fmv3/corrected_fmv3.yaml) |
 | Structured inference overlay | [`configs/fmv3/structured_memory_eval.yaml`](../configs/fmv3/structured_memory_eval.yaml) |
+| Regression temporal input adapter | [`components/temporal_adapter.py`](../components/temporal_adapter.py) |
+| Learned target-transform bank and query gate | [`components/prototypical_head.py`](../components/prototypical_head.py) |
+| Four-branch temporal training configuration | [`configs/fmv3/learned_time_4_temporal.yaml`](../configs/fmv3/learned_time_4_temporal.yaml) |
+| Temporal confirmation overlay | [`configs/fmv3/time_transform_confirmation_eval.yaml`](../configs/fmv3/time_transform_confirmation_eval.yaml) |
 | Unit tests for fallback and structured memory | [`tests/test_fmv3_protocol.py`](../tests/test_fmv3_protocol.py) |
+| Unit tests for transform inversion, gradients, scope, and classifier isolation | [`tests/test_fmv3_head.py`](../tests/test_fmv3_head.py) |
 | Full structured result generator | [`generate_structured_fmv3_report.py`](../generate_structured_fmv3_report.py) |
 
 ## Reproduction and validity boundary
@@ -483,8 +658,9 @@ being mistaken for the final architecture.
 The exact commands are in the repository
 [`README.md`](../README.md#fm-v3-experiments). The primary protocol uses five
 unseen event logs, five nested natural-support repetitions, absolute case
-budgets 1--128 plus eligible full-support rows, fixed case-disjoint queries, a
-balanced prior, and $k=20$.
+budgets 1--128 plus eligible full-support rows and fixed case-disjoint queries.
+Classification uses balanced-prior structured inference at $k=20$; the
+selected remaining-time head uses $k=50$.
 
 Architecture screening used the same five logs before the final full run.
 Although the mixture parameters were frozen before confirmation, a publication

@@ -26,6 +26,212 @@ def _as_bool(value) -> bool:
     return bool(value)
 
 
+class LearnedTimeTransformBank(nn.Module):
+    """Learned monotone target transforms for scale-robust time regression.
+
+    Each branch uses a positive Box--Cox-like transform on raw hours, performs
+    its own soft neighbor regression, inverts back to hours, and contributes to
+    a learned convex aggregation.  Training-time log-uniform rescaling changes
+    the numerical regime seen by the transforms without changing the returned
+    unit: predictions are divided by the sampled factor before loss/evaluation.
+    """
+
+    def __init__(self, num_transforms=8, init_logit_scale=5.0, **config):
+        super().__init__()
+        self.num_transforms = max(1, int(num_transforms))
+        self.power_min = max(float(config.get("regression_power_min", 0.05)), 1e-3)
+        self.power_max = max(
+            float(config.get("regression_power_max", 1.50)), self.power_min + 1e-3
+        )
+        initial_powers = torch.linspace(
+            self.power_min, self.power_max, self.num_transforms
+        )
+        fractions = (
+            (initial_powers - self.power_min) / (self.power_max - self.power_min)
+        ).clamp(0.02, 1.0 - 0.02)
+        self.power_logits = nn.Parameter(torch.logit(fractions))
+
+        scale_low = max(float(config.get("regression_transform_scale_min_hours", 1.0)), 1e-4)
+        scale_high = max(
+            float(config.get("regression_transform_scale_max_hours", 10000.0)),
+            scale_low,
+        )
+        initial_scales = torch.logspace(
+            math.log10(scale_low), math.log10(scale_high), self.num_transforms
+        )
+        self.log_scales = nn.Parameter(initial_scales.log())
+        self.branch_logit_scales = nn.Parameter(
+            torch.full((self.num_transforms,), float(init_logit_scale))
+        )
+        self.aggregation_logits = nn.Parameter(torch.zeros(self.num_transforms))
+        self.aggregation = str(config.get("regression_transform_aggregation", "learned"))
+        self.dynamic_gate = None
+        if self.aggregation == "dynamic":
+            # Shared branch scorer: the same rule can be used for four or eight
+            # transforms. Inputs are dimensionless to preserve scale transfer.
+            self.dynamic_gate = nn.Sequential(
+                nn.Linear(10, 32),
+                nn.GELU(),
+                nn.Linear(32, 16),
+                nn.GELU(),
+                nn.Linear(16, 1),
+            )
+            nn.init.normal_(self.dynamic_gate[-1].weight, mean=0.0, std=0.01)
+            nn.init.zeros_(self.dynamic_gate[-1].bias)
+        self.augmentation_enabled = _as_bool(
+            config.get("regression_scale_augmentation", True)
+        )
+        self.augmentation_min = max(
+            float(config.get("regression_scale_augmentation_min", 0.02)), 1e-6
+        )
+        self.augmentation_max = max(
+            float(config.get("regression_scale_augmentation_max", 50.0)),
+            self.augmentation_min,
+        )
+
+    @property
+    def powers(self):
+        return self.power_min + (self.power_max - self.power_min) * torch.sigmoid(
+            self.power_logits
+        )
+
+    @property
+    def scales(self):
+        return self.log_scales.clamp(math.log(1e-4), math.log(1e8)).exp()
+
+    @property
+    def aggregation_weights(self):
+        if self.aggregation == "mean":
+            return torch.full_like(self.aggregation_logits, 1.0 / self.num_transforms)
+        if self.aggregation not in {"learned", "dynamic"}:
+            raise ValueError(f"Unknown time-transform aggregation: {self.aggregation}")
+        return F.softmax(self.aggregation_logits, dim=0)
+
+    def _dynamic_aggregation_weights(
+        self, similarities, support_hours, attention, branch_predictions, raw_mean,
+        raw_std,
+    ):
+        """Return query-specific convex weights with shape [branch, query]."""
+        query_scale = support_hours.mean(dim=-1).clamp_min(1e-3)
+        geometric_center = torch.exp(
+            torch.log(branch_predictions.clamp_min(1e-6)).mean(dim=0)
+        ).clamp_min(1e-6)
+        entropy = -(
+            attention * torch.log(attention.clamp_min(1e-8))
+        ).sum(dim=-1) / math.log(max(attention.size(-1), 2))
+        max_attention = attention.max(dim=-1).values
+        branch_shape = (self.num_transforms, 1)
+        power_position = (
+            (self.powers - self.power_min) / (self.power_max - self.power_min)
+        ).view(branch_shape).expand_as(branch_predictions)
+        relative_transform_scale = torch.log(
+            self.scales.view(branch_shape) / query_scale.unsqueeze(0)
+        ).clamp(-12.0, 12.0) / 12.0
+        similarity_max = similarities.max(dim=-1).values.unsqueeze(0).expand_as(
+            branch_predictions
+        )
+        similarity_std = similarities.std(dim=-1, correction=0).unsqueeze(0).expand_as(
+            branch_predictions
+        )
+        features = torch.stack(
+            [
+                torch.log1p(branch_predictions / query_scale.unsqueeze(0)),
+                torch.log1p(raw_mean / query_scale.unsqueeze(0)),
+                torch.log1p(raw_std / query_scale.unsqueeze(0)),
+                entropy,
+                max_attention,
+                power_position,
+                relative_transform_scale,
+                torch.log(branch_predictions.clamp_min(1e-6) / geometric_center.unsqueeze(0)).clamp(-8.0, 8.0) / 8.0,
+                similarity_max,
+                similarity_std,
+            ],
+            dim=-1,
+        )
+        scores = self.dynamic_gate(features).squeeze(-1)
+        scores = scores + self.aggregation_logits[:, None]
+        return F.softmax(scores, dim=0)
+
+    def sample_augmentation_factor(self, reference):
+        if not self.training or not self.augmentation_enabled:
+            return reference.new_tensor(1.0)
+        log_low = math.log(self.augmentation_min)
+        log_high = math.log(self.augmentation_max)
+        return torch.exp(reference.new_empty(()).uniform_(log_low, log_high))
+
+    def transform(self, hours):
+        """Transform ``[..., support]`` raw hours into ``[branch, ...]``."""
+        hours = hours.float().clamp_min(0.0)
+        view_shape = (self.num_transforms,) + (1,) * hours.ndim
+        powers = self.powers.view(view_shape)
+        scales = self.scales.view(view_shape)
+        normalized = hours.unsqueeze(0) / scales
+        return torch.expm1(powers * torch.log1p(normalized)) / powers
+
+    def inverse(self, values):
+        """Invert a tensor whose leading dimension indexes transform branches."""
+        view_shape = (self.num_transforms,) + (1,) * (values.ndim - 1)
+        powers = self.powers.view(view_shape)
+        scales = self.scales.view(view_shape)
+        base = (1.0 + powers * values).clamp_min(1e-8)
+        return scales * torch.expm1(torch.log(base) / powers)
+
+    def predict(self, similarities, support_hours, augmentation_factor=None):
+        """Predict raw hours from similarities and query-specific support labels.
+
+        ``similarities`` is ``[query, support]``. ``support_hours`` may be a
+        shared ``[support]`` vector or query-specific ``[query, support]``.
+        """
+        if support_hours.ndim == 1:
+            support_hours = support_hours.unsqueeze(0).expand(similarities.size(0), -1)
+        factor = (
+            self.sample_augmentation_factor(support_hours)
+            if augmentation_factor is None else augmentation_factor
+        )
+        augmented_hours = support_hours * factor
+        transformed = self.transform(augmented_hours)  # [branch, query, support]
+        branch_scales = self.branch_logit_scales.clamp(0.1, 100.0)
+        attention = F.softmax(
+            similarities.unsqueeze(0) * branch_scales[:, None, None], dim=-1
+        )
+        transformed_predictions = (attention * transformed).sum(dim=-1)
+        branch_predictions = self.inverse(transformed_predictions) / factor
+        raw_mean = (attention * support_hours.unsqueeze(0)).sum(dim=-1)
+        raw_variance = (
+            attention
+            * (support_hours.unsqueeze(0) - raw_mean.unsqueeze(-1)).square()
+        ).sum(dim=-1)
+        raw_std = torch.sqrt(raw_variance.clamp_min(1e-8))
+        if self.aggregation == "dynamic":
+            aggregation_weights = self._dynamic_aggregation_weights(
+                similarities,
+                support_hours,
+                attention,
+                branch_predictions,
+                raw_mean,
+                raw_std,
+            )
+        else:
+            aggregation_weights = self.aggregation_weights[:, None].expand_as(
+                branch_predictions
+            )
+        prediction = (aggregation_weights * branch_predictions).sum(dim=0)
+        total_variance = (
+            aggregation_weights
+            * (raw_variance + (branch_predictions - prediction.unsqueeze(0)).square())
+        ).sum(dim=0)
+        diagnostics = {
+            "branch_predictions_hours": branch_predictions,
+            "branch_attention": attention,
+            "aggregation_weights": aggregation_weights,
+            "powers": self.powers,
+            "scales_hours": self.scales,
+            "augmentation_factor": factor,
+            "std_hours": torch.sqrt(total_variance.clamp_min(1e-8)),
+        }
+        return prediction, diagnostics
+
+
 class PrototypicalHead(nn.Module):
     """Classification and remaining-time heads with config-selected behavior."""
 
@@ -77,6 +283,20 @@ class PrototypicalHead(nn.Module):
         self.logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
         self.logit_scale.requires_grad_(self.learn_temperature)
         self.reg_logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
+        self.regression_mode = str(config.get("regression_mode", "sqrt_knn"))
+        self.time_transform_bank = None
+        if self.regression_mode == "learned_transform_ensemble":
+            self.time_transform_bank = LearnedTimeTransformBank(
+                num_transforms=int(config.get("regression_num_transforms", 8)),
+                init_logit_scale=init_logit_scale,
+                **config,
+            )
+        self.regression_mae_weight = max(
+            float(config.get("regression_mae_weight", 0.5)), 0.0
+        )
+        self.regression_rmse_weight = max(
+            float(config.get("regression_rmse_weight", 0.5)), 0.0
+        )
 
         # Kept for strict compatibility with historical FM-v2 checkpoints.
         self._proto_shrink = nn.Parameter(torch.tensor(-2.0))
@@ -331,19 +551,89 @@ class PrototypicalHead(nn.Module):
         result = (output_logits, classes, confidence, diagnostics)
         return result if return_diagnostics else result[:3]
 
-    def forward_regression(self, support_features, support_labels, query_features):
+    @property
+    def regression_outputs_hours(self):
+        return self.regression_mode == "learned_transform_ensemble"
+
+    def regression_labels_to_output(self, labels):
+        labels = labels.float()
+        if self.regression_outputs_hours:
+            return labels.clamp_min(0.0).square()
+        return labels
+
+    def regression_loss(self, predictions, labels, labels_in_output_space=False):
+        """Optimize scale-normalized raw-hour MAE and RMSE jointly."""
+        targets = labels.float() if labels_in_output_space else self.regression_labels_to_output(labels)
+        if not self.regression_outputs_hours:
+            return F.huber_loss(predictions.squeeze(), targets.squeeze())
+        errors = predictions.reshape(-1) - targets.reshape(-1)
+        normalizer = targets.detach().median().clamp_min(1.0)
+        normalized = errors / normalizer
+        mae = normalized.abs().mean()
+        rmse = torch.sqrt(normalized.square().mean() + 1e-8)
+        denominator = max(self.regression_mae_weight + self.regression_rmse_weight, 1e-8)
+        return (
+            self.regression_mae_weight * mae + self.regression_rmse_weight * rmse
+        ) / denominator
+
+    def _regression_from_local(
+        self, local_support, support_labels, query, augmentation_factor=None
+    ):
+        """Shared implementation for common and query-specific neighborhoods."""
+        if local_support.ndim == 2:
+            local_support = local_support.unsqueeze(0).expand(query.size(0), -1, -1)
+        support = _l2_normalize(local_support)
+        query = _l2_normalize(query)
+        center = support.mean(dim=1, keepdim=True)
+        centered_support = _l2_normalize(support - center)
+        centered_query = _l2_normalize(query - center.squeeze(1))
+        similarities = torch.einsum("qd,qkd->qk", centered_query, centered_support)
+        if self.regression_outputs_hours:
+            support_hours = self.regression_labels_to_output(support_labels)
+            prediction, diagnostics = self.time_transform_bank.predict(
+                similarities, support_hours, augmentation_factor=augmentation_factor
+            )
+            std = diagnostics["std_hours"]
+        else:
+            scale = self.reg_logit_scale.clamp(1.0, 100.0)
+            weights = F.softmax(similarities * scale, dim=1)
+            targets = support_labels.float()
+            if targets.ndim == 1:
+                targets = targets.unsqueeze(0).expand(query.size(0), -1)
+            prediction = (weights * targets).sum(dim=1)
+            variance = (weights * (targets - prediction.unsqueeze(1)).square()).sum(dim=1)
+            std = torch.sqrt(variance + 1e-8)
+            diagnostics = {"attention": weights, "std": std}
+        confidence = (1.0 / (1.0 + std)) * (
+            (similarities.max(dim=1).values + 1.0) / 2.0
+        ).clamp(0.0, 1.0)
+        diagnostics["similarities"] = similarities
+        return prediction, confidence.clamp(0.0, 1.0), diagnostics
+
+    def forward_regression(
+        self, support_features, support_labels, query_features, return_diagnostics=False,
+        augmentation_factor=None,
+    ):
         if support_features.numel() == 0 or query_features.numel() == 0:
             device = query_features.device
-            return torch.zeros(query_features.size(0), device=device), torch.zeros(query_features.size(0), device=device)
-        support = _l2_normalize(support_features)
-        query = _l2_normalize(query_features)
-        support, query = self._center_and_renorm(support, query)
-        scale = self.reg_logit_scale.clamp(1.0, 100.0)
-        sims_raw = query @ support.t()
-        weights = F.softmax(sims_raw * scale, dim=1)
-        targets = support_labels.view(-1).float()
-        prediction = weights @ targets
-        variance = (weights * (targets.view(1, -1) - prediction.view(-1, 1)) ** 2).sum(dim=1)
-        std = torch.sqrt(variance + 1e-8)
-        confidence = (1.0 / (1.0 + std)) * ((sims_raw.max(dim=1).values + 1.0) / 2.0).clamp(0.0, 1.0)
-        return prediction, confidence.clamp(0.0, 1.0)
+            result = (
+                torch.zeros(query_features.size(0), device=device),
+                torch.zeros(query_features.size(0), device=device),
+                {},
+            )
+        else:
+            result = self._regression_from_local(
+                support_features, support_labels, query_features,
+                augmentation_factor=augmentation_factor,
+            )
+        return result if return_diagnostics else result[:2]
+
+    def forward_regression_batched(
+        self, local_support_features, local_support_labels, query_features,
+        return_diagnostics=False, augmentation_factor=None,
+    ):
+        result = self._regression_from_local(
+            local_support_features, local_support_labels, query_features,
+            augmentation_factor=augmentation_factor,
+        )
+        return result if return_diagnostics else result[:2]

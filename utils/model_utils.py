@@ -38,6 +38,23 @@ def create_model (config ,loader ,device ):
     if strategy =='learned':
         model .set_char_vocab (loader .char_to_id )
     return model
+def load_state_dict_compatible (model ,state_dict ):
+    """Load a checkpoint while allowing initialization of a new time bank only."""
+    incompatible =model .load_state_dict (state_dict ,strict =False )
+    allowed_missing =[
+    key for key in incompatible .missing_keys
+    if '.proto_head.time_transform_bank.'in key
+    or '.embedder.time_input_adapter.'in key
+    ]
+    disallowed_missing =sorted (set (incompatible .missing_keys )-set (allowed_missing ))
+    if disallowed_missing or incompatible .unexpected_keys :
+        raise RuntimeError (
+        f"Checkpoint mismatch. Missing={disallowed_missing}; "
+        f"unexpected={incompatible .unexpected_keys}"
+        )
+    if allowed_missing :
+        print (f"🆕 Initialized {len (allowed_missing )} learned time-transform parameters from config.")
+    return incompatible
 def load_model_weights (model ,checkpoint_dir ,device ,epoch_num =None ):
     if not os .path .isdir (checkpoint_dir ):
         exit (f"❌ Error: Checkpoint directory not found at {checkpoint_dir }")
@@ -59,5 +76,5 @@ def load_model_weights (model ,checkpoint_dir ,device ,epoch_num =None ):
         )
         print (f"🔍 Found latest checkpoint: {latest_checkpoint_name }")
     print (f"💾 Loading weights from {checkpoint_path }...")
-    model .load_state_dict (torch .load (checkpoint_path ,map_location =device ))
+    load_state_dict_compatible (model ,torch .load (checkpoint_path ,map_location =device ))
     return checkpoint_path

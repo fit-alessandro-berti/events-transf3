@@ -59,6 +59,8 @@ class FMV3ProtocolTests(unittest.TestCase):
         result = regression_metrics([1, 2, 100], [2, 2, 2])
         self.assertIn("d2_absolute_error", result)
         self.assertAlmostEqual(result["mae_skill_vs_median"], 0.0)
+        self.assertAlmostEqual(result["mae_hours"], 99.0 / 3.0)
+        self.assertAlmostEqual(result["rmse_hours"], np.sqrt((1.0 + 0.0 + 98.0 ** 2) / 3.0))
 
     def test_batched_coverage_fallback_matches_head(self):
         head = PrototypicalHead(

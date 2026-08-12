@@ -1,0 +1,7 @@
+extends: learned_time_4_dynamic.yaml
+experiment_name: learned_time_4_temporal
+epochs: 33
+selected_checkpoint_epoch: 33
+fmv3_head:
+  regression_time_input_transforms: true
+  regression_time_replace_legacy: false

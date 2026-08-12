@@ -8,7 +8,8 @@ import random
 from config import CONFIG
 from config_utils import apply_experiment_config, save_yaml_config
 from utils .data_utils import get_task_data
-from utils .model_utils import init_loader ,create_model
+from utils .model_utils import init_loader ,create_model ,load_state_dict_compatible
+from utils .parameter_utils import configure_trainable_scope
 from training import train
 def main ():
     pre_parser =argparse .ArgumentParser (add_help =False )
@@ -137,7 +138,12 @@ def main ():
     model =create_model (CONFIG ,loader ,device )
     if latest_checkpoint_path :
         print (f"Loading model weights from {latest_checkpoint_path }...")
-        model .load_state_dict (torch .load (latest_checkpoint_path ,map_location =device ))
+        load_state_dict_compatible (model ,torch .load (latest_checkpoint_path ,map_location =device ))
+    trainable_scope =str (CONFIG .get ('trainable_scope','all')).lower ()
+    trainable_parameters =configure_trainable_scope (model ,trainable_scope )
+    if trainable_scope =='time_transform':
+        print ("🔒 Frozen encoder/classification parameters; training learned time-transform banks only.")
+        print (f"  - Trainable tensors: {len (trainable_parameters )}")
     print (f"Model has {sum (p .numel ()for p in model .parameters ()if p .requires_grad ):,} trainable parameters.")
     print ("\n--- Phase 4: Starting Model Training ---")
     if not CONFIG .get ('training_enabled',True ):

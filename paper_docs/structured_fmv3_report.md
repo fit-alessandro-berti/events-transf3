@@ -1,9 +1,11 @@
 # Structured FM-v3 architecture and paired evaluation
 
-> **Selected final system.** For a component-by-component explanation of the
+> **Selected final classifier.** For a component-by-component explanation of the
 > FM-v2 baseline, the corrected neural head, the structured-memory equations,
 > training versus inference changes, and rejected alternatives, see
 > [`fmv3_architecture_changes.md`](fmv3_architecture_changes.md).
+> Remaining-time inference was redesigned subsequently; see
+> [`fmv3_time_transform_report.md`](fmv3_time_transform_report.md).
 
 ## Outcome
 
@@ -102,9 +104,10 @@ should therefore remain separate validation-only steps. The largest gains occur 
 consistent with the structured memory becoming reliable as transition counts
 accumulate.
 
-This is a no-gradient target-memory augmentation of the already trained
-corrected checkpoint; remaining-time predictions are deliberately unchanged in
-the primary comparison. The same five logs were used for architectural
+This classification experiment is a no-gradient target-memory augmentation of
+the already trained corrected checkpoint; remaining-time predictions were
+deliberately unchanged in this historical comparison. The later temporal
+transform report evaluates that task separately. The same five logs were used for architectural
 screening, so a publication claim still requires confirmation on additional
 untouched logs or a nested development/test split.
 
