@@ -151,18 +151,22 @@ zero for an unseen context, leaving the foundation-model prediction unchanged.
 The primary full-protocol comparison is documented in
 `paper_docs/structured_fmv3_report.md`.
 
-### State-aware prefix attention and independent clocks
+### Promoted multi-metric state-aware model
 
-**Outcome:** yes, this change improves the repository benchmark. Compared with
-the immediate independent-temporal predecessor, the selected epoch-36 model is
-better on every aggregate primary metric. Higher is better for the first three
-columns; lower is better for MAE and RMSE.
+**Outcome:** the selected model is now the epoch-38 multi-metric continuation.
+It improves the established five-log benchmark over the previous selected
+epoch-36 checkpoint on balanced accuracy, macro-F1, MAE, and RMSE; ordinary
+accuracy has a small tradeoff. Higher is better for the first three columns;
+lower is better for MAE and RMSE.
+
+Canonical configuration: `configs/fmv3/selected.yaml`. Selected checkpoint:
+`checkpoints/fmv3/loss_multimetric_gate_aux_005/model_epoch_38.pth`.
 
 | Model | Balanced accuracy | Accuracy | Macro-F1 | MAE (h) | RMSE (h) |
 |---|---:|---:|---:|---:|---:|
-| Independent temporal, epoch 34 | 0.445968 | 0.708158 | 0.417730 | 1,113.1992 | 1,661.3121 |
-| **State-aware joint, epoch 36** | **0.447473** | **0.709352** | **0.418885** | **1,112.2914** | **1,660.6820** |
-| Change | **+0.001504** | **+0.001194** | **+0.001155** | **-0.9078** | **-0.6301** |
+| Previous state-aware model, epoch 36 | 0.447473 | **0.709352** | 0.418885 | 1,112.2914 | 1,660.6820 |
+| **Promoted multi-metric model, epoch 38** | **0.447740** | 0.709221 | **0.419179** | **1,109.4089** | **1,659.6200** |
+| Change | **+0.000268** | -0.000131 | **+0.000294** | **-2.8824** | **-1.0620** |
 
 The current architecture keeps parameter-disjoint learned components for the
 two observable prefix clocks: elapsed time from case start and time since the
@@ -180,17 +184,21 @@ default for historical configurations.
 
 The regression head is a third independent learned component. It learns four
 monotone target transforms and returns every branch to raw hours before
-aggregation. Consequently, MAE and RMSE are computed in raw hours—not in
-square-root or log space.
+aggregation. Its promoted primary objective combines MAE, RMSE, Huber,
+log-RMSE, relative-MAE, and bias control, plus transform-gate supervision.
+Reported MAE and RMSE remain raw-hour metrics—not square-root or log metrics.
 
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.
 The second observable prefix clock is `time_from_previous`.
 
 Start with
-[`paper_docs/fmv3_prefix_attention_report.md`](paper_docs/fmv3_prefix_attention_report.md)
-for the current design, bottleneck audit, equations, ablations, diagnostics,
-evaluation, and reproduction commands. The full component history is in
+[`paper_docs/fmv3_multimetric_loss_report.md`](paper_docs/fmv3_multimetric_loss_report.md)
+for the promotion decision, paired results, uncertainty, transfer limitation,
+artifact hashes, and reproduction commands. The Stage-6 design and bottleneck
+audit remain in
+[`paper_docs/fmv3_prefix_attention_report.md`](paper_docs/fmv3_prefix_attention_report.md).
+The full component history is in
 [`paper_docs/fmv3_architecture_changes.md`](paper_docs/fmv3_architecture_changes.md),
 while the immediate predecessor is recorded in
 [`paper_docs/fmv3_independent_temporal_report.md`](paper_docs/fmv3_independent_temporal_report.md)
@@ -202,19 +210,20 @@ Reproduce the selected confirmation with:
 
 ```bash
 python evaluate_fmv3.py \
-  --checkpoint_dir checkpoints/fmv3/prefix_state_attention_joint \
-  --checkpoint_epoch 36 \
+  --checkpoint_dir checkpoints/fmv3/loss_multimetric_gate_aux_005 \
+  --checkpoint_epoch 38 \
   --eval_config configs/fmv3/prefix_attention_confirmation_eval.yaml \
-  --output_dir evaluation_results/prefix_attention/confirmations/prefix_state_attention_joint_e36
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/loss_multimetric/confirmations/loss_multimetric_gate_aux_005_e38
 ```
 
 On the full paired protocol, the selected checkpoint reaches balanced accuracy
-`0.447473`, ordinary accuracy `0.709352`, macro-F1 `0.418885`, MAE
-`1,112.2914` hours, and RMSE `1,660.6820` hours. Relative to the immediate
-independent-temporal predecessor, all five primary means improve: `+0.001504`,
-`+0.001194`, `+0.001155`, `-0.9078` hours, and `-0.6301` hours, respectively.
-MAE and RMSE are `13.5507` and `5.0163` hours below the fixed-sqrt structured
-baseline.
+`0.447740`, ordinary accuracy `0.709221`, macro-F1 `0.419179`, MAE
+`1,109.4089` hours, and RMSE `1,659.6200` hours. Relative to epoch 36, the
+changes are `+0.000268`, `-0.000131`, `+0.000294`, `-2.8824` hours, and
+`-1.0620` hours, respectively. On the separate `roadtraffic_10000` check,
+classification is unchanged but MAE and RMSE worsen by `3.9787` and `7.7584`
+hours; this remains a documented limitation of the promoted checkpoint.
 
 The three-way corrected baseline/control/FM-v3 evaluation manifest is
 `configs/fmv3/improved_evaluation_manifest.yaml`.

@@ -27,6 +27,11 @@ fmv3_head:
   local_gate: 0.5
   enable_abstention: true
   abstain_label: -101
+  # Pin the historical two-term MAE/RMSE objective despite newer base defaults.
+  regression_huber_weight: 0.0
+  regression_log_rmse_weight: 0.0
+  regression_relative_mae_weight: 0.0
+  regression_bias_weight: 0.0
 fmv3_evaluation:
   evaluation_profiles:
     - name: main

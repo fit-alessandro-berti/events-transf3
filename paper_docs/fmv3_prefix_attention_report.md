@@ -1,14 +1,17 @@
 # FM-v3 state-aware prefix attention
 
-## Status and selected checkpoint
+## Stage-6 status and checkpoint
 
-This is the current learned FM-v3 architecture. It succeeds the independent
+This report records the state-aware Stage-6 architecture. It succeeds the independent
 temporal model documented in
 [`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md)
 and keeps that model's two independent observable-clock encoders and learned
-remaining-time target bank.
+remaining-time target bank. The architecture is still current, but its
+epoch-36 weights have been superseded by the promoted epoch-38 multi-metric
+continuation documented in
+[`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md).
 
-The selected checkpoint is
+The selected Stage-6 checkpoint is
 `checkpoints/fmv3/prefix_state_attention_joint/model_epoch_36.pth`. It was
 initialized from `learned_time_independent_4_cls70` epoch 34 and trained for
 two continuation epochs. The selected full paired result is
@@ -16,7 +19,7 @@ two continuation epochs. The selected full paired result is
 
 ### Decision and result at a glance
 
-**Decision: accept the change and make epoch 36 the selected architecture.**
+**Stage-6 decision: accept the architecture and use epoch 36 as the continuation base.**
 It improves every aggregate primary metric over the immediate predecessor on
 the same paired evaluation rows. “Improves” here means higher classification
 scores and lower raw-hour regression errors:
@@ -252,7 +255,7 @@ rows per checkpoint.
 | Joint temporal + state path, epoch 35 | 0.447067 | 0.709165 | 0.418751 | 1,112.4743 | 1,660.8221 |
 | **Joint temporal + state path, epoch 36** | **0.447473** | **0.709352** | **0.418885** | **1,112.2914** | **1,660.6820** |
 
-Relative to the immediate independent-temporal predecessor, the selected
+Relative to the immediate independent-temporal predecessor, the Stage-6
 checkpoint changes balanced accuracy by `+0.001504`, accuracy by `+0.001194`,
 macro-F1 by `+0.001155`, MAE by `-0.9078` hours, and RMSE by `-0.6301` hours.
 Relative to the fixed-sqrt structured baseline it improves all five primary
@@ -310,7 +313,7 @@ padding invariance, monotone recency bias, task-isolated gradients, checkpoint
 migration, and constrained parameter scopes. Source compilation and
 `git diff --check` also pass.
 
-## Reproduction
+## Stage-6 reproduction
 
 Training configuration:
 [`configs/fmv3/prefix_state_attention_joint.yaml`](../configs/fmv3/prefix_state_attention_joint.yaml)
@@ -344,7 +347,7 @@ python main.py \
   --stop_after_epoch 36
 ```
 
-Evaluate the selected checkpoint with:
+Evaluate the Stage-6 checkpoint with:
 
 ```bash
 python evaluate_fmv3.py \

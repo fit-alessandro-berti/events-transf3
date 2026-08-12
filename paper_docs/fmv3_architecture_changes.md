@@ -1,4 +1,4 @@
-# FM-v3 architecture changes: from FM-v2 to state-aware temporal FM-v3
+# FM-v3 architecture changes: from FM-v2 to promoted multi-metric FM-v3
 
 This document is the source of truth for the architecture currently selected
 for the paper. It explains what changed, why each change was made, which parts
@@ -12,11 +12,13 @@ fully independent successor is documented in
 [`fmv3_independent_temporal_report.md`](fmv3_independent_temporal_report.md).
 The current state-aware prefix projection, its bottleneck audit, and its full
 confirmation are documented in
-[`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md).
+[`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). The
+promoted epoch-38 loss continuation and its transfer limitation are documented
+in [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md).
 
 ## Short version
 
-The final system is not the original `06_full_fmv3` model. It has four selected
+The final system is not the original `06_full_fmv3` model. It has five selected
 layers:
 
 1. **Corrected FM-v3 checkpoint:** retain FM-v2's reliable centered local
@@ -40,6 +42,11 @@ layers:
    last valid event, and a prefix-conditioned attention pool. Classification
    and regression use separate query offsets, gates, and learned ordinal-
    recency strengths.
+5. **Multi-metric remaining-time optimization:** continue the state-aware
+   model through epoch 38 with explicit MAE, RMSE, Huber, log-RMSE, relative-
+   MAE, and bias terms plus transform-gate supervision. This is the promoted
+   checkpoint because it improves the established five-log benchmark; its
+   worse mean/RMSE result on `roadtraffic_10000` remains a stated limitation.
 
 The six-layer Transformer encoder and its four-expert mixture remain the frozen
 representation backbone. The structured transition memory remains
@@ -48,23 +55,23 @@ paths and can change classification output; only the target-transform bank is
 regression-only. The new prefix adapter is task-conditioned and therefore
 gives the two tasks different final prefix vectors.
 
-## Seven-stage comparison
+## Eight-stage comparison
 
-| Dimension | FM-v2 baseline | Original full FM-v3 | Corrected FM-v3 | Structured FM-v3 | Historical temporal FM-v3 | Independent temporal FM-v3 | State-aware temporal FM-v3 |
-|---|---|---|---|---|---|---|---|
-| Encoder | Four Transformer experts | Same backbone, continued training | Same backbone, continued from FM-v2 epoch 20 | Frozen corrected epoch-23 checkpoint | Frozen encoder plus shared regression-only temporal residual | Frozen encoder plus two independent temporal residuals used by both tasks | Same frozen Transformer plus task-conditioned prefix residual |
-| Prefix projection | Static query plus CLS | Same | Same | Same | Same | Same | Dynamic CLS/last-event query, learned recency, explicit last state, historical residual anchor |
-| Local geometry | Neighborhood-centered cosine | Uncentered cosine | Neighborhood-centered cosine restored | Same as corrected FM-v3 | Classification unchanged; regression uses adapted embeddings | Both tasks use independently temporal-adapted embeddings | Same head; task-conditioned prefix vectors |
-| Local aggregation | Summed soft-kNN mass | Log-sum-exp with learned count normalization | Log-sum-exp with fixed $\gamma=0$ | Same as corrected FM-v3 | Same classifier; four regression transform branches | Same heads; changed shared event representation | Same heads and structured classifier |
-| Candidate labels | Local top-k only | Full support pool | Full support pool, but global evidence used only for locally missing labels | Neural candidates plus structured transition evidence | Same classification rule | Same classification rule, new temporal embeddings | Same classification rule, new state-aware embeddings |
-| Global combination | None | Learned/fixed global-local fusion for all classes | Margin-gated coverage fallback | Same fallback inside $p_{FM}$ | Same classification; dual regression combination | Same head-level combinations | Same head-level combinations |
-| Class prior | Implicit local frequency | Explicit balanced/natural mode | Balanced | Balanced neural head plus uniform structured class prior | Same classification prior | Same classification prior | Same classification prior |
-| Abstention | None | Learned missing-pool abstention | Removed | Removed | Removed | Removed | Removed |
-| Target-log adaptation | Embedding retrieval | Embedding retrieval and prototypes | Corrected retrieval and prototypes | Corrected neural memory plus order-1--3 transition memory | Labeled-support branch calibration for regression | Same, with both tasks retrieving in the new temporal representation | Same, in task-specific prefix spaces |
-| Target gradients | None | None | None | None | None at adaptation time | None at adaptation time | None at adaptation time |
-| Remaining-time target rule | Fixed square-root neighbor regression | Same | Same | Same | Four learned monotone branches, inverted to raw hours | Same independent target bank | Same bank, jointly continued with prefix adapter |
-| Prefix timing inputs | Fixed `log1p` coordinates | Same | Same | Same | Fixed coordinates plus one shared two-clock regression adapter | Fixed coordinates plus separate start/previous banks active for both tasks | Same two clocks plus ordinal attention recency |
-| Status | Authoritative baseline | Rejected combined design | Selected neural base | Selected structured classifier | Superseded temporal input design | Immediate predecessor | **Selected current architecture** |
+| Dimension | FM-v2 baseline | Original full FM-v3 | Corrected FM-v3 | Structured FM-v3 | Historical temporal FM-v3 | Independent temporal FM-v3 | State-aware temporal FM-v3 | Promoted multi-metric FM-v3 |
+|---|---|---|---|---|---|---|---|---|
+| Encoder | Four Transformer experts | Same backbone, continued training | Same backbone, continued from FM-v2 epoch 20 | Frozen corrected epoch-23 checkpoint | Frozen encoder plus shared regression-only temporal residual | Frozen encoder plus two independent temporal residuals used by both tasks | Same frozen Transformer plus task-conditioned prefix residual | Same architecture, continued through epoch 38 |
+| Prefix projection | Static query plus CLS | Same | Same | Same | Same | Same | Dynamic CLS/last-event query, learned recency, explicit last state, historical residual anchor | Same state-aware projection |
+| Local geometry | Neighborhood-centered cosine | Uncentered cosine | Neighborhood-centered cosine restored | Same as corrected FM-v3 | Classification unchanged; regression uses adapted embeddings | Both tasks use independently temporal-adapted embeddings | Same head; task-conditioned prefix vectors | Same, jointly continued |
+| Local aggregation | Summed soft-kNN mass | Log-sum-exp with learned count normalization | Log-sum-exp with fixed $\gamma=0$ | Same as corrected FM-v3 | Same classifier; four regression transform branches | Same heads; changed shared event representation | Same heads and structured classifier | Same |
+| Candidate labels | Local top-k only | Full support pool | Full support pool, but global evidence used only for locally missing labels | Neural candidates plus structured transition evidence | Same classification rule | Same classification rule, new temporal embeddings | Same classification rule, new state-aware embeddings | Same |
+| Global combination | None | Learned/fixed global-local fusion for all classes | Margin-gated coverage fallback | Same fallback inside $p_{FM}$ | Same classification; dual regression combination | Same head-level combinations | Same head-level combinations | Same |
+| Class prior | Implicit local frequency | Explicit balanced/natural mode | Balanced | Balanced neural head plus uniform structured class prior | Same classification prior | Same classification prior | Same classification prior | Same |
+| Abstention | None | Learned missing-pool abstention | Removed | Removed | Removed | Removed | Removed | Removed |
+| Target-log adaptation | Embedding retrieval | Embedding retrieval and prototypes | Corrected retrieval and prototypes | Corrected neural memory plus order-1--3 transition memory | Labeled-support branch calibration for regression | Same, with both tasks retrieving in the new temporal representation | Same, in task-specific prefix spaces | Same |
+| Target gradients | None | None | None | None | None at adaptation time | None at adaptation time | None at adaptation time | None at adaptation time |
+| Remaining-time target rule | Fixed square-root neighbor regression | Same | Same | Same | Four learned monotone branches, inverted to raw hours | Same independent target bank | Same bank, jointly continued with prefix adapter | Same bank trained with promoted multi-metric loss and gate auxiliary |
+| Prefix timing inputs | Fixed `log1p` coordinates | Same | Same | Same | Fixed coordinates plus one shared two-clock regression adapter | Fixed coordinates plus separate start/previous banks active for both tasks | Same two clocks plus ordinal attention recency | Same |
+| Status | Authoritative baseline | Rejected combined design | Selected neural base | Selected structured classifier | Superseded temporal input design | Earlier predecessor | Architecture predecessor | **Selected current checkpoint** |
 
 ## Architecture at a glance
 
@@ -554,27 +561,54 @@ steps pass `ignore_index=-100` for queries whose label is absent from the
 support prototype set. Retrieval maps each query onto the episode's prototype
 classes first and skips unmapped labels.
 
-**Remaining-time primary loss (`learned_transform_ensemble`).** A convex
-combination of scale-normalized MAE and RMSE in raw hours:
+**Remaining-time primary loss (`learned_transform_ensemble`).** A weighted
+mixture of complementary raw-hour metrics, all computed after unit conversion
+and (except log-RMSE) after batch-median scale normalization
+\(s=m^{p}s_0^{1-p}\):
 
 \[
 \mathcal{L}_{\mathrm{reg}}
 =
-\frac{w_{\mathrm{mae}}\mathrm{MAE}(e/s)+w_{\mathrm{rmse}}\mathrm{RMSE}(e/s)}
-{w_{\mathrm{mae}}+w_{\mathrm{rmse}}},
+\frac{
+\sum_{k\in\mathcal{K}} w_k\,\ell_k
+}{\sum_{k\in\mathcal{K}} w_k},
 \quad
 s = m^{p}\,s_0^{1-p},
 \]
 
-where \(e=\hat y-y\) is the raw-hour residual, \(m\) is the batch median of
+| Term \(\ell_k\) | Knob (default) | Role for joint MAE+RMSE |
+|---|---|---|
+| Scale-normalized MAE | `regression_mae_weight` (0.5) | Explicit central absolute error |
+| Scale-normalized RMSE | `regression_rmse_weight` (0.5) | Explicit tail / L2 pressure |
+| Huber on \(e/s\) | `regression_huber_weight` (0.15), `regression_huber_delta` (1.0) | Smooth MAE/RMSE bridge |
+| \(\mathrm{RMSE}(\log(1+\hat y)-\log(1+y))\) | `regression_log_rmse_weight` (0.15) | Multi-scale tail pressure |
+| Mean \(\|e\|/\max(\|y\|,1)\) | `regression_relative_mae_weight` (0.05) | Relative absolute error |
+| \(\lvert\mathrm{mean}(e)\rvert/s\) | `regression_bias_weight` (0.05) | Systematic shift control |
+| Pinball / quantile residual | `regression_quantile_weight` (0.0), `regression_quantile_level` (0.5) | Optional asymmetric-error term |
+
+Here \(e=\hat y-y\) is the raw-hour residual, \(m\) is the batch median of
 targets (floored at 1 hour), \(p=\) `regression_loss_scale_power` (default
-`1.0`, i.e. pure median scaling), and \(s_0=\)
-`regression_loss_reference_hours` (default `100`). Setting \(p=0\) recovers a
-fixed reference-hour normalizer. Predictions must be in hours; labels are
-either stored `sqrt(hours)` (default, squared on entry) or already-hours when
-`labels_in_output_space=True` (episodic path after `MetaLearner` conversion).
-The primary reduction runs in float32 even under AMP. Legacy `sqrt_knn` still
-uses Huber loss in the stored sqrt unit.
+`1.0`), and \(s_0=\) `regression_loss_reference_hours` (default `100`).
+Setting \(p=0\) recovers a fixed reference-hour normalizer. The displayed
+complementary weights are the promoted defaults. Historical experiment roots
+pin them to zero and resolved checkpoint configurations remain authoritative,
+so the earlier two-term MAE/RMSE runs are still reproducible. Any weight may be
+set to zero to drop that term; at least one primary weight must be positive.
+The pure component tensors are available from
+`PrototypicalHead.regression_loss_components` for diagnostics and tests.
+Predictions must be in hours; labels are either stored `sqrt(hours)` (default,
+squared on entry) or already-hours when `labels_in_output_space=True`
+(episodic path after `MetaLearner` conversion). The primary reduction runs in
+float32 even under AMP. Legacy `sqrt_knn` still uses a single Huber loss in
+the stored sqrt unit.
+
+The complementary terms were retrained in a controlled epoch-36-to-38
+continuation. They improve five-log MAE and RMSE and are promoted as the
+selected repository checkpoint. Both metrics regress on the separate
+10,000-case Road Traffic log; that accepted transfer limitation remains part
+of the selection record. See
+[`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md) for the
+full paired results, uncertainty intervals, artifact hashes, and decision.
 
 **Optional transform-gate auxiliary.** When
 `regression_gate_aux_weight > 0`, a soft cross-entropy teaches the dynamic
@@ -583,9 +617,9 @@ error. Soft targets use temperature
 `regression_gate_target_temperature` scaled by the per-query mean branch error
 (floored at `1e-4` hours so sub-hour logs still get peaked targets). Branch
 predictions are detached so the aux term cannot move branch outputs merely to
-make selection easier; the primary MAE/RMSE remains authoritative for the
-transform parameters. Both retrieval and episodic strategies attach this term
-when diagnostics are available.
+make selection easier; the multi-metric primary loss remains authoritative for
+the transform parameters. Both retrieval and episodic strategies attach this
+term when diagnostics are available.
 
 **Retrieval auxiliaries (classification/regression embedding space).** Optional
 supervised contrastive (`retrieval_contrastive_weight`; same-label different-case
@@ -669,19 +703,43 @@ only adds a soft statement about relative position inside the observed prefix.
 The pretrained `sqrt(d_model)` input scale and positional encoding remain
 unchanged because retuning them would alter all six frozen Transformer layers.
 
-The selected `temporal_prefix_joint` continuation exposes only the new prefix
+The Stage-6 `temporal_prefix_joint` continuation exposes only the new prefix
 adapter, both learned input clocks, and the regression target bank. Across four
 experts this is 991,900 trainable parameters out of 22,362,904. A checkpoint
 audit found 36 new state-pool tensors and changes only in the 40 clock tensors
 and 40 target-bank tensors; the other 476 common tensors are exactly unchanged.
 
-The full paired confirmation selects
+The Stage-6 full paired confirmation selected
 `prefix_state_attention_joint/model_epoch_36.pth`. Relative to Stage 5 it
 improves balanced accuracy by `0.001504`, accuracy by `0.001194`, macro-F1 by
 `0.001155`, MAE by `0.9078` hours, and RMSE by `0.6301` hours. Architecture
 equations, ablations, Receipt support-budget accuracy, attention diagnostics,
 and reproduction commands are in
 [`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md).
+
+## Stage 7: promoted multi-metric continuation
+
+Stage 7 keeps the complete Stage-6 architecture and continues only the same
+116 adapter tensors for epochs 37 and 38. It adds a 0.05 transform-gate
+auxiliary and replaces the two-term primary regression objective with the
+promoted mixture listed in Section 4.6. The Transformer, character embedder,
+base event projection, fallback classifier, and structured inference rule stay
+unchanged.
+
+The selected artifact is
+`loss_multimetric_gate_aux_005/model_epoch_38.pth`. Against the Stage-6
+epoch-36 checkpoint on 400 paired five-log rows, it changes balanced accuracy
+by `+0.000268`, accuracy by `-0.000131`, macro-F1 by `+0.000294`, MAE by
+`-2.8824` hours, RMSE by `-1.0620` hours, and median absolute error by
+`-2.4679` hours. The five-log cluster-bootstrap intervals exclude zero for
+both MAE and RMSE improvements.
+
+Promotion is scoped to the established repository benchmark. On the separate
+10,000-case Road Traffic log, classification is exactly unchanged and median
+absolute error improves by `7.8184` hours, but MAE worsens by `3.9787` hours
+and RMSE by `7.7584` hours. This transfer regression is retained as a known
+limitation, not averaged away. Full controls, intervals, hashes, and commands
+are in [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md).
 
 ## Final classification inference algorithm
 
@@ -754,6 +812,8 @@ For the same case-disjoint target support/query split:
 | Learned ordinal-recency attention bias | Yes | Yes | Yes |
 | Historical static prefix vector as residual anchor | No | Yes | Yes |
 | Shared temporal scale augmentation | Yes | No | Yes |
+| Multi-metric MAE/RMSE/Huber/log/relative/bias objective | Yes | No | Yes |
+| Transform-gate auxiliary supervision | Yes | No | Yes |
 | Query-specific regression gate | Yes | Yes | Yes |
 | Support-only regression branch prior | No | Yes | Yes |
 | 50/50 regression prediction blend | No | Yes | Yes |
@@ -766,7 +826,8 @@ For the same case-disjoint target support/query split:
 | Corrected FM-v3 | 0.4194 | 0.6837 | 0.3986 | Training, head, and evaluator corrections |
 | Structured FM-v3 | 0.4463 | 0.7086 | 0.4177 | Corrected checkpoint plus structured inference memory |
 | Independent temporal FM-v3 | 0.4460 | 0.7082 | 0.4177 | Both learned clocks feed the classifier; small tradeoff for the selected regression checkpoint |
-| **State-aware temporal FM-v3** | **0.4475** | **0.7094** | **0.4189** | Dynamic task-conditioned prefix projection plus joint continuation |
+| State-aware temporal FM-v3, epoch 36 | 0.4475 | **0.7094** | 0.4189 | Dynamic task-conditioned prefix projection plus joint continuation |
+| **Promoted multi-metric FM-v3, epoch 38** | **0.4477** | 0.7092 | **0.4192** | Same architecture continued with the promoted loss mixture |
 
 The corrected checkpoint contributes +0.0059 balanced accuracy over FM-v2.
 Structured memory then contributes +0.0269 over corrected FM-v3, for a total
@@ -788,12 +849,15 @@ support/query rows used by the strongest fixed-sqrt baseline:
 | Fixed sqrt baseline | 1,125.8421 | 1,665.6983 |
 | Historical shared temporal adapter | 1,113.7193 | 1,661.9432 |
 | Independent temporal FM-v3 | 1,113.1992 | 1,661.3121 |
-| **State-aware temporal FM-v3** | **1,112.2914** | **1,660.6820** |
-| Current minus fixed sqrt | **-13.5507** | **-5.0163** |
-| Current minus independent temporal | **-0.9078** | **-0.6301** |
+| State-aware temporal FM-v3, epoch 36 | 1,112.2914 | 1,660.6820 |
+| **Promoted multi-metric FM-v3, epoch 38** | **1,109.4089** | **1,659.6200** |
+| Current minus fixed sqrt | **-16.4332** | **-6.0783** |
+| Current minus state-aware epoch 36 | **-2.8824** | **-1.0620** |
 
-Per-log and per-budget results, including the smallest-budget regressions, are
-reported in
+Per-log and per-budget results, including the separate Road Traffic transfer
+check, are reported in
+[`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md), with the
+Stage-6 architecture details retained in
 [`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md).
 
 ## Rejected or non-final alternatives
@@ -825,8 +889,8 @@ The following remain useful ablations but are not part of the selected method:
   last state drives much of the classification gain but was weaker overall;
 - prefix-only continuation without joint clock/target-bank updates;
 - 80% classification sampling and a stronger initial recency of 0.5;
-- epoch 38 of the new continuations, which did not improve the development
-  screen over epochs 35--36.
+- epoch 38 of the original prefix variants without the promoted loss mixture,
+  which did not improve the development screen over epochs 35--36.
 
 Documenting these exclusions prevents an ablation or discarded screen from
 being mistaken for the final architecture.
@@ -849,7 +913,9 @@ being mistaken for the final architecture.
 | Independent temporal screen overlay | [`configs/fmv3/independent_temporal_screen_eval.yaml`](../configs/fmv3/independent_temporal_screen_eval.yaml) |
 | Independent temporal confirmation overlay | [`configs/fmv3/independent_temporal_confirmation_eval.yaml`](../configs/fmv3/independent_temporal_confirmation_eval.yaml) |
 | Historical and state-aware prefix projections | [`components/event_encoder.py`](../components/event_encoder.py) |
-| Selected state-aware joint training configuration | [`configs/fmv3/prefix_state_attention_joint.yaml`](../configs/fmv3/prefix_state_attention_joint.yaml) |
+| Stage-6 state-aware joint training configuration | [`configs/fmv3/prefix_state_attention_joint.yaml`](../configs/fmv3/prefix_state_attention_joint.yaml) |
+| **Canonical selected configuration** | [`configs/fmv3/selected.yaml`](../configs/fmv3/selected.yaml) |
+| Promoted experiment configuration | [`configs/fmv3/loss_multimetric_gate_aux_005.yaml`](../configs/fmv3/loss_multimetric_gate_aux_005.yaml) |
 | State-aware development overlay | [`configs/fmv3/prefix_attention_screen_eval.yaml`](../configs/fmv3/prefix_attention_screen_eval.yaml) |
 | State-aware confirmation overlay | [`configs/fmv3/prefix_attention_confirmation_eval.yaml`](../configs/fmv3/prefix_attention_confirmation_eval.yaml) |
 | Prefix compatibility, masking, task-gradient, and scope tests | [`tests/test_event_encoder.py`](../tests/test_event_encoder.py) |
@@ -866,9 +932,9 @@ budgets 1--128 plus eligible full-support rows and fixed case-disjoint queries.
 Classification uses balanced-prior structured inference at $k=20$; the
 selected remaining-time head uses $k=50$.
 
-Temporal and prefix-architecture screening used the same five logs before the
-final full run, and the state-aware checkpoint epoch was selected after
-comparing saved candidates. Although all evaluation comparisons use fixed,
-case-disjoint paired rows, a publication claim beyond this repository benchmark
-still requires additional untouched logs or a nested log-level development/test
-split with a predeclared stopping rule.
+Temporal, prefix-architecture, and loss screening used the same five logs
+before promotion. The later 10,000-case Road Traffic check regresses in mean
+MAE and RMSE and is reported separately. Although all evaluation comparisons
+use fixed, case-disjoint paired rows, a publication claim beyond this
+repository benchmark still requires additional untouched logs or a nested
+log-level development/test split with a predeclared stopping rule.

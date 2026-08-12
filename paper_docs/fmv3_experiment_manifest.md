@@ -59,8 +59,9 @@ The final end-to-end comparison is in
 | `prefix_state_attention_no_recency`, epoch 35 | Same state path with near-zero initial recency | Full-confirmation ablation |
 | `prefix_state_attention_80`, epochs 35--38 | Prefix-only path, 80% classification sampling, stronger initial recency | Screen ablation |
 | `prefix_state_attention_joint`, epoch 35 | Prefix adapter plus both clock encoders and regression bank | Full-confirmation checkpoint candidate |
-| `prefix_state_attention_joint`, epoch 36 | Same joint scope after a second continuation epoch | **Selected current architecture** |
-| State-aware epoch-38 checkpoints | End-of-schedule candidates for all four variants | Rejected by development screen |
+| `prefix_state_attention_joint`, epoch 36 | Same joint scope after a second continuation epoch | Selected Stage-6 architecture; predecessor to promoted model |
+| Original state-aware epoch-38 checkpoints | End-of-schedule candidates without the promoted loss | Rejected by development screen |
+| `loss_multimetric_gate_aux_005`, epoch 38 | Epoch-36 continuation with the multi-metric primary loss and 0.05 gate auxiliary | **Selected current checkpoint** |
 
 The selected independent-temporal predecessor completed epoch 34 and was
 intentionally stopped during epoch 35 when that experiment was closed. Its
@@ -75,13 +76,20 @@ the selected full confirmation lives under
 The state-aware runs were seeded from that epoch-34 checkpoint and continued
 through epoch 38 without modifying the frozen Transformer or historical prefix
 path. Four variants were screened at epochs 35, 36, and 38; four informative
-checkpoints received the full paired confirmation. The joint epoch-36
-checkpoint improves all five primary aggregate means and is the selected
-successor. Its architecture, tensor-scope audit, ablations, diagnostics, and
-Receipt support-budget results are in
+checkpoints received the full paired confirmation. Joint epoch 36 became the
+Stage-6 architecture base. The promoted loss experiment then continued that
+exact checkpoint through epoch 38 and is now the selected repository model.
+Its promotion evidence and Road Traffic limitation are in
+[`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md); the
+architecture audit remains in
 [`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). Screen
-results live under `evaluation_results/prefix_attention/screens/`; full results
-live under `evaluation_results/prefix_attention/confirmations/`.
+results live under `evaluation_results/prefix_attention/screens/` and
+`evaluation_results/loss_multimetric/screens/`; full results live under their
+corresponding `confirmations/` directories.
+
+`configs/fmv3/selected.yaml` is the stable configuration alias for the
+promoted checkpoint; it resolves to `loss_multimetric_gate_aux_005` with
+`selected_checkpoint_epoch: 38`.
 
 Historical manifest folders contain their resolved `training_config.yaml`,
 serialized loader artifacts, and final `model_epoch_*.pth`. Independent

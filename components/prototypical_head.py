@@ -297,10 +297,34 @@ class PrototypicalHead(nn.Module):
         self.regression_rmse_weight = max(
             float(config.get("regression_rmse_weight", 0.5)), 0.0
         )
-        if self.regression_mae_weight + self.regression_rmse_weight <= 0:
+        # Selected complementary metrics in raw hours after unit conversion.
+        # Historical two-term behavior remains available by setting these
+        # four weights to zero explicitly.
+        self.regression_huber_weight = max(
+            float(config.get("regression_huber_weight", 0.15)), 0.0
+        )
+        self.regression_huber_delta = max(
+            float(config.get("regression_huber_delta", 1.0)), 1e-4
+        )
+        self.regression_log_rmse_weight = max(
+            float(config.get("regression_log_rmse_weight", 0.15)), 0.0
+        )
+        self.regression_relative_mae_weight = max(
+            float(config.get("regression_relative_mae_weight", 0.05)), 0.0
+        )
+        self.regression_bias_weight = max(
+            float(config.get("regression_bias_weight", 0.05)), 0.0
+        )
+        self.regression_quantile_weight = max(
+            float(config.get("regression_quantile_weight", 0.0)), 0.0
+        )
+        self.regression_quantile_level = min(
+            max(float(config.get("regression_quantile_level", 0.5)), 1e-3), 1.0 - 1e-3
+        )
+        if self._regression_primary_weight_sum() <= 0:
             raise ValueError(
-                "At least one of regression_mae_weight and "
-                "regression_rmse_weight must be positive"
+                "At least one regression primary metric weight must be positive "
+                "(mae, rmse, huber, log_rmse, relative_mae, bias, quantile)"
             )
         self.regression_loss_scale_power = min(
             max(float(config.get("regression_loss_scale_power", 1.0)), 0.0), 1.0
@@ -578,6 +602,85 @@ class PrototypicalHead(nn.Module):
             return labels.clamp_min(0.0).square()
         return labels
 
+    def _regression_primary_weight_sum(self) -> float:
+        return (
+            self.regression_mae_weight
+            + self.regression_rmse_weight
+            + self.regression_huber_weight
+            + self.regression_log_rmse_weight
+            + self.regression_relative_mae_weight
+            + self.regression_bias_weight
+            + self.regression_quantile_weight
+        )
+
+    def regression_loss_components(
+        self,
+        predictions,
+        labels,
+        labels_in_output_space=False,
+    ):
+        """Return scale-normalized primary metric terms used by ``regression_loss``.
+
+        All terms are finite scalars in a dimensionless (scale-normalized) space
+        except ``log_rmse``, which is computed in ``log1p(hours)`` residual
+        space. Callers that need the blended training objective should use
+        :meth:`regression_loss` so gate-aux wiring stays consistent.
+        """
+        targets = (
+            labels.float()
+            if labels_in_output_space
+            else self.regression_labels_to_output(labels)
+        )
+        predictions_f = predictions.float().reshape(-1)
+        targets_f = targets.float().reshape(-1)
+        errors = predictions_f - targets_f
+        batch_scale = targets_f.detach().median().clamp_min(1.0)
+        power = self.regression_loss_scale_power
+        normalizer = batch_scale.pow(power) * (
+            self.regression_loss_reference_hours ** (1.0 - power)
+        )
+        normalized = errors / normalizer
+        abs_norm = normalized.abs()
+        mae = abs_norm.mean()
+        rmse = torch.sqrt(normalized.square().mean() + 1e-8)
+        # Huber on normalized residuals: quadratic near zero (RMSE-like),
+        # linear in the tails (MAE-like).
+        delta = self.regression_huber_delta
+        huber = torch.where(
+            abs_norm <= delta,
+            0.5 * normalized.square() / delta,
+            abs_norm - 0.5 * delta,
+        ).mean()
+        # Multi-scale tail pressure without raw-hour domination.
+        log_errors = torch.log1p(predictions_f.clamp_min(0.0)) - torch.log1p(
+            targets_f.clamp_min(0.0)
+        )
+        log_rmse = torch.sqrt(log_errors.square().mean() + 1e-8)
+        relative_mae = (
+            errors.abs() / targets_f.detach().abs().clamp_min(1.0)
+        ).mean()
+        bias = errors.mean().abs() / normalizer
+        # Pinball / quantile residual (level 0.5 is proportional to MAE).
+        level = self.regression_quantile_level
+        quantile = torch.where(
+            errors >= 0,
+            level * errors,
+            (level - 1.0) * errors,
+        ).mean() / normalizer
+        return {
+            "mae": mae,
+            "rmse": rmse,
+            "huber": huber,
+            "log_rmse": log_rmse,
+            "relative_mae": relative_mae,
+            "bias": bias,
+            "quantile": quantile,
+            "normalizer": normalizer,
+            "errors": errors,
+            "targets": targets_f,
+            "predictions": predictions_f,
+        }
+
     def regression_gate_auxiliary_loss(
         self, branch_predictions, aggregation_weights, targets
     ):
@@ -624,7 +727,17 @@ class PrototypicalHead(nn.Module):
         branch_predictions=None,
         aggregation_weights=None,
     ):
-        """Optimize raw-hour MAE/RMSE and optional transform-gate selection.
+        """Optimize a multi-metric raw-hour objective and optional gate selection.
+
+        Primary terms (config-weighted, then renormalized) after unit conversion
+        and batch-median scale normalization:
+
+        * ``mae`` / ``rmse`` — explicit absolute and squared-error pressure
+        * ``huber`` — smooth bridge (quadratic near zero, linear tails)
+        * ``log_rmse`` — multi-scale tail pressure in ``log1p(hours)``
+        * ``relative_mae`` — per-query absolute error relative to target hours
+        * ``bias`` — absolute mean residual (systematic shift control)
+        * ``quantile`` — pinball residual (optional; level defaults to 0.5)
 
         Label units:
         - ``labels_in_output_space=False`` (default): ``labels`` are the stored
@@ -639,23 +752,20 @@ class PrototypicalHead(nn.Module):
         targets = labels.float() if labels_in_output_space else self.regression_labels_to_output(labels)
         if not self.regression_outputs_hours:
             return F.huber_loss(predictions.squeeze(), targets.squeeze())
-        # Keep reduction math in fp32: AMP half can under/overflow large hour
-        # ranges when squaring residuals and taking batch medians.
-        predictions_f = predictions.float().reshape(-1)
-        targets_f = targets.float().reshape(-1)
-        errors = predictions_f - targets_f
-        batch_scale = targets_f.detach().median().clamp_min(1.0)
-        power = self.regression_loss_scale_power
-        normalizer = batch_scale.pow(power) * (
-            self.regression_loss_reference_hours ** (1.0 - power)
+        components = self.regression_loss_components(
+            predictions, labels, labels_in_output_space=labels_in_output_space
         )
-        normalized = errors / normalizer
-        mae = normalized.abs().mean()
-        rmse = torch.sqrt(normalized.square().mean() + 1e-8)
-        denominator = self.regression_mae_weight + self.regression_rmse_weight
-        loss = (
-            self.regression_mae_weight * mae + self.regression_rmse_weight * rmse
-        ) / denominator
+        weighted = (
+            self.regression_mae_weight * components["mae"]
+            + self.regression_rmse_weight * components["rmse"]
+            + self.regression_huber_weight * components["huber"]
+            + self.regression_log_rmse_weight * components["log_rmse"]
+            + self.regression_relative_mae_weight * components["relative_mae"]
+            + self.regression_bias_weight * components["bias"]
+            + self.regression_quantile_weight * components["quantile"]
+        )
+        denominator = self._regression_primary_weight_sum()
+        loss = weighted / denominator
         has_branch_predictions = branch_predictions is not None
         has_aggregation_weights = aggregation_weights is not None
         if has_branch_predictions != has_aggregation_weights:
@@ -665,7 +775,9 @@ class PrototypicalHead(nn.Module):
         if has_branch_predictions and self.regression_gate_aux_weight > 0:
             loss = loss + self.regression_gate_aux_weight * (
                 self.regression_gate_auxiliary_loss(
-                    branch_predictions, aggregation_weights, targets_f
+                    branch_predictions,
+                    aggregation_weights,
+                    components["targets"],
                 )
             )
         return loss

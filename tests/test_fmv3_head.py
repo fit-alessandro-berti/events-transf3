@@ -11,12 +11,39 @@ from components.temporal_adapter import (
     IndependentTemporalInputEncoder,
     LearnedTemporalInputAdapter,
 )
+from config_utils import load_yaml_config
 from utils.parameter_utils import configure_trainable_scope
 
 
 class FMV3HeadTests(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(7)
+
+    def test_promoted_multimetric_defaults_and_historical_pin(self):
+        head = PrototypicalHead(regression_mode="learned_transform_ensemble")
+        self.assertEqual(head.regression_huber_weight, 0.15)
+        self.assertEqual(head.regression_log_rmse_weight, 0.15)
+        self.assertEqual(head.regression_relative_mae_weight, 0.05)
+        self.assertEqual(head.regression_bias_weight, 0.05)
+
+        base = load_yaml_config("configs/fmv3/base.yaml")["fmv3_head"]
+        historical = load_yaml_config("configs/fmv3/00_fmv2.yaml")["fmv3_head"]
+        selected = load_yaml_config(
+            "configs/fmv3/loss_multimetric_gate_aux_005.yaml"
+        )
+        selected_alias = load_yaml_config("configs/fmv3/selected.yaml")
+        for key, expected in {
+            "regression_huber_weight": 0.15,
+            "regression_log_rmse_weight": 0.15,
+            "regression_relative_mae_weight": 0.05,
+            "regression_bias_weight": 0.05,
+        }.items():
+            self.assertEqual(base[key], expected)
+            self.assertEqual(historical[key], 0.0)
+            self.assertEqual(selected["fmv3_head"][key], expected)
+            self.assertEqual(selected_alias["fmv3_head"][key], expected)
+        self.assertEqual(selected["selected_checkpoint_epoch"], 38)
+        self.assertEqual(selected_alias["selected_checkpoint_epoch"], 38)
 
     def test_count_neutral_local_evidence_removes_duplicate_bias(self):
         head = PrototypicalHead(
@@ -293,6 +320,17 @@ class FMV3HeadTests(unittest.TestCase):
         self.assertGreater(float(aligned_logits.grad.abs().sum()), 0.0)
         self.assertIsNone(branch_predictions.grad)
 
+    @staticmethod
+    def _legacy_two_term_weights():
+        """Pin complementary metrics off so only MAE+RMSE remain (historical)."""
+        return dict(
+            regression_huber_weight=0.0,
+            regression_log_rmse_weight=0.0,
+            regression_relative_mae_weight=0.0,
+            regression_bias_weight=0.0,
+            regression_quantile_weight=0.0,
+        )
+
     def test_regression_loss_scale_power_preserves_historical_default(self):
         labels = torch.sqrt(torch.tensor([10.0, 100.0]))
         predictions = torch.tensor([20.0, 110.0])
@@ -300,6 +338,7 @@ class FMV3HeadTests(unittest.TestCase):
             regression_mode="learned_transform_ensemble",
             regression_mae_weight=0.5,
             regression_rmse_weight=0.5,
+            **self._legacy_two_term_weights(),
         )
         fixed_reference = PrototypicalHead(
             regression_mode="learned_transform_ensemble",
@@ -307,6 +346,7 @@ class FMV3HeadTests(unittest.TestCase):
             regression_rmse_weight=0.5,
             regression_loss_scale_power=0.0,
             regression_loss_reference_hours=100.0,
+            **self._legacy_two_term_weights(),
         )
         self.assertAlmostEqual(
             float(historical.regression_loss(predictions, labels)), 1.0, places=5
@@ -321,6 +361,11 @@ class FMV3HeadTests(unittest.TestCase):
                 regression_mode="learned_transform_ensemble",
                 regression_mae_weight=0.0,
                 regression_rmse_weight=0.0,
+                regression_huber_weight=0.0,
+                regression_log_rmse_weight=0.0,
+                regression_relative_mae_weight=0.0,
+                regression_bias_weight=0.0,
+                regression_quantile_weight=0.0,
             )
 
     def test_regression_loss_respects_label_space_flag(self):
@@ -329,6 +374,7 @@ class FMV3HeadTests(unittest.TestCase):
             regression_mae_weight=1.0,
             regression_rmse_weight=0.0,
             regression_loss_scale_power=1.0,
+            **self._legacy_two_term_weights(),
         )
         predictions = torch.tensor([20.0, 110.0])
         hours = torch.tensor([10.0, 100.0])
@@ -343,6 +389,146 @@ class FMV3HeadTests(unittest.TestCase):
         # Passing already-hours labels without the flag would square them again.
         wrongly_squared = float(head.regression_loss(predictions, hours))
         self.assertNotAlmostEqual(from_hours, wrongly_squared, places=3)
+
+    def test_regression_loss_components_are_finite_and_weighted_in_primary_loss(self):
+        """Shipped multi-metric mix: each term finite; MAE and RMSE both contribute."""
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=0.5,
+            regression_rmse_weight=0.5,
+            regression_huber_weight=0.15,
+            regression_log_rmse_weight=0.15,
+            regression_relative_mae_weight=0.05,
+            regression_bias_weight=0.05,
+            regression_quantile_weight=0.1,
+            regression_quantile_level=0.5,
+            regression_loss_scale_power=1.0,
+        )
+        # Asymmetric errors: large positive residual + smaller negative.
+        predictions = torch.tensor([30.0, 80.0, 5.0], requires_grad=True)
+        labels = torch.sqrt(torch.tensor([10.0, 100.0, 4.0]))
+        components = head.regression_loss_components(predictions, labels)
+        for key in (
+            "mae", "rmse", "huber", "log_rmse", "relative_mae", "bias", "quantile"
+        ):
+            self.assertIn(key, components)
+            self.assertTrue(torch.isfinite(components[key]))
+            self.assertGreaterEqual(float(components[key].detach()), 0.0)
+
+        full = head.regression_loss(predictions, labels)
+        mae_only = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=1.0,
+            regression_rmse_weight=0.0,
+            **self._legacy_two_term_weights(),
+        ).regression_loss(predictions.detach(), labels)
+        rmse_only = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=0.0,
+            regression_rmse_weight=1.0,
+            **self._legacy_two_term_weights(),
+        ).regression_loss(predictions.detach(), labels)
+        # Full mix is a convex combination of positive terms, so it sits
+        # between pure MAE and pure RMSE only when those dominate; with extra
+        # terms it must remain finite and strictly positive for nonzero errors.
+        self.assertTrue(torch.isfinite(full))
+        self.assertGreater(float(full.detach()), 0.0)
+        self.assertGreater(float(mae_only.detach()), 0.0)
+        self.assertGreater(float(rmse_only.detach()), 0.0)
+        # Turning off all extras recovers the classical MAE+RMSE blend.
+        classical = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=0.5,
+            regression_rmse_weight=0.5,
+            **self._legacy_two_term_weights(),
+        ).regression_loss(predictions.detach(), labels)
+        self.assertAlmostEqual(
+            float(classical.detach()),
+            0.5 * float(mae_only.detach()) + 0.5 * float(rmse_only.detach()),
+            places=5,
+        )
+        full.backward()
+        self.assertIsNotNone(predictions.grad)
+        self.assertTrue(torch.isfinite(predictions.grad).all())
+        self.assertGreater(float(predictions.grad.abs().sum()), 0.0)
+
+    def test_regression_loss_extra_terms_change_loss_and_keep_grads_on_bank(self):
+        head_rich = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=4,
+            regression_scale_augmentation=False,
+            regression_mae_weight=0.5,
+            regression_rmse_weight=0.5,
+            regression_huber_weight=0.2,
+            regression_log_rmse_weight=0.2,
+            regression_relative_mae_weight=0.1,
+            regression_bias_weight=0.1,
+        )
+        head_legacy = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_num_transforms=4,
+            regression_scale_augmentation=False,
+            regression_mae_weight=0.5,
+            regression_rmse_weight=0.5,
+            **self._legacy_two_term_weights(),
+        )
+        support = torch.tensor(
+            [[1.0, 0.0], [0.8, 0.2], [0.0, 1.0], [-0.5, 0.5]],
+            dtype=torch.float32,
+        )
+        labels = torch.sqrt(torch.tensor([1.0, 10.0, 100.0, 1000.0]))
+        query = torch.tensor([[0.9, 0.1], [0.1, 0.9]])
+        # Shared predictions from one forward; compare losses with same tensors.
+        with torch.no_grad():
+            predictions, _ = head_legacy.forward_regression(support, labels, query)
+        targets = predictions.detach() + torch.tensor([5.0, -20.0])
+        loss_legacy = head_legacy.regression_loss(
+            predictions, targets, labels_in_output_space=True
+        )
+        loss_rich = head_rich.regression_loss(
+            predictions, targets, labels_in_output_space=True
+        )
+        self.assertTrue(torch.isfinite(loss_rich))
+        self.assertTrue(torch.isfinite(loss_legacy))
+        # Richer mix must not collapse to the two-term value for nonzero errors.
+        self.assertNotAlmostEqual(
+            float(loss_rich.detach()), float(loss_legacy.detach()), places=4
+        )
+        # Gradients reach transform-bank parameters through the real path.
+        head_rich.zero_grad(set_to_none=True)
+        pred_live, _ = head_rich.forward_regression(support, labels, query)
+        head_rich.regression_loss(
+            pred_live, targets, labels_in_output_space=True
+        ).backward()
+        bank = head_rich.time_transform_bank
+        self.assertTrue(any(
+            parameter.grad is not None and torch.isfinite(parameter.grad).all()
+            and float(parameter.grad.abs().sum()) > 0.0
+            for parameter in (
+                bank.power_logits,
+                bank.log_scales,
+                bank.branch_logit_scales,
+                bank.aggregation_logits,
+            )
+        ))
+
+    def test_regression_loss_hours_and_sqrt_paths_match_for_multi_metric(self):
+        head = PrototypicalHead(
+            regression_mode="learned_transform_ensemble",
+            regression_mae_weight=0.4,
+            regression_rmse_weight=0.4,
+            regression_huber_weight=0.1,
+            regression_log_rmse_weight=0.1,
+            regression_relative_mae_weight=0.05,
+            regression_bias_weight=0.05,
+        )
+        predictions = torch.tensor([12.0, 50.0, 200.0])
+        hours = torch.tensor([9.0, 64.0, 121.0])
+        a = float(head.regression_loss(predictions, torch.sqrt(hours)))
+        b = float(
+            head.regression_loss(predictions, hours, labels_in_output_space=True)
+        )
+        self.assertAlmostEqual(a, b, places=5)
 
     def test_regression_loss_gate_aux_grads_flow_to_gate_not_detached_branches(self):
         head = PrototypicalHead(
