@@ -176,14 +176,15 @@ checkpoint:
 best endpoint:
 `checkpoints/fmv3/expert_confidence_heads/model_epoch_40.pth` evaluated with
 `configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`,
-which sets regression expert-confidence softmax temperature to `0.02`.
+which sets regression expert-confidence softmax temperature to `0.02` and uses
+a budget-aware support-calibration mix for budgets 2 and 4.
 
 | Model | Balanced accuracy | Accuracy | Macro-F1 | MAE (h) | RMSE (h) |
 |---|---:|---:|---:|---:|---:|
 | Previous state-aware model, epoch 36 | 0.447473 | **0.709352** | 0.418885 | 1,112.2914 | 1,660.6820 |
 | **Promoted multi-metric base, epoch 38** | **0.447740** | 0.709221 | **0.419179** | **1,109.4089** | **1,659.6200** |
-| Current endpoint: low-support structured + regression confidence, T=0.02 | **0.451092** | **0.717033** | **0.422542** | **1,101.9887** | **1,655.2955** |
-| Endpoint change vs epoch-38 base | **+0.003351** | **+0.007812** | **+0.003363** | **-7.4203** | **-4.3245** |
+| Current endpoint: low-support structured + regression confidence, T=0.02 + budget-aware calibration | **0.451092** | **0.717033** | **0.422542** | **1,099.5167** | **1,652.9279** |
+| Endpoint change vs epoch-38 base | **+0.003351** | **+0.007812** | **+0.003363** | **-9.8923** | **-6.6921** |
 
 The current architecture keeps parameter-disjoint learned components for the
 two observable prefix clocks: elapsed time from case start and time since the

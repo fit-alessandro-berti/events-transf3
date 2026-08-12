@@ -25,8 +25,11 @@ The current best endpoint is
 `configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`. That
 overlay deliberately disables the learned classification-confidence head and
 keeps the learned regression-confidence head. The regression expert-confidence
-softmax uses inference temperature `0.1`; the default temperature-`1.0`
-variant is retained as a comparison artifact.
+softmax uses inference temperature `0.02`; the default temperature-`1.0`
+variant and the earlier `0.1` refinement are retained as comparison artifacts.
+The support-calibration blend is budget-aware only at budgets 2 and 4; all
+other budgets keep the established 50/50 query-dynamic/support-calibrated
+blend.
 
 This conclusion separates two claims:
 
@@ -70,9 +73,11 @@ hour-valued branch predictions. The weights are nonnegative and sum to one.
 
 The evaluator subsequently averages the four experts' head predictions. In
 the full confirmation overlay, it also learns a support-only branch prior and
-blends that calibrated prediction 50/50 with the trained query-dynamic result.
-Thus uniform averaging is used across experts and for the final two-path blend,
-but not across the four learned rescaling branches inside an expert.
+usually blends that calibrated prediction 50/50 with the trained query-dynamic
+result. The current endpoint uses two budget-aware exceptions found by the
+current-screen ablation: mix 0.0 at budget 2 and mix 0.6 at budget 4. Thus
+uniform averaging is used across experts, but not across the four learned
+rescaling branches inside an expert.
 
 The promoted complementary weights are now the defaults in `config.py`, the
 head constructor, and `configs/fmv3/base.yaml`. Historical root configurations
@@ -97,18 +102,18 @@ classification exactly unchanged and worsens every primary regression metric:
 
 | Head | MAE (h) | RMSE (h) | Median AE (h) | Normalized MAE | R² |
 |---|---:|---:|---:|---:|---:|
-| Current endpoint: learned transforms + regression confidence, T=0.02 | **1,101.989** | **1,655.295** | **738.194** | **0.830872** | **-0.208764** |
+| Current endpoint: learned transforms + regression confidence, T=0.02 + budget-aware calibration | **1,099.517** | **1,652.928** | **735.143** | **0.827663** | **-0.202875** |
 | Raw prediction + regression confidence, T=0.02 | 1,186.052 | 1,689.993 | 850.179 | 0.994600 | -0.278256 |
-| Raw minus current endpoint | +84.063 | +34.698 | +111.985 | +0.163728 | -0.069492 |
+| Raw minus current endpoint | +86.535 | +37.065 | +115.036 | +0.166937 | -0.075381 |
 
-Paired regression rows favor the current endpoint for MAE on 141/200 rows,
-RMSE on 104/200 rows, median absolute error on 159/200 rows, and R² on
-104/200 rows. The degradation is not just an ultra-low-data effect:
+Paired regression rows favor the current endpoint for MAE on 140/200 rows,
+RMSE on 103/200 rows, median absolute error on 159/200 rows, and R² on
+103/200 rows. The degradation is not just an ultra-low-data effect:
 for budgets ≥4, raw prediction changes MAE/RMSE/median AE by
-+106.682/+43.357/+143.507 h; for budgets ≥8, it changes them by
++107.110/+43.528/+144.168 h; for budgets ≥8, it changes them by
 +98.708/+30.327/+133.601 h. Per-log MAE deltas are nonnegative on every
-original log: billing +185.606 h, helpdesk +0.000 h, receipt +21.918 h,
-roadtraffic100traces +27.136 h, and sepsis +168.042 h.
+original log: billing +186.445 h, helpdesk +0.000 h, receipt +21.998 h,
+roadtraffic100traces +28.590 h, and sepsis +177.081 h.
 
 The same conclusion already held when isolating the selected epoch-38 base
 checkpoint without the confidence continuation:
@@ -216,20 +221,22 @@ original five-log confirmation:
 | Base selected epoch 38 | 0.447740 | 0.709221 | 0.419179 | 1,109.409 | 1,659.620 | 744.362 | -0.214691 |
 | Low-support structured + regression confidence, T=1.0 | 0.451092 | 0.717033 | 0.422542 | 1,109.237 | 1,659.464 | 744.239 | -0.214383 |
 | Intermediate endpoint, T=0.1 | 0.451092 | 0.717033 | 0.422542 | 1,107.614 | 1,658.117 | 742.639 | -0.211902 |
-| **Current endpoint, T=0.02** | **0.451092** | **0.717033** | **0.422542** | **1,101.989** | **1,655.295** | **738.194** | **-0.208764** |
-| Current endpoint minus base selected | +0.003351 | +0.007812 | +0.003363 | -7.420 | -4.325 | -6.169 | +0.005927 |
-| T=0.02 minus T=0.1 | 0.000000 | 0.000000 | 0.000000 | -5.625 | -2.822 | -4.445 | +0.003137 |
+| Static-mix endpoint, T=0.02 | 0.451092 | 0.717033 | 0.422542 | 1,101.989 | 1,655.295 | 738.194 | -0.208764 |
+| **Current endpoint, T=0.02 + budget-aware calibration** | **0.451092** | **0.717033** | **0.422542** | **1,099.517** | **1,652.928** | **735.143** | **-0.202875** |
+| Current endpoint minus base selected | +0.003351 | +0.007812 | +0.003363 | -9.892 | -6.692 | -9.220 | +0.011816 |
+| Current endpoint minus static-mix T=0.02 | 0.000000 | 0.000000 | 0.000000 | -2.472 | -2.368 | -3.051 | +0.005889 |
 
 The classification metrics are exactly identical to the selected low-support
 structured overlay because classification expert confidence is disabled. The
-temperature-sharpened regression rows improve over the earlier `T=0.1`
-endpoint by MAE **-5.625 h**, RMSE **-2.822 h**, median absolute error
-**-4.445 h**, and R² **+0.003137**. Relative to the epoch-38 base, MAE
-improves on 149/200 paired rows, RMSE and R² improve on 93/200 rows, and
-median absolute error improves on 147/200 rows. In the support range now used
-for continued work, budget ≥4 rows change versus the base by MAE **-8.981 h**,
-RMSE **-5.540 h**, and R² **+0.005260**; budget ≥8 rows change by MAE
-**-6.267 h**, RMSE **-3.059 h**, and R² **+0.001641**.
+budget-aware regression endpoint improves over the preceding static-mix
+endpoint by MAE **-2.472 h**, RMSE **-2.368 h**, median absolute error
+**-3.051 h**, and R² **+0.005889**. Relative to the epoch-38 base, MAE
+improves on 146/200 paired rows, RMSE and R² improve on 94/200 rows, and
+median absolute error improves on 143/200 rows. In the support range now used
+for continued work, budget ≥4 rows change versus the base by MAE **-9.409 h**,
+RMSE **-5.711 h**, and R² **+0.005263**; budget ≥8 rows are unchanged from
+the static-mix endpoint and change by MAE **-6.267 h**, RMSE **-3.059 h**,
+and R² **+0.001641** versus the base.
 
 An additional temperature screen below `0.1` found that very sharp values
 `0.005` and `0.01` give the largest aggregate MAE reductions, but they reduce
@@ -255,7 +262,7 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
   --checkpoint_epoch 40 \
   --eval_config configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml \
   --logs billing helpdesk receipt roadtraffic100traces sepsis \
-  --output_dir evaluation_results/expert_confidence/confirmations/regression_confidence_temp0020_low_support_e40 \
+  --output_dir evaluation_results/expert_confidence/confirmations/regression_confidence_temp0020_budget_calibration_e40 \
   --device cuda:0
 ```
 
@@ -275,12 +282,21 @@ commands are in
 #### Support-calibration mix sweep
 
 The evaluation-time branch prior was also swept by changing
-`regression_calibration_mix`. Stronger support-only calibration improves
-MAE/median error but trades off RMSE and R², so it is not promoted. On the full
-confirmation, mix `0.75` changes MAE by **-6.969 h** but RMSE by **+2.948 h**
-and R² by **-0.005796**. Mix `1.0` changes MAE by **-10.945 h** but RMSE by
-**+8.294 h** and R² by **-0.014606**. Because the target includes R², the
-selected endpoint keeps the established `regression_calibration_mix: 0.5`.
+`regression_calibration_mix`. Globally stronger support-only calibration
+improves MAE/median error but trades off RMSE and R², so broad static mixes
+above 0.5 are not promoted. On the earlier full confirmation, mix `0.75`
+changes MAE by **-6.969 h** but RMSE by **+2.948 h** and R² by **-0.005796**.
+Mix `1.0` changes MAE by **-10.945 h** but RMSE by **+8.294 h** and R² by
+**-0.014606**.
+
+After the temperature-0.02 endpoint, a narrower screen found two exact budget
+exceptions that improve MAE, RMSE, median AE, normalized MAE, and R² together:
+budget 2 uses `regression_calibration_mix: 0.0`, and budget 4 uses `0.6`.
+All other budgets keep the established `0.5` mix. This budget-aware schedule
+is promoted because it improves the full confirmation by MAE **-2.472 h**,
+RMSE **-2.368 h**, median AE **-3.051 h**, normalized MAE **-0.003209**, and
+R² **+0.005889** versus the static-mix endpoint. For budgets ≥4 it gives a
+small same-direction gain; budgets ≥8 are unchanged by construction.
 
 Reproduce with:
 

@@ -125,7 +125,7 @@ flowchart LR
     B --> D[Trained query-specific gate]
     S --> C[Self-excluded support calibration]
     C --> P[Log-level branch prior]
-    D --> M[50/50 convex prediction blend]
+    D --> M[Budget-aware convex prediction blend]
     P --> M
     M --> H[Remaining time in raw hours]
 ```
@@ -792,8 +792,9 @@ For the same case-disjoint target support/query split:
    prefix itself excluded and estimate the target-log branch prior.
 6. Aggregate each branch across experts with the same expert weights, apply
    the support prior, and form the calibrated prediction.
-7. Average the query-gated and support-calibrated predictions 50/50 and report
-   raw hours.
+7. Blend the query-gated and support-calibrated predictions and report raw
+   hours. The default blend remains 50/50, with endpoint exceptions of 0.0
+   support calibration at budget 2 and 0.6 support calibration at budget 4.
 
 ## Training-time versus inference-time changes
 
@@ -823,7 +824,7 @@ For the same case-disjoint target support/query split:
 | Transform-gate auxiliary supervision | Yes | No | Yes |
 | Query-specific regression gate | Yes | Yes | Yes |
 | Support-only regression branch prior | No | Yes | Yes |
-| 50/50 regression prediction blend | No | Yes | Yes |
+| Budget-aware regression prediction blend | No | Yes | Yes |
 
 ## What each result measures
 
@@ -858,9 +859,9 @@ support/query rows used by the strongest fixed-sqrt baseline:
 | Independent temporal FM-v3 | 1,113.1992 | 1,661.3121 |
 | State-aware temporal FM-v3, epoch 36 | 1,112.2914 | 1,660.6820 |
 | **Promoted multi-metric FM-v3, epoch 38** | **1,109.4089** | **1,659.6200** |
-| Current endpoint: low-support structured + regression confidence, T=0.02 | **1,101.9887** | **1,655.2955** |
-| Current endpoint minus fixed sqrt | **-23.8534** | **-10.4028** |
-| Current endpoint minus state-aware epoch 36 | **-10.3027** | **-5.3865** |
+| Current endpoint: low-support structured + regression confidence, T=0.02 + budget-aware calibration | **1,099.5167** | **1,652.9279** |
+| Current endpoint minus fixed sqrt | **-26.3254** | **-12.7704** |
+| Current endpoint minus state-aware epoch 36 | **-12.7747** | **-7.7541** |
 
 Per-log and per-budget results, including the separate Road Traffic transfer
 check, are reported in

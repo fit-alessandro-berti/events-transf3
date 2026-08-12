@@ -924,10 +924,33 @@ def _calibrate_time_transform_weights(
     return weights, diagnostics
 
 
+def _regression_calibration_mix(eval_cfg, case_budget=None):
+    """Return the support-calibration blend for a known support-case budget."""
+    default = min(
+        1.0,
+        max(0.0, float(eval_cfg.get("regression_calibration_mix", 1.0))),
+    )
+    schedule = eval_cfg.get("regression_calibration_mix_by_budget") or {}
+    if case_budget is None or not isinstance(schedule, dict):
+        return default
+    try:
+        budget = int(case_budget)
+    except (TypeError, ValueError):
+        return default
+    for key, value in schedule.items():
+        try:
+            scheduled_budget = int(key)
+        except (TypeError, ValueError):
+            continue
+        if scheduled_budget == budget:
+            return min(1.0, max(0.0, float(value)))
+    return default
+
+
 @torch.no_grad()
 def predict_regression(
     experts, embeddings_by_expert, labels, query_indices, support_indices,
-    retrieval_k, support_case_ids=None, eval_cfg=None,
+    retrieval_k, support_case_ids=None, eval_cfg=None, case_budget=None,
 ):
     device = next(experts[0].parameters()).device
     labels_device = labels.to(device).float()
@@ -1008,9 +1031,8 @@ def predict_regression(
             calibrated_prediction = (
                 calibrated_weights[:, None] * mean_branches
             ).sum(dim=0)
-            calibration_mix = min(
-                1.0,
-                max(0.0, float(eval_cfg.get("regression_calibration_mix", 1.0))),
+            calibration_mix = _regression_calibration_mix(
+                eval_cfg, case_budget=case_budget
             )
             mean_prediction = (
                 (1.0 - calibration_mix) * mean_prediction
@@ -1266,6 +1288,7 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                         reg_support_indices, regression_k,
                         support_case_ids=[reg_tasks[int(idx)][2] for idx in reg_support_indices],
                         eval_cfg=eval_cfg,
+                        case_budget=budget,
                     )
                     row = {
                         "task": "regression", "log": log_name,

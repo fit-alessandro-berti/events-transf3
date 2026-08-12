@@ -21,3 +21,10 @@ fmv3_evaluation:
   # and R² over both the original temperature-1.0 endpoint and the earlier
   # temperature-0.1 refinement, while preserving the budget ≥4/≥8 improvements.
   regression_expert_confidence_temperature: 0.02
+  # Keep the established 50/50 query-dynamic/support-calibrated blend except
+  # where the current endpoint screen found same-direction wins:
+  # budget 2 is better with no support-calibration blend, while budget 4 is
+  # better with a slightly stronger support-calibrated component.
+  regression_calibration_mix_by_budget:
+    2: 0.0
+    4: 0.6
