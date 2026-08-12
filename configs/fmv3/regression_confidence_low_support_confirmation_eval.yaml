@@ -17,6 +17,7 @@ fmv3_head:
 fmv3_evaluation:
   expert_aggregation_diagnostics: true
   # Sharpen the learned regression expert-confidence weights at inference.
-  # Temperature 0.1 improves MAE, RMSE, median AE, normalized MAE, and R² over
-  # the original temperature-1.0 endpoint on the paired five-log screen.
-  regression_expert_confidence_temperature: 0.1
+  # Temperature 0.02 improves aggregate MAE, RMSE, median AE, normalized MAE,
+  # and R² over both the original temperature-1.0 endpoint and the earlier
+  # temperature-0.1 refinement, while preserving the budget ≥4/≥8 improvements.
+  regression_expert_confidence_temperature: 0.02

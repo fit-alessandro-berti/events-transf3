@@ -5,7 +5,7 @@
 #   --checkpoint_epoch 40
 #
 # This keeps the current low-support classifier overlay and learned
-# per-expert regression confidence aggregation, including the temperature-0.1
+# per-expert regression confidence aggregation, including the temperature-0.02
 # expert-weight softmax, but bypasses the learned remaining-time transform
 # bank. Stored sqrt(hours) labels are converted back to hours and averaged
 # directly by similarity-weighted soft-kNN.

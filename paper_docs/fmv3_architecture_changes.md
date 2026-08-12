@@ -787,7 +787,7 @@ For the same case-disjoint target support/query split:
 4. Produce the trained query-specific convex prediction in each expert and
    aggregate across experts. The selected base checkpoint uses a uniform
    expert average; the current endpoint uses the epoch-40 regression-confidence
-   logits as learned expert weights with softmax temperature 0.1.
+   logits as learned expert weights with softmax temperature 0.02.
 5. On labeled support prefixes only, repeat retrieval with the predicted
    prefix itself excluded and estimate the target-log branch prior.
 6. Aggregate each branch across experts with the same expert weights, apply
@@ -858,9 +858,9 @@ support/query rows used by the strongest fixed-sqrt baseline:
 | Independent temporal FM-v3 | 1,113.1992 | 1,661.3121 |
 | State-aware temporal FM-v3, epoch 36 | 1,112.2914 | 1,660.6820 |
 | **Promoted multi-metric FM-v3, epoch 38** | **1,109.4089** | **1,659.6200** |
-| Current endpoint: low-support structured + regression confidence, T=0.1 | **1,107.6139** | **1,658.1174** |
-| Current endpoint minus fixed sqrt | **-18.2282** | **-7.5809** |
-| Current endpoint minus state-aware epoch 36 | **-4.6775** | **-2.5646** |
+| Current endpoint: low-support structured + regression confidence, T=0.02 | **1,101.9887** | **1,655.2955** |
+| Current endpoint minus fixed sqrt | **-23.8534** | **-10.4028** |
+| Current endpoint minus state-aware epoch 36 | **-10.3027** | **-5.3865** |
 
 Per-log and per-budget results, including the separate Road Traffic transfer
 check, are reported in
