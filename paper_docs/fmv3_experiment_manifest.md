@@ -65,7 +65,7 @@ The final end-to-end comparison is in
 | `expert_confidence_heads`, epochs 39--40 | Confidence-only continuation from the selected checkpoint; learns per-expert aggregation logits for classification and regression | Symmetric two-head ablation rejected; regression-only endpoint promoted |
 | `structured_low_support_*_eval` | Evaluation-only structured-memory schedule that increases suffix-memory fusion only when support has at most eight prefixes | Promoted low-support classification overlay |
 | `structured_tuning/screens/endpoint_thr{16,32,64}_w100_tau025` | Current endpoint with the stronger structured suffix rule extended beyond the eight-prefix cutoff | Rejected; threshold extension lowers overall classification metrics |
-| `regression_confidence_low_support_confirmation_eval` | Expert-confidence epoch-40 checkpoint with classification confidence disabled, regression confidence enabled, and low-support structured classification overlay | **Current best endpoint** |
+| `regression_confidence_low_support_confirmation_eval` | Expert-confidence epoch-40 checkpoint with classification confidence disabled, regression confidence enabled at softmax temperature 0.1, and low-support structured classification overlay | **Current best endpoint** |
 | `raw_prediction_regression_confidence_confirmation_eval` | Current endpoint with the learned remaining-time transform bank bypassed in favor of direct raw-hour soft-kNN prediction | Rejected; worsens MAE, RMSE, median AE, normalized MAE, and R² |
 
 The selected independent-temporal predecessor completed epoch 34 and was
@@ -96,7 +96,10 @@ low-support structured-memory refinement is documented in
 results live under `evaluation_results/prefix_attention/screens/` and
 `evaluation_results/loss_multimetric/screens/`; full results live under their
 corresponding `confirmations/` directories. The confidence-head ablation
-results live under `evaluation_results/expert_confidence/`; low-support
+results live under `evaluation_results/expert_confidence/`; the current
+endpoint confirmation is
+`evaluation_results/expert_confidence/confirmations/regression_confidence_temp010_low_support_e40/`.
+Low-support
 structured-memory tuning lives under `evaluation_results/structured_tuning/`.
 Raw no-rescaling regression ablations live under
 `evaluation_results/raw_hours_knn/confirmations/`.

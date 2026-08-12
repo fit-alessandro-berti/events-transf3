@@ -399,6 +399,16 @@ def _fuse_structured_prediction(
     return fused
 
 
+def _expert_confidence_weights(logits: torch.Tensor, temperature: float = 1.0):
+    """Softmax expert-confidence logits with a configurable temperature."""
+    temperature = float(temperature)
+    if not math.isfinite(temperature) or temperature <= 0.0:
+        raise ValueError(
+            "Expert-confidence temperature must be finite and positive"
+        )
+    return F.softmax(logits / temperature, dim=0)
+
+
 def _batched_head_probabilities(
     head,
     query,
@@ -972,9 +982,16 @@ def predict_regression(
     neighbor_targets = labels_device[support_indices_device][reference_positions]
     stacked_predictions = torch.stack(expert_predictions)
     if any(expert.proto_head.regression_expert_confidence_enabled for expert in experts):
-        expert_weights = F.softmax(torch.stack(expert_confidence_logits), dim=0)
+        expert_confidence_temperature = float(
+            eval_cfg.get("regression_expert_confidence_temperature", 1.0)
+        )
+        expert_weights = _expert_confidence_weights(
+            torch.stack(expert_confidence_logits),
+            temperature=expert_confidence_temperature,
+        )
         mean_prediction = (expert_weights * stacked_predictions).sum(dim=0)
     else:
+        expert_confidence_temperature = None
         expert_weights = None
         mean_prediction = stacked_predictions.mean(dim=0)
     transformed_truth = labels_device[query_indices_device].cpu().numpy()
@@ -1051,6 +1068,9 @@ def predict_regression(
         if expert_weights is not None:
             branch_diagnostics["regression_expert_confidence_weights_mean"] = (
                 expert_weights.mean(dim=1).cpu().tolist()
+            )
+            branch_diagnostics["regression_expert_confidence_temperature"] = (
+                expert_confidence_temperature
             )
     return truths.tolist(), predictions.tolist(), lower.tolist(), upper.tolist(), branch_diagnostics
 

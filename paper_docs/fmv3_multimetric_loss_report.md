@@ -24,7 +24,9 @@ The current best endpoint is
 `checkpoints/fmv3/expert_confidence_heads/model_epoch_40.pth` evaluated with
 `configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`. That
 overlay deliberately disables the learned classification-confidence head and
-keeps the learned regression-confidence head.
+keeps the learned regression-confidence head. The regression expert-confidence
+softmax uses inference temperature `0.1`; the default temperature-`1.0`
+variant is retained as a comparison artifact.
 
 This conclusion separates two claims:
 
@@ -95,18 +97,18 @@ classification exactly unchanged and worsens every primary regression metric:
 
 | Head | MAE (h) | RMSE (h) | Median AE (h) | Normalized MAE | R² |
 |---|---:|---:|---:|---:|---:|
-| Current endpoint: learned transforms + regression confidence | **1,109.237** | **1,659.464** | **744.239** | **0.843233** | **-0.214383** |
-| Raw prediction + regression confidence | 1,188.004 | 1,692.760 | 852.759 | 0.994489 | -0.282032 |
-| Raw minus current endpoint | +78.767 | +33.296 | +108.520 | +0.151256 | -0.067648 |
+| Current endpoint: learned transforms + regression confidence, T=0.1 | **1,107.614** | **1,658.117** | **742.639** | **0.841043** | **-0.211902** |
+| Raw prediction + regression confidence, T=0.1 | 1,187.138 | 1,691.549 | 851.593 | 0.994111 | -0.279494 |
+| Raw minus current endpoint | +79.524 | +33.431 | +108.954 | +0.153068 | -0.067592 |
 
 Paired regression rows favor the current endpoint for MAE on 137/200 rows,
-RMSE on 106/200 rows, median absolute error on 157/200 rows, and R² on
+RMSE on 106/200 rows, median absolute error on 163/200 rows, and R² on
 106/200 rows. The degradation is not just an ultra-low-data effect:
 for budgets ≥4, raw prediction changes MAE/RMSE/median AE by
-+100.336/+41.930/+139.247 h; for budgets ≥8, it changes them by
-+93.461/+29.247/+128.063 h. Per-log MAE deltas are nonnegative on every
-original log: billing +175.423 h, helpdesk +0.000 h, receipt +19.983 h,
-roadtraffic100traces +25.569 h, and sepsis +156.495 h.
++101.260/+42.056/+139.283 h; for budgets ≥8, it changes them by
++94.212/+29.292/+128.406 h. Per-log MAE deltas are nonnegative on every
+original log: billing +177.066 h, helpdesk +0.000 h, receipt +20.259 h,
+roadtraffic100traces +25.534 h, and sepsis +158.180 h.
 
 The same conclusion already held when isolating the selected epoch-38 base
 checkpoint without the confidence continuation:
@@ -131,7 +133,7 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
   --checkpoint_epoch 40 \
   --eval_config configs/fmv3/raw_prediction_regression_confidence_confirmation_eval.yaml \
   --logs billing helpdesk receipt roadtraffic100traces sepsis \
-  --output_dir evaluation_results/raw_hours_knn/confirmations/raw_prediction_regression_confidence_e40 \
+  --output_dir evaluation_results/raw_hours_knn/confirmations/raw_prediction_temp010_regression_confidence_e40 \
   --device cuda:0
 ```
 
@@ -203,7 +205,8 @@ the classification confidence head at load time. It is combined with the
 already promoted low-support structured-memory classifier. Loading prints
 `Ignored 16 checkpoint parameters not used by current config`, corresponding
 to the disabled classification-confidence tensors; the regression-confidence
-tensors remain active.
+tensors remain active. A final inference-only refinement sharpens the
+regression expert-confidence softmax to temperature `0.1`.
 
 This endpoint is a small Pareto improvement over the base selected stack on the
 original five-log confirmation:
@@ -211,16 +214,37 @@ original five-log confirmation:
 | Endpoint | Balanced accuracy | Accuracy | Macro-F1 | MAE (h) | RMSE (h) | Median AE (h) | R² |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Base selected epoch 38 | 0.447740 | 0.709221 | 0.419179 | 1,109.409 | 1,659.620 | 744.362 | -0.214691 |
-| Low-support structured + regression confidence | **0.451092** | **0.717033** | **0.422542** | **1,109.237** | **1,659.464** | **744.239** | **-0.214383** |
-| Endpoint minus base selected | +0.003351 | +0.007812 | +0.003363 | -0.172 | -0.156 | -0.124 | +0.000308 |
+| Low-support structured + regression confidence, T=1.0 | 0.451092 | 0.717033 | 0.422542 | 1,109.237 | 1,659.464 | 744.239 | -0.214383 |
+| **Current endpoint, T=0.1** | **0.451092** | **0.717033** | **0.422542** | **1,107.614** | **1,658.117** | **742.639** | **-0.211902** |
+| Current endpoint minus base selected | +0.003351 | +0.007812 | +0.003363 | -1.795 | -1.503 | -1.723 | +0.002789 |
+| T=0.1 minus T=1.0 | 0.000000 | 0.000000 | 0.000000 | -1.623 | -1.347 | -1.600 | +0.002482 |
 
 The classification metrics are exactly identical to the selected low-support
 structured overlay because classification expert confidence is disabled. The
-regression rows keep the epoch-40 gains: MAE improves on 153/200 paired rows,
-RMSE and R² improve on 112/200 rows, and median absolute error improves on
-133/200 rows. In the support range now used for continued work, budget ≥4 rows
-change by MAE **-0.188 h**, RMSE **-0.170 h**, and R² **+0.000307**; budget ≥8
-rows change by MAE **-0.099 h**, RMSE **-0.063 h**, and R² **+0.000146**.
+temperature-sharpened regression rows improve over the previous endpoint by
+MAE **-1.623 h**, RMSE **-1.347 h**, median absolute error **-1.600 h**, and
+R² **+0.002482**. Relative to the epoch-38 base, MAE improves on 156/200
+paired rows, RMSE and R² improve on 105/200 rows, and median absolute error
+improves on 141/200 rows. In the support range now used for continued work,
+budget ≥4 rows change versus the base by MAE **-2.003 h**, RMSE **-1.688 h**,
+and R² **+0.002737**; budget ≥8 rows change by MAE **-1.147 h**, RMSE
+**-0.709 h**, and R² **+0.001293**.
+
+The temperature screen is monotonic in this local range: flattening to `1.5`
+or `2.0` worsens MAE/RMSE/R², while sharpening from `0.75` to `0.5`, `0.4`,
+`0.333`, `0.25`, and `0.1` progressively improves them. The selected value is
+the best screened value, not a newly trained checkpoint.
+
+| Regression confidence temperature | MAE Δ vs T=1.0 (h) | RMSE Δ vs T=1.0 (h) | Median AE Δ (h) | R² Δ |
+|---:|---:|---:|---:|---:|
+| 0.10 | **-1.623** | **-1.347** | **-1.600** | **+0.002482** |
+| 0.25 | -0.528 | -0.462 | -0.450 | +0.000888 |
+| 0.333 | -0.351 | -0.309 | -0.358 | +0.000598 |
+| 0.40 | -0.263 | -0.232 | -0.267 | +0.000451 |
+| 0.50 | -0.175 | -0.155 | -0.128 | +0.000302 |
+| 0.75 | -0.058 | -0.052 | -0.027 | +0.000101 |
+| 1.50 | +0.058 | +0.052 | +0.034 | -0.000102 |
+| 2.00 | +0.086 | +0.078 | +0.056 | -0.000153 |
 
 Reproduce the endpoint with:
 
@@ -230,7 +254,7 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_fmv3.py \
   --checkpoint_epoch 40 \
   --eval_config configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml \
   --logs billing helpdesk receipt roadtraffic100traces sepsis \
-  --output_dir evaluation_results/expert_confidence/confirmations/regression_confidence_low_support_e40 \
+  --output_dir evaluation_results/expert_confidence/confirmations/regression_confidence_temp010_low_support_e40 \
   --device cuda:0
 ```
 

@@ -7,6 +7,7 @@ from components.prototypical_head import PrototypicalHead
 from evaluation.fmv3_metrics import classification_metrics, regression_metrics
 from evaluation.fmv3_protocol import (
     _batched_head_probabilities,
+    _expert_confidence_weights,
     _fuse_structured_prediction,
     _structured_class_probabilities,
     fixed_case_split,
@@ -61,6 +62,17 @@ class FMV3ProtocolTests(unittest.TestCase):
         self.assertAlmostEqual(result["mae_skill_vs_median"], 0.0)
         self.assertAlmostEqual(result["mae_hours"], 99.0 / 3.0)
         self.assertAlmostEqual(result["rmse_hours"], np.sqrt((1.0 + 0.0 + 98.0 ** 2) / 3.0))
+
+    def test_expert_confidence_temperature_controls_sharpness(self):
+        logits = torch.tensor([[0.0], [1.0], [2.0]])
+        default = _expert_confidence_weights(logits, temperature=1.0)
+        sharp = _expert_confidence_weights(logits, temperature=0.5)
+        flat = _expert_confidence_weights(logits, temperature=2.0)
+        self.assertGreater(sharp[-1, 0].item(), default[-1, 0].item())
+        self.assertLess(flat[-1, 0].item(), default[-1, 0].item())
+        torch.testing.assert_close(default.sum(dim=0), torch.ones(1))
+        with self.assertRaises(ValueError):
+            _expert_confidence_weights(logits, temperature=0.0)
 
     def test_batched_coverage_fallback_matches_head(self):
         head = PrototypicalHead(

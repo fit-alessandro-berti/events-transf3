@@ -198,6 +198,7 @@ CONFIG ={
 'regression_calibration_rmse_weight':0.5,
 'regression_calibration_exclude_same_case':False,
 'regression_calibration_mix':1.0,
+'regression_expert_confidence_temperature':1.0,
 'expert_aggregation_diagnostics':False,
 'evaluation_profiles':[
 {'name':'main','retrieval_modes':['configured'],'prior_modes':['balanced','natural'],'prior_strengths':[1.0],'retrieval_k':[5,20,50]},
