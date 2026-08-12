@@ -14,6 +14,25 @@ initialized from `learned_time_independent_4_cls70` epoch 34 and trained for
 two continuation epochs. The selected full paired result is
 `evaluation_results/prefix_attention/confirmations/prefix_state_attention_joint_e36/results.csv`.
 
+### Decision and result at a glance
+
+**Decision: accept the change and make epoch 36 the selected architecture.**
+It improves every aggregate primary metric over the immediate predecessor on
+the same paired evaluation rows. “Improves” here means higher classification
+scores and lower raw-hour regression errors:
+
+| Metric | Independent temporal, epoch 34 | State-aware joint, epoch 36 | Change | Direction |
+|---|---:|---:|---:|---|
+| Balanced accuracy | 0.445968 | **0.447473** | **+0.001504** | Higher is better |
+| Accuracy | 0.708158 | **0.709352** | **+0.001194** | Higher is better |
+| Macro-F1 | 0.417730 | **0.418885** | **+0.001155** | Higher is better |
+| MAE | 1,113.1992 h | **1,112.2914 h** | **-0.9078 h** | Lower is better |
+| RMSE | 1,661.3121 h | **1,660.6820 h** | **-0.6301 h** | Lower is better |
+
+This is an aggregate repository-benchmark improvement, not a claim that every
+individual log or support budget improves. The per-log exceptions and the
+selection-validity boundary are documented below.
+
 The main change is the projection from Transformer event states to the prefix
 vector. The historical static attention query remains as a frozen residual
 anchor. A small trainable path adds an explicit last-event state, a
@@ -22,6 +41,31 @@ ordinal-recency prior. Joint continuation also updates the already selected
 start/previous-event temporal encoders and regression target bank. The
 Transformer, character CNN, base event projection, historical pooling path,
 and retrieval/classification heads stay frozen.
+
+The data flow changes as follows:
+
+```mermaid
+flowchart LR
+    E[Event vectors with two learned clocks] --> T[Frozen Transformer]
+    T --> C[CLS state]
+    T --> H[Valid event states]
+    H --> P0[Historical static-query pool]
+    C --> Z0[Historical prefix projection]
+    P0 --> Z0
+    C --> Q[Dynamic query]
+    H --> L[Last valid event]
+    L --> Q
+    Q --> PS[Task-specific recency-aware pool]
+    H --> PS
+    L --> R[Low-rank gated residual]
+    PS --> R
+    P0 --> R
+    Z0 --> Z[Final task-specific prefix vector]
+    R --> Z
+```
+
+The historical path `Z0` is unchanged. The new path only contributes the
+small gated residual `R`.
 
 ## Bottleneck found in the historical projection
 
@@ -154,6 +198,21 @@ training scopes are:
 - `temporal_prefix_joint`: train the projection, both observable-clock
   encoders, and the target bank.
 
+### Configuration reference
+
+| Key | Selected value | Meaning |
+|---|---:|---|
+| `state_aware_prefix_attention` | `true` | Enables the new residual path |
+| `prefix_attention_hidden_dim` | `128` | Width of the query and residual bottlenecks |
+| `prefix_attention_dropout` | `0.15` | Dropout inside the residual projector |
+| `prefix_attention_gate_logit` | `-3.0` | Conservative initial residual gate (`0.0474`) |
+| `prefix_attention_initial_recency` | `0.25` | Initial positive ordinal-recency strength |
+| `trainable_scope` | `temporal_prefix_joint` | Restricts training to prefix/clock/target adapters |
+| `classification_task_probability` | `0.70` | Classification share of continuation episodes |
+
+Historical YAML configurations resolve the enable flag to `false`, retaining
+the old prefix projection exactly.
+
 ## Development variants
 
 All variants were seeded from the same epoch-34 independent-temporal
@@ -261,6 +320,17 @@ Development evaluation overlay:
 
 Full confirmation overlay:
 [`configs/fmv3/prefix_attention_confirmation_eval.yaml`](../configs/fmv3/prefix_attention_confirmation_eval.yaml)
+
+Implementation and compatibility map:
+
+| Concern | File |
+|---|---|
+| Dynamic query, recency mask, last-event gathering, residual gate | [`components/event_encoder.py`](../components/event_encoder.py) |
+| Task-type routing into the encoder | [`components/meta_learner.py`](../components/meta_learner.py) |
+| Mixture-level task routing | [`components/moe_model.py`](../components/moe_model.py) |
+| Constrained trainable scopes | [`utils/parameter_utils.py`](../utils/parameter_utils.py) |
+| Historical-checkpoint migration | [`utils/model_utils.py`](../utils/model_utils.py) |
+| Compatibility, masking, gradient, and scope tests | [`tests/test_event_encoder.py`](../tests/test_event_encoder.py) |
 
 To reproduce continuation from an independently copied epoch-34 seed, place
 the predecessor checkpoint and its training artifacts in the destination and

@@ -153,6 +153,17 @@ The primary full-protocol comparison is documented in
 
 ### State-aware prefix attention and independent clocks
 
+**Outcome:** yes, this change improves the repository benchmark. Compared with
+the immediate independent-temporal predecessor, the selected epoch-36 model is
+better on every aggregate primary metric. Higher is better for the first three
+columns; lower is better for MAE and RMSE.
+
+| Model | Balanced accuracy | Accuracy | Macro-F1 | MAE (h) | RMSE (h) |
+|---|---:|---:|---:|---:|---:|
+| Independent temporal, epoch 34 | 0.445968 | 0.708158 | 0.417730 | 1,113.1992 | 1,661.3121 |
+| **State-aware joint, epoch 36** | **0.447473** | **0.709352** | **0.418885** | **1,112.2914** | **1,660.6820** |
+| Change | **+0.001504** | **+0.001194** | **+0.001155** | **-0.9078** | **-0.6301** |
+
 The current architecture keeps parameter-disjoint learned components for the
 two observable prefix clocks: elapsed time from case start and time since the
 previous event. Their residuals augment the legacy `log1p` coordinates before
