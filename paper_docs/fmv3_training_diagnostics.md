@@ -235,6 +235,16 @@ ablation. Selection instead uses invariant outputs: held-out classification
 accuracy/NLL and raw-hour regression MAE/RMSE, with pool-level results checked
 for regressions hidden by the aggregate.
 
+The regression-balanced control completed all 20 epochs. Halving the
+median/relative coefficients reduced their mean isolated gradient norms to
+1.782/0.407, versus approximately 3.24--3.29/0.74--0.77 in the other fully
+instrumented controls. This did not yield a consistent invariant improvement:
+best MAE worsened from 837.320 to 840.106 hours, while best RMSE improved
+slightly from 1,129.434 to 1,127.514 hours; classification NLL was effectively
+identical (1.90843 versus 1.90837). The joint score remains worse. The robust
+terms are therefore retained; scalar loss share alone would have led to the
+wrong removal decision.
+
 `compare_training_debug.py` creates a live or final matched comparison. Its
 joint screening score gives equal weight to held-out classification NLL and
 raw-hour regression MAE after normalizing both by baseline epoch 1. The two
