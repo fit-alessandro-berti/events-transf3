@@ -1,0 +1,5 @@
+# Fixed five-log deployment-facing screen for checkpoints selected only from
+# the source-case holdout. This inherits the established 96-row selector screen
+# unchanged so candidate comparisons remain paired with the promoted endpoint.
+extends: example_selector_screen_eval.yaml
+experiment_name: training_debug_target_screen

@@ -240,6 +240,12 @@ use the more conservative 5× ratio seen in earlier staged continuations. The
 backbone LR and clip cap remain unchanged so this intervention moves capacity
 toward small task heads rather than accelerating memorization in the encoder.
 
+Candidates are selected exclusively from the source-case holdout, then run
+once through `training_debug_target_screen_eval.yaml`. That overlay inherits
+the established five-log, 96-row selector screen unchanged; target results do
+not feed back into epoch selection. Dominated smoothing/loss-weight controls
+are not screened merely because they completed training.
+
 ```bash
 python compare_training_debug.py \
   --baseline baseline \
