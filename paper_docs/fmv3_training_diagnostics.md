@@ -175,3 +175,20 @@ remain matched. Reweighted total losses are not compared across the regression
 ablation. Selection instead uses invariant outputs: held-out classification
 accuracy/NLL and raw-hour regression MAE/RMSE, with pool-level results checked
 for regressions hidden by the aggregate.
+
+`compare_training_debug.py` creates a live or final matched comparison. Its
+joint screening score gives equal weight to held-out classification NLL and
+raw-hour regression MAE after normalizing both by baseline epoch 1. The two
+constituent metrics, accuracy, RMSE, confidence gap, and clipping remain visible
+and are the evidence used for a decision; the joint score is not a new training
+objective.
+
+```bash
+python compare_training_debug.py \
+  --baseline baseline \
+  --run baseline=checkpoints/fmv3/training_debug_full_retrain/training_debug_summary.json \
+  --run clip5=checkpoints/fmv3/training_debug_clip5_retrain/training_debug_summary.json \
+  --run smoothing010=checkpoints/fmv3/training_debug_smoothing010_retrain/training_debug_summary.json \
+  --run regression_balanced=checkpoints/fmv3/training_debug_regression_balanced_retrain/training_debug_summary.json \
+  --output_dir evaluation_results/training_debug/matched_comparison
+```
