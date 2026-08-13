@@ -32,6 +32,8 @@ gradient_clip_norm: 1.0
 training_diagnostics:
   enabled: false
   step_interval: 25
+  # Per-loss autograd attribution is more expensive; 0 disables it.
+  loss_gradient_interval: 0
   validation_fraction: 0.10
   validation_steps_per_pool: 1
   validation_seed_offset: 100000

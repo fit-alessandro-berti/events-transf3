@@ -12,6 +12,7 @@ from training_debug import (
     MetricAccumulator,
     TrainingDiagnostics,
     gradient_metrics,
+    loss_gradient_metrics,
     model_state_metrics,
     parameter_update_metrics,
     snapshot_trainable_parameters,
@@ -370,6 +371,8 @@ def train(
                 step_metrics["optimization/step_applied"] = 0.0
             else:
                 finite_loss_steps += 1
+                if diagnostics.should_record_loss_gradients(step):
+                    step_metrics.update(loss_gradient_metrics(model, step_metrics))
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 if sampled_step:

@@ -47,6 +47,7 @@ eleven-log mean. Sampled step records also persist `pool` directly.
 | `loss_curves.csv` | Long-form primary and weighted auxiliary/component losses |
 | `head_curves.csv` | Long-form classifier, regressor, selector, branch, and calibration behavior |
 | `pool_curves.csv` | Held-out source-log loss and task metrics when pool-level telemetry is available |
+| `loss_gradient_curves.csv` | Sampled gradient L2 attributable to each differentiable loss component when enabled |
 
 The analyzer automatically locates the validation manifest next to the summary:
 
@@ -99,6 +100,9 @@ scheduled-step denominator is still recorded explicitly for comparison.
 - sampled gradient L2/mean/max, finite fraction, and nonzero fraction for
   encoders, embedders, prefix/temporal/task adapters, both selectors, transform
   bank, confidence heads, router, projection, and remaining head parameters;
+- optional sampled per-loss gradient L2 attribution for the primary objective,
+  each weighted regression term, separation, confidence, gate, and routing
+  auxiliaries (`loss_gradient_interval`; zero disables the extra autograd work);
 - total pre-clip gradient norm, clip incidence, AMP scale/overflow, and whether
   an optimizer step applied;
 - per-epoch absolute and parameter-relative update norms for the same groups;

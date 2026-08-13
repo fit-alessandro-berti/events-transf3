@@ -356,6 +356,71 @@ def gradient_metrics(model):
     return metrics
 
 
+def loss_gradient_metrics(model, step_metrics):
+    """Attribute sampled gradient energy to each differentiable loss term.
+
+    Total-loss gradients reveal which parameter groups move, but a large scalar
+    auxiliary need not have a large gradient. This sampled diagnostic uses
+    ``autograd.grad`` without touching ``parameter.grad`` so the subsequent
+    optimization backward pass is unchanged.
+    """
+    selected = (
+        "loss/primary",
+        "loss/classification_separation_weighted",
+        "loss/confidence_weighted",
+        "loss/regression_gate_aux_weighted",
+        "loss/routing_weighted",
+        "loss/regression/mae_weighted",
+        "loss/regression/rmse_weighted",
+        "loss/regression/huber_weighted",
+        "loss/regression/log_rmse_weighted",
+        "loss/regression/relative_mae_weighted",
+        "loss/regression/bias_weighted",
+        "loss/regression/median_ae_weighted",
+        "loss/regression/quantile_weighted",
+    )
+    named_parameters = [
+        (name, parameter)
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    ]
+    if not named_parameters:
+        return {}
+    parameters = [parameter for _, parameter in named_parameters]
+    metrics = {}
+    for metric_name in selected:
+        component = step_metrics.get(metric_name)
+        if not isinstance(component, torch.Tensor) or not component.requires_grad:
+            continue
+        gradients = torch.autograd.grad(
+            component,
+            parameters,
+            retain_graph=True,
+            allow_unused=True,
+        )
+        group_squares = defaultdict(float)
+        total_squares = 0.0
+        for (name, _), gradient in zip(named_parameters, gradients):
+            if gradient is None:
+                continue
+            values = gradient.detach().float()
+            values = values[torch.isfinite(values)]
+            if not values.numel():
+                continue
+            square_sum = float(values.square().sum().cpu())
+            group_squares[parameter_group(name)] += square_sum
+            total_squares += square_sum
+        component_name = metric_name.removeprefix("loss/")
+        metrics[
+            f"optimization/loss_gradient/{component_name}/all/l2_norm"
+        ] = math.sqrt(total_squares)
+        for group, square_sum in sorted(group_squares.items()):
+            metrics[
+                f"optimization/loss_gradient/{component_name}/{group}/l2_norm"
+            ] = math.sqrt(square_sum)
+    return metrics
+
+
 def parameter_update_metrics(model, snapshot):
     update_squares = defaultdict(float)
     parameter_squares = defaultdict(float)
@@ -485,6 +550,9 @@ class TrainingDiagnostics:
         self.enabled = bool(self.config.get("enabled", False))
         self.checkpoint_dir = Path(checkpoint_dir)
         self.step_interval = max(1, int(self.config.get("step_interval", 25)))
+        self.loss_gradient_interval = max(
+            0, int(self.config.get("loss_gradient_interval", 0))
+        )
         self.epoch_accumulator = MetricAccumulator()
         self.epoch_records = []
         self.steps_path = self.checkpoint_dir / "training_debug_steps.jsonl"
@@ -498,6 +566,13 @@ class TrainingDiagnostics:
 
     def should_record_step(self, step):
         return self.enabled and (int(step) % self.step_interval == 0)
+
+    def should_record_loss_gradients(self, step):
+        return (
+            self.enabled
+            and self.loss_gradient_interval > 0
+            and int(step) % self.loss_gradient_interval == 0
+        )
 
     def start_epoch(self):
         self.epoch_accumulator = MetricAccumulator()

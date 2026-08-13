@@ -9,12 +9,42 @@ from training_debug import (
     MetricAccumulator,
     TrainingDiagnostics,
     classification_head_metrics,
+    loss_gradient_metrics,
     regression_head_metrics,
     split_training_tasks_by_case,
 )
 
 
 class TrainingDebugTests(unittest.TestCase):
+    def test_loss_gradient_attribution_separates_parameter_groups(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = torch.nn.Linear(2, 1, bias=False)
+                self.task_confidence_head = torch.nn.Linear(2, 1, bias=False)
+
+        model = ToyModel()
+        values = torch.tensor([[1.0, -2.0]])
+        components = {
+            "loss/primary": model.encoder(values).square().mean(),
+            "loss/routing_weighted": (
+                model.task_confidence_head(values).square().mean()
+            ),
+        }
+        metrics = loss_gradient_metrics(model, components)
+        self.assertGreater(
+            metrics["optimization/loss_gradient/primary/encoder/l2_norm"], 0.0
+        )
+        self.assertGreater(
+            metrics[
+                "optimization/loss_gradient/routing_weighted/routing/l2_norm"
+            ],
+            0.0,
+        )
+        self.assertNotIn(
+            "optimization/loss_gradient/primary/routing/l2_norm", metrics
+        )
+
     def test_case_split_is_deterministic_disjoint_and_shared_across_tasks(self):
         tasks = {
             "classification": [[([{"x": 1}], index % 2, f"case-{index}") for index in range(10)]],

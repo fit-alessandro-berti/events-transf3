@@ -21,6 +21,7 @@ fmv3_head:
 training_diagnostics:
   enabled: true
   step_interval: 25
+  loss_gradient_interval: 100
   validation_fraction: 0.10
   validation_steps_per_pool: 1
   validation_seed_offset: 100000

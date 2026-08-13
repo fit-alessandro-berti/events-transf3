@@ -88,6 +88,7 @@ CONFIG ={
 'training_diagnostics':{
 'enabled':False,
 'step_interval':25,
+'loss_gradient_interval':0,
 'validation_fraction':0.10,
 'validation_steps_per_pool':1,
 'validation_seed_offset':100000,

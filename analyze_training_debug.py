@@ -220,6 +220,30 @@ def _gradient_summary(records):
     return result
 
 
+def _loss_gradient_summary(records):
+    result = {}
+    pattern = re.compile(
+        r"^task/(classification|regression)/optimization/"
+        r"loss_gradient/(.+)/all/l2_norm$"
+    )
+    keys = set()
+    for record in records:
+        keys.update(
+            key for key in record.get("train", {}) if pattern.match(key)
+        )
+    for key in sorted(keys):
+        task, component = pattern.match(key).groups()
+        values = _series(records, "train", key)
+        if values:
+            result.setdefault(task, {})[component] = {
+                "first": values[0][1],
+                "last": values[-1][1],
+                "mean": sum(value for _, value in values) / len(values),
+                "max": max(value for _, value in values),
+            }
+    return result
+
+
 def _pool_summary(records, pool_names=None):
     """Report latest held-out behavior per source pool, when instrumented."""
     if not records:
@@ -445,6 +469,7 @@ def analyze(summary, pool_names=None):
         "optimization": optimization,
         "heads": heads,
         "gradients": _gradient_summary(records),
+        "loss_gradients": _loss_gradient_summary(records),
         "pools": _pool_summary(records, pool_names),
         "last_epoch_loss_contributions": loss_contributions,
         "findings": findings,
@@ -546,6 +571,31 @@ def _pool_curve_rows(summary, pool_names=None):
     return rows
 
 
+def _loss_gradient_curve_rows(summary):
+    rows = []
+    pattern = re.compile(
+        r"^task/(classification|regression)/optimization/"
+        r"loss_gradient/(.+)/all/l2_norm$"
+    )
+    for record in summary.get("epochs", []):
+        for key in record.get("train", {}):
+            match = pattern.match(key)
+            if not match:
+                continue
+            value = _mean(record["train"], key)
+            if value is not None:
+                task, component = match.groups()
+                rows.append(
+                    {
+                        "epoch": int(record["epoch"]),
+                        "task": task,
+                        "component": component,
+                        "gradient_l2": value,
+                    }
+                )
+    return rows
+
+
 def _write_csv(path, rows):
     if not rows:
         return
@@ -628,6 +678,9 @@ def main():
     _write_csv(output / "loss_curves.csv", _long_metric_rows(summary, "loss"))
     _write_csv(output / "head_curves.csv", _long_metric_rows(summary, "head"))
     _write_csv(output / "pool_curves.csv", _pool_curve_rows(summary, pool_names))
+    _write_csv(
+        output / "loss_gradient_curves.csv", _loss_gradient_curve_rows(summary)
+    )
     (output / "analysis.md").write_text(_markdown(analysis), encoding="utf-8")
     print(f"Wrote training analysis to {output}")
 
