@@ -158,3 +158,20 @@ python main.py \
 The final training curves, bottleneck diagnosis, regularization choice,
 matched rerun, and target-log confirmation will be added here after the full
 audit completes.
+
+### Matched diagnostic ablations
+
+Three one-factor, full-schedule runs are reserved for hypotheses that can be
+read directly from the baseline telemetry:
+
+| Configuration | Isolated change | Diagnostic hypothesis |
+|---|---|---|
+| `training_debug_clip5_retrain.yaml` | Global clip cap 1 → 5 | Near-100% clipping throttles otherwise finite gradients and front-loads effective learning |
+| `training_debug_smoothing010_retrain.yaml` | Classification label smoothing 0.05 → 0.10 | Held-out confidence grows faster than accuracy |
+| `training_debug_regression_balanced_retrain.yaml` | Median/relative weights 0.40/0.05 → 0.20/0.025 | These two terms contribute disproportionate regression gradient energy |
+
+The seed, case split, architecture, task mixture, optimizer, and 20×300 schedule
+remain matched. Reweighted total losses are not compared across the regression
+ablation. Selection instead uses invariant outputs: held-out classification
+accuracy/NLL and raw-hour regression MAE/RMSE, with pool-level results checked
+for regressions hidden by the aggregate.

@@ -1,0 +1,8 @@
+# Matched diagnostic ablation: the median and relative-error components had the
+# largest sampled regression component gradients after the primary objective.
+# Halve only these two weights; retain every architecture and optimizer setting.
+extends: training_debug_full_retrain.yaml
+experiment_name: training_debug_regression_balanced_retrain
+fmv3_head:
+  regression_relative_mae_weight: 0.025
+  regression_median_ae_weight: 0.20

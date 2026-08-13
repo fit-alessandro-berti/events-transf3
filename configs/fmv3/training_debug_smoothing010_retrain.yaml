@@ -1,0 +1,5 @@
+# Matched diagnostic ablation: isolate calibration pressure after held-out
+# maximum probability pulled ahead of accuracy during the first three epochs.
+extends: training_debug_full_retrain.yaml
+experiment_name: training_debug_smoothing010_retrain
+classification_label_smoothing: 0.10
