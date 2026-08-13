@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import re
+import statistics
 from pathlib import Path
 
 
@@ -448,6 +449,7 @@ def analyze(summary, pool_names=None):
     heads = _head_summary(records)
     loss_contributions = _loss_contributions(records)
     loss_gradients = _loss_gradient_summary(records)
+    pools = _pool_summary(records, pool_names)
     findings = []
     for task, task_result in task_summary.items():
         invariant_overfit = task_result["invariant_overfitting"].get(
@@ -672,6 +674,32 @@ def analyze(summary, pool_names=None):
                         },
                     }
                 )
+    regression_pools = pools.get("regression", [])
+    pool_maes = [
+        (row.get("log", str(row.get("pool"))), row.get("head/regression/mae_hours"))
+        for row in regression_pools
+        if row.get("head/regression/mae_hours") is not None
+    ]
+    if len(pool_maes) >= 3:
+        median_mae = statistics.median(value for _, value in pool_maes)
+        worst_log, worst_mae = max(pool_maes, key=lambda item: item[1])
+        concentration_ratio = worst_mae / max(median_mae, 1e-12)
+        if concentration_ratio >= 10.0:
+            findings.append(
+                {
+                    "severity": "high",
+                    "kind": "regression_pool_error_concentration",
+                    "task": "regression",
+                    "evidence": {
+                        "worst_log": worst_log,
+                        "worst_mae_hours": worst_mae,
+                        "median_pool_mae_hours": median_mae,
+                        "ratio_to_median_pool": concentration_ratio,
+                        "fraction_of_pool_mae_sum": worst_mae
+                        / sum(value for _, value in pool_maes),
+                    },
+                }
+            )
     return {
         "schema_version": 1,
         "epochs_analyzed": len(records),
@@ -680,7 +708,7 @@ def analyze(summary, pool_names=None):
         "heads": heads,
         "gradients": _gradient_summary(records),
         "loss_gradients": loss_gradients,
-        "pools": _pool_summary(records, pool_names),
+        "pools": pools,
         "last_epoch_loss_contributions": loss_contributions,
         "findings": findings,
     }

@@ -158,7 +158,10 @@ norm, even if its scalar contribution looks small. It also flags a regression
 transform mixture whose normalized weight entropy remains at least 0.99 while
 the best and worst branch MAE differ by at least 5%; branch MAE and mean weight
 are retained separately so a uniform mixture of genuinely equivalent branches
-is not mislabeled.
+is not mislabeled. Finally, a source pool whose raw-hour MAE is at least 10×
+the median pool is reported explicitly with its share of the summed per-pool
+MAE. This prevents one long-duration process from silently defining the
+aggregate regression conclusion.
 
 ## Full retraining audit
 

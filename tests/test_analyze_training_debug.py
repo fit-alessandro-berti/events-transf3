@@ -219,6 +219,36 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
             result["pools"]["classification"][0]["log"], "source.xes.gz"
         )
 
+    def test_analysis_flags_regression_error_concentrated_in_one_pool(self):
+        validation = {"task/regression/loss/total": _metric(1.0)}
+        for pool, mae in enumerate([10.0, 11.0, 200.0]):
+            validation[
+                f"task/regression/pool/{pool}/loss/total"
+            ] = _metric(1.0)
+            validation[
+                f"task/regression/pool/{pool}/head/regression/mae_hours"
+            ] = _metric(mae)
+        records = [
+            {
+                "epoch": 1,
+                "train": {"task/regression/loss/total": _metric(1.0)},
+                "validation": validation,
+                "epoch_metrics": {},
+                "updates": {},
+            }
+        ]
+        result = analyze(
+            {"epochs": records, "configuration": {}},
+            pool_names={0: "small-a", 1: "small-b", 2: "large"},
+        )
+        finding = next(
+            finding
+            for finding in result["findings"]
+            if finding["kind"] == "regression_pool_error_concentration"
+        )
+        self.assertEqual(finding["evidence"]["worst_log"], "large")
+        self.assertGreater(finding["evidence"]["ratio_to_median_pool"], 18.0)
+
 
 if __name__ == "__main__":
     unittest.main()
