@@ -147,9 +147,12 @@ strict 2% overfitting tolerance.
 The analyzer additionally screens for large auxiliary losses that stay nearly
 constant, selectors whose effective support remains indistinguishable from
 uniform retrieval, classifier overconfidence, frequent gradient clipping, and
-AMP overflow. These are hypotheses for a matched intervention, not proof that
-a component should be removed: scalar loss size and gradient influence are
-reported separately for that reason.
+AMP overflow. An overflow confined to AMP scale warm-up is reported as a
+low-severity transient event; only a mean overflow rate of at least 1% or an
+overflow still present in the last epoch is high severity. These are
+hypotheses for a matched intervention, not proof that a component should be
+removed: scalar loss size and gradient influence are reported separately for
+that reason.
 
 ## Full retraining audit
 

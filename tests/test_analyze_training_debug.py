@@ -8,6 +8,49 @@ def _metric(value):
 
 
 class AnalyzeTrainingDebugTests(unittest.TestCase):
+    def test_analysis_distinguishes_transient_amp_warmup_overflow(self):
+        records = []
+        for epoch, overflow in enumerate([0.02, 0.0, 0.0], start=1):
+            records.append(
+                {
+                    "epoch": epoch,
+                    "train": {
+                        "task/classification/loss/total": _metric(1.0),
+                        "optimization/amp_overflow": _metric(overflow),
+                    },
+                    "validation": {
+                        "task/classification/loss/total": _metric(1.0),
+                    },
+                    "epoch_metrics": {},
+                    "updates": {},
+                }
+            )
+        result = analyze({"epochs": records, "configuration": {}})
+        findings = {finding["kind"]: finding for finding in result["findings"]}
+        self.assertNotIn("amp_overflow", findings)
+        self.assertEqual(findings["transient_amp_overflow"]["severity"], "low")
+
+    def test_analysis_reports_persistent_amp_overflow(self):
+        records = []
+        for epoch in range(1, 4):
+            records.append(
+                {
+                    "epoch": epoch,
+                    "train": {
+                        "task/classification/loss/total": _metric(1.0),
+                        "optimization/amp_overflow": _metric(0.02),
+                    },
+                    "validation": {
+                        "task/classification/loss/total": _metric(1.0),
+                    },
+                    "epoch_metrics": {},
+                    "updates": {},
+                }
+            )
+        result = analyze({"epochs": records, "configuration": {}})
+        findings = {finding["kind"]: finding for finding in result["findings"]}
+        self.assertEqual(findings["amp_overflow"]["severity"], "high")
+
     def test_analysis_detects_front_loaded_overfitting_and_clipping(self):
         records = []
         train = [1.0, 0.8, 0.6, 0.5]

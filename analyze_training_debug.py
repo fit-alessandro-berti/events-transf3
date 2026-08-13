@@ -500,12 +500,21 @@ def analyze(summary, pool_names=None):
                 "evidence": clipping,
             }
         )
-    if optimization.get("amp_overflow_fraction", {}).get("max", 0.0) > 0.0:
+    amp_overflow = optimization.get("amp_overflow_fraction", {})
+    if amp_overflow.get("max", 0.0) > 0.0:
+        persistent_amp_overflow = (
+            amp_overflow.get("mean", 0.0) >= 0.01
+            or amp_overflow.get("last", 0.0) > 0.0
+        )
         findings.append(
             {
-                "severity": "high",
-                "kind": "amp_overflow",
-                "evidence": optimization["amp_overflow_fraction"],
+                "severity": "high" if persistent_amp_overflow else "low",
+                "kind": (
+                    "amp_overflow"
+                    if persistent_amp_overflow
+                    else "transient_amp_overflow"
+                ),
+                "evidence": amp_overflow,
             }
         )
     if len(records) >= 3:
