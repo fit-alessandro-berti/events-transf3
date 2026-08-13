@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from components.pretrained_event_embedder import PretrainedEventEmbedder
 from components.moe_model import MoEModel
+from components.meta_learner import MetaLearner
 from components.prototypical_head import LearnedTimeTransformBank, PrototypicalHead
 from components.temporal_adapter import (
     IndependentTemporalInputEncoder,
@@ -45,6 +46,67 @@ class FMV3HeadTests(unittest.TestCase):
             self.assertEqual(selected_alias["fmv3_head"][key], expected)
         self.assertEqual(selected["selected_checkpoint_epoch"], 38)
         self.assertEqual(selected_alias["selected_checkpoint_epoch"], 38)
+
+    def test_classification_adapter_is_identity_and_task_isolated(self):
+        model = MetaLearner(
+            strategy="learned",
+            num_feat_dim=3,
+            d_model=8,
+            n_heads=2,
+            n_layers=1,
+            dropout=0.0,
+            proto_head_config={
+                "classification_embedding_adapter_enabled": True,
+                "classification_embedding_adapter_hidden_dim": 4,
+                "regression_embedding_adapter_enabled": True,
+                "regression_embedding_adapter_hidden_dim": 4,
+            },
+            char_vocab_size=8,
+            char_embedding_dim=4,
+            char_cnn_output_dim=4,
+        )
+        embeddings = torch.randn(5, 8)
+        self.assertTrue(
+            torch.equal(
+                model.adapt_task_embeddings(embeddings, "classification"),
+                embeddings,
+            )
+        )
+        self.assertTrue(torch.equal(
+            model.adapt_task_embeddings(embeddings, "regression"), embeddings
+        ))
+        trainable = configure_trainable_scope(model, "classification_adapter")
+        self.assertTrue(trainable)
+        self.assertTrue(
+            all("classification_embedding_adapter." in name for name in trainable)
+        )
+        regression_trainable = configure_trainable_scope(
+            model, "regression_refinement"
+        )
+        self.assertTrue(regression_trainable)
+        self.assertTrue(all(
+            "regression_embedding_adapter." in name
+            for name in regression_trainable
+        ))
+
+    def test_loss_refinement_selected_config_is_complete(self):
+        selected = load_yaml_config("configs/fmv3/loss_refinement_selected.yaml")
+        self.assertEqual(selected["selected_checkpoint_epoch"], 43)
+        self.assertEqual(selected["classification_separation_weight"], 0.20)
+        self.assertTrue(
+            selected["fmv3_head"]["classification_embedding_adapter_enabled"]
+        )
+        self.assertTrue(selected["fmv3_head"]["regression_embedding_adapter_enabled"])
+        self.assertEqual(selected["fmv3_head"]["regression_median_ae_weight"], 0.40)
+        evaluation = selected["fmv3_evaluation"]
+        self.assertEqual(evaluation["classification_output_temperature"], 0.60)
+        self.assertEqual(
+            evaluation["regression_expert_confidence_temperature"], 0.018
+        )
+        self.assertEqual(evaluation["regression_calibration_mix"], 0.502)
+        self.assertEqual(
+            evaluation["regression_calibration_mix_by_budget"], {2: 0.0, 4: 0.6}
+        )
 
     def test_count_neutral_local_evidence_removes_duplicate_bias(self):
         head = PrototypicalHead(
@@ -464,6 +526,7 @@ class FMV3HeadTests(unittest.TestCase):
                 regression_log_rmse_weight=0.0,
                 regression_relative_mae_weight=0.0,
                 regression_bias_weight=0.0,
+                regression_median_ae_weight=0.0,
                 regression_quantile_weight=0.0,
             )
 
@@ -499,6 +562,7 @@ class FMV3HeadTests(unittest.TestCase):
             regression_log_rmse_weight=0.15,
             regression_relative_mae_weight=0.05,
             regression_bias_weight=0.05,
+            regression_median_ae_weight=0.10,
             regression_quantile_weight=0.1,
             regression_quantile_level=0.5,
             regression_loss_scale_power=1.0,
@@ -508,7 +572,8 @@ class FMV3HeadTests(unittest.TestCase):
         labels = torch.sqrt(torch.tensor([10.0, 100.0, 4.0]))
         components = head.regression_loss_components(predictions, labels)
         for key in (
-            "mae", "rmse", "huber", "log_rmse", "relative_mae", "bias", "quantile"
+            "mae", "rmse", "huber", "log_rmse", "relative_mae", "bias",
+            "median_ae", "quantile"
         ):
             self.assertIn(key, components)
             self.assertTrue(torch.isfinite(components[key]))
@@ -718,6 +783,7 @@ class FMV3HeadTests(unittest.TestCase):
 
     def test_retrieval_contrastive_helpers_finite_and_grad(self):
         from training_strategies.retrieval_strategy import (
+            _classification_angular_margin_loss,
             _covariance_loss,
             _nca_knn_loss,
             _regression_neighbor_contrastive,
@@ -754,9 +820,40 @@ class FMV3HeadTests(unittest.TestCase):
         reg_c.backward()
         self.assertGreater(float(z.grad.abs().sum()), 0.0)
 
+        z.grad = None
+        separation = _classification_angular_margin_loss(
+            z, labels, cases, temperature=0.10, margin=0.15
+        )
+        self.assertIsNotNone(separation)
+        self.assertTrue(torch.isfinite(separation))
+        separation.backward(retain_graph=True)
+        self.assertGreater(float(z.grad.abs().sum()), 0.0)
+
         z_det = z.detach()
         self.assertTrue(torch.isfinite(_variance_loss(z_det)))
         self.assertTrue(torch.isfinite(_covariance_loss(z_det)))
+
+    def test_direct_embedding_margin_losses_reward_separation(self):
+        from training_strategies.retrieval_strategy import (
+            _classification_angular_margin_loss,
+        )
+
+        cases = torch.arange(6)
+        labels = torch.tensor([0, 0, 1, 1, 2, 2])
+        separated = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],
+                [0.9, 0.1, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.1, 0.9, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.1, 0.9],
+            ]
+        )
+        mixed = separated[[0, 2, 4, 1, 3, 5]]
+        good_cls = _classification_angular_margin_loss(separated, labels, cases)
+        bad_cls = _classification_angular_margin_loss(mixed, labels, cases)
+        self.assertLess(float(good_cls), float(bad_cls))
 
     def test_vectorized_regression_contrastive_matches_loop_reference(self):
         """Guard the vectorized neighbor-contrastive against a direct loop oracle.

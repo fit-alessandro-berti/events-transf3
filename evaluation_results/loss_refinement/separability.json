@@ -1,0 +1,31 @@
+{
+  "baseline_checkpoint": "checkpoints/fmv3/expert_routing_bias/model_epoch_42.pth",
+  "selected_checkpoint": "checkpoints/fmv3/loss_refinement_selected/model_epoch_43.pth",
+  "seed": 20260813,
+  "max_prefixes_per_log": 2000,
+  "active_classification_experts": [0, 2],
+  "method": "leave-one-out own-class centroid cosine minus hardest other-class centroid cosine; unweighted mean over five logs and two active experts",
+  "valid_prefix_expert_pairs": 16360,
+  "aggregate": {
+    "centroid_margin": {
+      "baseline": -0.014492659363895655,
+      "selected": -0.012779555737506599,
+      "delta": 0.0017131036263890558
+    },
+    "leave_one_out_centroid_top1": {
+      "baseline": 0.5149435609579086,
+      "selected": 0.5154447138309479,
+      "delta": 0.0005011528730393122
+    },
+    "within_class_centroid_cosine": {
+      "baseline": 0.9294069111347198,
+      "selected": 0.9326745510101319,
+      "delta": 0.0032676398754120095
+    },
+    "hardest_other_class_centroid_cosine": {
+      "baseline": 0.9438995480537414,
+      "selected": 0.945454066991806,
+      "delta": 0.0015545189380645752
+    }
+  }
+}

@@ -343,6 +343,7 @@ def _fuse_structured_prediction(
     low_support_threshold=0,
     low_support_weight=None,
     low_support_tau=None,
+    output_temperature=1.0,
 ):
     base_probabilities = np.asarray(base["probabilities"], dtype=np.float64)
     structured_probabilities = np.asarray(structured["probabilities"], dtype=np.float64)
@@ -382,6 +383,14 @@ def _fuse_structured_prediction(
     else:
         raise ValueError(f"Unknown structured fusion: {fusion}")
     probabilities /= probabilities.sum(axis=1, keepdims=True).clip(min=1e-12)
+    output_temperature = float(output_temperature)
+    if not math.isfinite(output_temperature) or output_temperature <= 0.0:
+        raise ValueError("classification output temperature must be finite and positive")
+    if output_temperature != 1.0:
+        calibrated_logits = np.log(probabilities.clip(min=1e-12)) / output_temperature
+        calibrated_logits -= calibrated_logits.max(axis=1, keepdims=True)
+        probabilities = np.exp(calibrated_logits)
+        probabilities /= probabilities.sum(axis=1, keepdims=True).clip(min=1e-12)
     universe = np.asarray(class_universe, dtype=np.int64)
     fused = dict(base)
     fused["probabilities"] = probabilities
@@ -904,6 +913,7 @@ def predict_classification(
             ),
             low_support_weight=eval_cfg.get("structured_low_support_weight"),
             low_support_tau=eval_cfg.get("structured_low_support_tau"),
+            output_temperature=eval_cfg.get("classification_output_temperature", 1.0),
         )
     if retrieval_mode == "dynamic_expanded_local":
         return _predict_classification_dynamic_batched(

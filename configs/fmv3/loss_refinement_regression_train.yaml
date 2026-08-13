@@ -1,0 +1,20 @@
+# Winning regression-only continuation from expert_routing_bias epoch 42.
+extends: expert_routing_selected.yaml
+experiment_name: loss_refinement_regression
+epochs: 43
+episodes_per_epoch: 300
+lr: 0.0001
+weight_decay: 0.0
+trainable_scope: regression_refinement
+classification_task_probability: 0.0
+classification_separation_weight: 0.0
+fmv3_head:
+  regression_embedding_adapter_enabled: true
+  regression_embedding_adapter_hidden_dim: 64
+  regression_embedding_adapter_dropout: 0.0
+  regression_mae_weight: 0.65
+  regression_rmse_weight: 0.35
+  regression_median_ae_weight: 0.40
+  classification_expert_confidence_loss_weight: 0.0
+  regression_expert_confidence_loss_weight: 0.25
+  expert_routing_confidence_loss_weight: 0.0

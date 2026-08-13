@@ -319,6 +319,9 @@ class PrototypicalHead(nn.Module):
         self.regression_bias_weight = max(
             float(config.get("regression_bias_weight", 0.05)), 0.0
         )
+        self.regression_median_ae_weight = max(
+            float(config.get("regression_median_ae_weight", 0.0)), 0.0
+        )
         self.regression_quantile_weight = max(
             float(config.get("regression_quantile_weight", 0.0)), 0.0
         )
@@ -328,7 +331,8 @@ class PrototypicalHead(nn.Module):
         if self._regression_primary_weight_sum() <= 0:
             raise ValueError(
                 "At least one regression primary metric weight must be positive "
-                "(mae, rmse, huber, log_rmse, relative_mae, bias, quantile)"
+                "(mae, rmse, huber, log_rmse, relative_mae, bias, "
+                "median_ae, quantile)"
             )
         self.regression_loss_scale_power = min(
             max(float(config.get("regression_loss_scale_power", 1.0)), 0.0), 1.0
@@ -682,6 +686,7 @@ class PrototypicalHead(nn.Module):
             + self.regression_log_rmse_weight
             + self.regression_relative_mae_weight
             + self.regression_bias_weight
+            + self.regression_median_ae_weight
             + self.regression_quantile_weight
         )
 
@@ -732,6 +737,7 @@ class PrototypicalHead(nn.Module):
             errors.abs() / targets_f.detach().abs().clamp_min(1.0)
         ).mean()
         bias = errors.mean().abs() / normalizer
+        median_ae = abs_norm.quantile(0.5)
         # Pinball / quantile residual (level 0.5 is proportional to MAE).
         level = self.regression_quantile_level
         quantile = torch.where(
@@ -746,6 +752,7 @@ class PrototypicalHead(nn.Module):
             "log_rmse": log_rmse,
             "relative_mae": relative_mae,
             "bias": bias,
+            "median_ae": median_ae,
             "quantile": quantile,
             "normalizer": normalizer,
             "errors": errors,
@@ -871,6 +878,7 @@ class PrototypicalHead(nn.Module):
         * ``log_rmse`` — multi-scale tail pressure in ``log1p(hours)``
         * ``relative_mae`` — per-query absolute error relative to target hours
         * ``bias`` — absolute mean residual (systematic shift control)
+        * ``median_ae`` — direct typical-case absolute-error pressure
         * ``quantile`` — pinball residual (optional; level defaults to 0.5)
 
         Label units:
@@ -896,6 +904,7 @@ class PrototypicalHead(nn.Module):
             + self.regression_log_rmse_weight * components["log_rmse"]
             + self.regression_relative_mae_weight * components["relative_mae"]
             + self.regression_bias_weight * components["bias"]
+            + self.regression_median_ae_weight * components["median_ae"]
             + self.regression_quantile_weight * components["quantile"]
         )
         denominator = self._regression_primary_weight_sum()

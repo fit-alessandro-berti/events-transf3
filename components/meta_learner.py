@@ -33,6 +33,37 @@ class MetaLearner (nn .Module ):
         nn .LayerNorm (128 ),
         )
         self .d_model =d_model
+        self .classification_embedding_adapter =None
+        if routing_config .get ('classification_embedding_adapter_enabled',False ):
+            adapter_hidden =max (int (routing_config .get (
+            'classification_embedding_adapter_hidden_dim',64 )),1 )
+            adapter_dropout =max (float (routing_config .get (
+            'classification_embedding_adapter_dropout',0.0 )),0.0 )
+            self .classification_embedding_adapter =nn .Sequential (
+            nn .LayerNorm (d_model ),
+            nn .Linear (d_model ,adapter_hidden ),
+            nn .GELU (),
+            nn .Dropout (adapter_dropout ),
+            nn .Linear (adapter_hidden ,d_model ),
+            )
+            # Exact identity at initialization and when migrating a checkpoint.
+            nn .init .zeros_ (self .classification_embedding_adapter [-1 ].weight )
+            nn .init .zeros_ (self .classification_embedding_adapter [-1 ].bias )
+        self .regression_embedding_adapter =None
+        if routing_config .get ('regression_embedding_adapter_enabled',False ):
+            adapter_hidden =max (int (routing_config .get (
+            'regression_embedding_adapter_hidden_dim',64 )),1 )
+            adapter_dropout =max (float (routing_config .get (
+            'regression_embedding_adapter_dropout',0.0 )),0.0 )
+            self .regression_embedding_adapter =nn .Sequential (
+            nn .LayerNorm (d_model ),
+            nn .Linear (d_model ,adapter_hidden ),
+            nn .GELU (),
+            nn .Dropout (adapter_dropout ),
+            nn .Linear (adapter_hidden ,d_model ),
+            )
+            nn .init .zeros_ (self .regression_embedding_adapter [-1 ].weight )
+            nn .init .zeros_ (self .regression_embedding_adapter [-1 ].bias )
         # Side-channel for episodic regression: branch diagnostics used by gate-aux.
         self .last_regression_diagnostics =None
         self .last_expert_confidence_logit =None
@@ -78,6 +109,13 @@ class MetaLearner (nn .Module ):
             return next (self .parameters ()).new_zeros (())
         descriptor =self .task_confidence_descriptor (support_set ,query_set ,task_type )
         return self .task_confidence_head .reliability_loss (descriptor ,target )
+    def adapt_task_embeddings (self ,encoded ,task_type ):
+        """Apply the opt-in task residual without changing the other task."""
+        if task_type =='classification'and self .classification_embedding_adapter is not None :
+            return encoded +self .classification_embedding_adapter (encoded )
+        if task_type =='regression'and self .regression_embedding_adapter is not None :
+            return encoded +self .regression_embedding_adapter (encoded )
+        return encoded
     def _process_batch (self ,batch_of_sequences ,task_type =None ,time_scale_factor =None ):
         device =next (self .parameters ()).device
         max_len =max (len (seq )for seq in batch_of_sequences )if batch_of_sequences else 0
@@ -98,8 +136,9 @@ class MetaLearner (nn .Module ):
         time_scale_factor =time_scale_factor )
         embeddings_reshaped =all_embeddings .view (len (batch_of_sequences ),max_len ,-1 )
         mask_tensor =torch .tensor (masks ,dtype =torch .bool ,device =device )
-        return self .encoder (
+        encoded =self .encoder (
         embeddings_reshaped ,src_key_padding_mask =mask_tensor ,task_type =task_type )
+        return self .adapt_task_embeddings (encoded ,task_type )
     def forward (self ,support_set ,query_set ,task_type ):
         support_seqs ,query_seqs =[s [0 ]for s in support_set ],[q [0 ]for q in query_set ]
         all_seqs =support_seqs +query_seqs

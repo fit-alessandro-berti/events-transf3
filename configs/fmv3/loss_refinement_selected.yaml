@@ -1,0 +1,34 @@
+# Promoted task-isolated loss refinement, assembled from two matched epoch-43
+# continuations by merge_task_isolated_checkpoints.py. Both start from the
+# expert-routing epoch-42 checkpoint; only task-specific adapter tensors are
+# merged, while the learned router remains byte-identical.
+extends: expert_routing_selected.yaml
+experiment_name: loss_refinement_selected
+selected_checkpoint_epoch: 43
+epochs: 43
+episodes_per_epoch: 300
+lr: 0.001
+weight_decay: 0.0
+trainable_scope: classification_adapter
+classification_task_probability: 1.0
+classification_separation_weight: 0.20
+classification_separation_temperature: 0.10
+classification_separation_margin: 0.15
+fmv3_head:
+  classification_embedding_adapter_enabled: true
+  classification_embedding_adapter_hidden_dim: 64
+  classification_embedding_adapter_dropout: 0.0
+  regression_embedding_adapter_enabled: true
+  regression_embedding_adapter_hidden_dim: 64
+  regression_embedding_adapter_dropout: 0.0
+  regression_mae_weight: 0.65
+  regression_rmse_weight: 0.35
+  regression_median_ae_weight: 0.40
+  regression_expert_confidence_loss_weight: 0.25
+fmv3_evaluation:
+  classification_output_temperature: 0.60
+  regression_expert_confidence_temperature: 0.018
+  regression_calibration_mix: 0.502
+  regression_calibration_mix_by_budget:
+    2: 0.0
+    4: 0.6

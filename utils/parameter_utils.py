@@ -14,6 +14,8 @@ def configure_trainable_scope(model, scope):
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",
+        "classification_adapter",
+        "regression_refinement",
     }:
         for name, parameter in model.named_parameters():
             allowed = False
@@ -47,6 +49,14 @@ def configure_trainable_scope(model, scope):
                     or "proto_head.time_transform_bank." in name
                     or "embedder.temporal_input_encoder." in name
                 )
+            elif selected == "classification_adapter":
+                allowed = "classification_embedding_adapter." in name
+            elif selected == "regression_refinement":
+                allowed = (
+                    "proto_head.time_transform_bank." in name
+                    or "regression_embedding_adapter." in name
+                    or "proto_head.regression_expert_confidence." in name
+                )
             parameter.requires_grad_(allowed)
     else:
         raise ValueError(f"Unknown trainable_scope: {selected}")
@@ -60,6 +70,8 @@ def configure_trainable_scope(model, scope):
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",
+        "classification_adapter",
+        "regression_refinement",
     }
     if selected in constrained and not trainable:
         raise RuntimeError(

@@ -226,6 +226,27 @@ The direct raw-hour soft-kNN replacement was tested as a no-rescaling ablation
 and rejected because it worsens MAE, RMSE, median AE, normalized MAE, and R² on
 the current endpoint confirmation.
 
+### Task-isolated loss refinement
+
+The current promoted continuation is
+`configs/fmv3/loss_refinement_selected.yaml` at epoch 43. A classification-only
+residual adapter is trained with a leave-case-out angular-margin objective on
+the deployed embedding; an independent regression-only adapter is trained with
+a median-aware multi-metric loss. An audited merge rejects any shared or
+out-of-scope tensor change, and the learned pre-execution router stays
+byte-identical to epoch 42.
+
+On the full five-log confirmation, balanced accuracy improves from `0.450242`
+to `0.450425`, macro-F1 from `0.421233` to `0.421533`, MAE from `1,097.8102`
+to `1,097.2543` hours, and RMSE from `1,651.8832` to `1,651.7386` hours.
+Accuracy, macro-precision, zero-recall fraction, NLL, Brier, ECE, AURC, median
+AE, normalized MAE, both skill scores, D², R², and interval coverage/width all
+also improve. Every one of the 400 result rows still activates exactly 2 of 4
+experts with routing payloads identical to the epoch-42 endpoint. See
+[`paper_docs/fmv3_loss_refinement_report.md`](paper_docs/fmv3_loss_refinement_report.md)
+for the separability diagnostic, full tables, rejected candidates, hashes, and
+reproduction commands.
+
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.
 The second observable prefix clock is `time_from_previous`.

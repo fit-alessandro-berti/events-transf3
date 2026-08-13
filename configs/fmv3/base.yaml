@@ -21,6 +21,11 @@ retrieval_knn_aux_weight: 0.1
 proto_head_lr_mult_after_warmup: 1.0
 classification_task_probability: 0.50
 classification_label_smoothing: 0.05
+# Optional metric-learning refinements on the deployed (pre-projection)
+# embedding. Zero defaults preserve all historical checkpoints exactly.
+classification_separation_weight: 0.0
+classification_separation_temperature: 0.10
+classification_separation_margin: 0.15
 trainable_scope: all
 fmv3_head:
   regression_mode: sqrt_knn
@@ -65,6 +70,14 @@ fmv3_head:
   prefix_attention_dropout: 0.15
   prefix_attention_gate_logit: -3.0
   prefix_attention_initial_recency: 0.25
+  # Classification-only residual embedding adapter. It is initialized as the
+  # identity and never executes for regression.
+  classification_embedding_adapter_enabled: false
+  classification_embedding_adapter_hidden_dim: 64
+  classification_embedding_adapter_dropout: 0.0
+  regression_embedding_adapter_enabled: false
+  regression_embedding_adapter_hidden_dim: 64
+  regression_embedding_adapter_dropout: 0.0
   regression_mae_weight: 0.5
   regression_rmse_weight: 0.5
   # Promoted multi-metric primary objective (renormalized with MAE/RMSE).
@@ -74,6 +87,7 @@ fmv3_head:
   regression_log_rmse_weight: 0.15
   regression_relative_mae_weight: 0.05
   regression_bias_weight: 0.05
+  regression_median_ae_weight: 0.0
   regression_quantile_weight: 0.0
   regression_quantile_level: 0.5
   # Lower scale power partially restores raw-hour weighting; gate aux is opt-in.
@@ -133,6 +147,9 @@ fmv3_evaluation:
   structured_low_support_threshold: 0
   structured_low_support_weight:
   structured_low_support_tau:
+  # Optional post-fusion calibration. Positive temperature scaling preserves
+  # class decisions; 1.0 is exact historical behavior.
+  classification_output_temperature: 1.0
   virtual_expert_replicates: 1
   virtual_expert_support_fraction: 1.0
   virtual_expert_min_support_prefixes: 1

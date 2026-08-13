@@ -1,0 +1,10 @@
+# Matched 96-row screen with the promoted classification calibration.
+extends: expert_routing_screen_eval.yaml
+experiment_name: loss_refinement_screen
+fmv3_head:
+  inference_temperature: 1.00
+  fallback_inference_temperature: 0.40
+fmv3_evaluation:
+  classification_output_temperature: 0.60
+  regression_expert_confidence_temperature: 0.018
+  regression_calibration_mix: 0.502

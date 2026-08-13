@@ -275,6 +275,67 @@ def _nca_knn_loss(
         return (-log_p_pos[valid]).mean()
 
 
+def _classification_angular_margin_loss(
+    z: torch.Tensor,
+    labels: torch.Tensor,
+    case_ids_int: torch.Tensor,
+    temperature: float = 0.10,
+    margin: float = 0.15,
+):
+    """Separate classes in the deployed embedding space with an angular margin.
+
+    Every anchor is classified against leave-case-out class prototypes. The
+    target prototype logit is reduced by ``margin`` before cross entropy, so a
+    zero loss requires same-class cosine similarity to exceed competing class
+    similarities by that margin. Excluding the anchor's whole case prevents
+    prefixes from one trace providing a trivial same-case shortcut.
+
+    Unlike the existing projection-head SupCon/NCA objectives, this loss acts
+    directly on ``all_embeddings`` -- the representation used by retrieval at
+    test time. It has no dependency on either posterior expert confidence or
+    pre-execution routing confidence.
+    """
+    device = z.device
+    temperature = max(float(temperature), 1e-6)
+    margin = max(float(margin), 0.0)
+
+    with _autocast_disabled_for(device):
+        z = F.normalize(z.float(), p=2, dim=1)
+        labels = labels.long().reshape(-1)
+        case_ids_int = case_ids_int.long().reshape(-1)
+        classes = torch.unique(labels, sorted=True)
+        if z.size(0) < 3 or classes.numel() < 2:
+            return None
+
+        different_case = case_ids_int.view(-1, 1).ne(case_ids_int.view(1, -1))
+        prototypes = []
+        availability = []
+        for cls in classes:
+            members = different_case & labels.view(1, -1).eq(cls)
+            counts = members.sum(dim=1)
+            prototype = members.float() @ z
+            prototype = prototype / counts.clamp_min(1).float().unsqueeze(1)
+            prototypes.append(F.normalize(prototype, p=2, dim=1))
+            availability.append(counts > 0)
+
+        # [anchor, class, embedding] and [anchor, class]
+        prototypes_t = torch.stack(prototypes, dim=1)
+        availability_t = torch.stack(availability, dim=1)
+        target_indices = torch.searchsorted(classes, labels)
+        row_indices = torch.arange(z.size(0), device=device)
+        valid = (
+            availability_t[row_indices, target_indices]
+            & (availability_t.sum(dim=1) >= 2)
+        )
+        if not valid.any():
+            return None
+
+        logits = torch.einsum("bd,bcd->bc", z, prototypes_t) / temperature
+        logits = logits.masked_fill(~availability_t, -1e4)
+        logits[row_indices, target_indices] -= margin / temperature
+        return F.cross_entropy(logits[valid], target_indices[valid])
+
+
 def _variance_loss(z: torch.Tensor, eps: float = 1e-4, target_std: float = 1.0):
     z = z.float()
     z = z - z.mean(dim=0, keepdim=True)
@@ -360,10 +421,21 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     knn_aux_w = float(config.get("retrieval_knn_aux_weight", 0.0))
     contrastive_loss = None
     nca_loss = None
+    classification_separation_loss = None
     labels_t = None
     case_ids_int = None
 
-    if contrastive_w > 0 or (task_type == "classification" and knn_aux_w > 0):
+    classification_separation_w = max(
+        float(config.get("classification_separation_weight", 0.0)), 0.0
+    )
+
+    if (
+        contrastive_w > 0
+        or (
+            task_type == "classification"
+            and (knn_aux_w > 0 or classification_separation_w > 0)
+        )
+    ):
         case_ids_int = _encode_case_ids_to_int(batch_case_ids).to(device)
 
     if task_type == "classification":
@@ -387,6 +459,22 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             labels_t,
             case_ids_int,
             temperature=contrastive_temp,
+        )
+
+    if (
+        task_type == "classification"
+        and classification_separation_w > 0
+        and labels_t is not None
+        and case_ids_int is not None
+    ):
+        classification_separation_loss = _classification_angular_margin_loss(
+            all_embeddings,
+            labels_t,
+            case_ids_int,
+            temperature=float(
+                config.get("classification_separation_temperature", 0.10)
+            ),
+            margin=float(config.get("classification_separation_margin", 0.15)),
         )
 
     total_loss_for_batch = 0.0
@@ -615,6 +703,14 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             loss_out = knn_aux_w * nca_loss
         else:
             loss_out = loss_out + (knn_aux_w * nca_loss)
+
+    if classification_separation_loss is not None and classification_separation_w > 0:
+        if loss_out is None:
+            loss_out = classification_separation_w * classification_separation_loss
+        else:
+            loss_out = loss_out + (
+                classification_separation_w * classification_separation_loss
+            )
 
     if (
         loss_out is not None

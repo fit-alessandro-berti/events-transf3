@@ -248,6 +248,46 @@ class FMV3ProtocolTests(unittest.TestCase):
         self.assertEqual(low_support_fused["structured_selected_weight"], 1.0)
         self.assertEqual(low_support_fused["structured_selected_tau"], 0.25)
 
+    def test_structured_output_temperature_calibrates_without_changing_decision(self):
+        base = {
+            "y_true": [0],
+            "y_pred": [0],
+            "probabilities": np.asarray([[0.7, 0.2, 0.1]]),
+            "confidences": [0.7],
+            "support_counts": {0: 1, 1: 1, 2: 1},
+        }
+        structured = {
+            "probabilities": np.asarray([[0.7, 0.2, 0.1]]),
+            "structured_context_support": [1.0],
+        }
+        default = _fuse_structured_prediction(
+            base, structured, [0, 1, 2], weight=0.5, tau=1.0, fusion="mixture"
+        )
+        sharpened = _fuse_structured_prediction(
+            base,
+            structured,
+            [0, 1, 2],
+            weight=0.5,
+            tau=1.0,
+            fusion="mixture",
+            output_temperature=0.5,
+        )
+        self.assertEqual(default["y_pred"], sharpened["y_pred"])
+        self.assertGreater(
+            sharpened["probabilities"][0, 0], default["probabilities"][0, 0]
+        )
+        self.assertAlmostEqual(float(sharpened["probabilities"].sum()), 1.0)
+        with self.assertRaises(ValueError):
+            _fuse_structured_prediction(
+                base,
+                structured,
+                [0, 1, 2],
+                weight=0.5,
+                tau=1.0,
+                fusion="mixture",
+                output_temperature=0.0,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

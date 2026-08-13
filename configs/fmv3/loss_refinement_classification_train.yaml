@@ -1,0 +1,19 @@
+# Winning classification-only continuation from expert_routing_bias epoch 42.
+extends: expert_routing_selected.yaml
+experiment_name: loss_refinement_classification
+epochs: 43
+episodes_per_epoch: 300
+lr: 0.001
+weight_decay: 0.0
+trainable_scope: classification_adapter
+classification_task_probability: 1.0
+classification_separation_weight: 0.20
+classification_separation_temperature: 0.10
+classification_separation_margin: 0.15
+fmv3_head:
+  classification_embedding_adapter_enabled: true
+  classification_embedding_adapter_hidden_dim: 64
+  classification_embedding_adapter_dropout: 0.0
+  classification_expert_confidence_loss_weight: 0.0
+  regression_expert_confidence_loss_weight: 0.0
+  expert_routing_confidence_loss_weight: 0.0
