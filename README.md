@@ -228,7 +228,7 @@ the current endpoint confirmation.
 
 ### Task-isolated loss refinement
 
-The current promoted continuation is
+The immediate predecessor is
 `configs/fmv3/loss_refinement_selected.yaml` at epoch 43. A classification-only
 residual adapter is trained with a leave-case-out angular-margin objective on
 the deployed embedding; an independent regression-only adapter is trained with
@@ -246,6 +246,41 @@ experts with routing payloads identical to the epoch-42 endpoint. See
 [`paper_docs/fmv3_loss_refinement_report.md`](paper_docs/fmv3_loss_refinement_report.md)
 for the separability diagnostic, full tables, rejected candidates, hashes, and
 reproduction commands.
+
+### Explainable task-specific example selection
+
+The current promoted endpoint is
+`configs/fmv3/example_selector_selected.yaml` at epoch 44. It adds a separate
+bounded support-trust MLP inside each task head. The classifier scores every
+retrieved example from relative/centered similarity, neighborhood centrality,
+same-class coherence, and class support. The regressor uses the same geometric
+signals plus robust support-target deviation and nearest-neighbor target
+agreement. Neither selector sees the query label, query remaining time, or a
+future event.
+
+Only 516 classification-selector and 580 regression-selector parameters are
+added across all four experts. They were trained in independent continuations
+from the exact epoch-43 checkpoint and merged under the existing scope audit;
+all pre-existing tensors and all routing payloads remain exact. A zero-
+initialized selector is an exact identity, and bounded residual log weights
+make every example adjustment inspectable.
+
+On the full five-log confirmation, balanced accuracy improves from `0.450425`
+to `0.450954`, macro-F1 from `0.421533` to `0.421786`, MAE from `1,097.254`
+to `1,088.594` hours, and RMSE from `1,651.739` to `1,647.497` hours. NLL,
+Brier, ECE, median AE, normalized MAE, D2, R2, coverage, and interval width
+also improve. Macro-precision is effectively flat (`-0.000010`), while AURC
+(`+0.001187`) and RMSE skill (`-0.002057`) are retained as explicit secondary
+tradeoffs.
+
+Real-neighborhood diagnostics show that classification mostly learns relative
+centered relevance with a mild correction against locally dominant classes;
+regression learns to retain relevant examples while downweighting robust
+target outliers and geometrically close examples with inconsistent targets.
+See
+[`paper_docs/fmv3_example_selector_report.md`](paper_docs/fmv3_example_selector_report.md)
+for equations, feature definitions, permutation diagnostics, complete tables,
+limitations, hashes, and reproduction commands.
 
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.

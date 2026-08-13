@@ -1,0 +1,696 @@
+{
+  "case_budget": 128,
+  "checkpoint": "checkpoints/fmv3/example_selector_selected/model_epoch_44.pth",
+  "checkpoint_sha256": "231dc6b00d5840498c8469fd470b736a35ebe46294714d5c04c540c0284b9314",
+  "logs": [
+    {
+      "case_budget": 128,
+      "log": "billing",
+      "tasks": {
+        "classification": {
+          "active_experts": [
+            0,
+            2
+          ],
+          "queries": 208,
+          "support_prefixes": 514
+        },
+        "regression": {
+          "active_experts": [
+            2,
+            3
+          ],
+          "queries": 208,
+          "support_prefixes": 514
+        }
+      }
+    },
+    {
+      "case_budget": 128,
+      "log": "helpdesk",
+      "tasks": {
+        "classification": {
+          "active_experts": [
+            0,
+            2
+          ],
+          "queries": 145,
+          "support_prefixes": 329
+        },
+        "regression": {
+          "active_experts": [
+            2,
+            3
+          ],
+          "queries": 145,
+          "support_prefixes": 329
+        }
+      }
+    },
+    {
+      "case_budget": 128,
+      "log": "receipt",
+      "tasks": {
+        "classification": {
+          "active_experts": [
+            0,
+            2
+          ],
+          "queries": 244,
+          "support_prefixes": 563
+        },
+        "regression": {
+          "active_experts": [
+            2,
+            3
+          ],
+          "queries": 244,
+          "support_prefixes": 563
+        }
+      }
+    },
+    {
+      "case_budget": 43,
+      "log": "roadtraffic100traces",
+      "tasks": {
+        "classification": {
+          "active_experts": [
+            0,
+            2
+          ],
+          "queries": 59,
+          "support_prefixes": 131
+        },
+        "regression": {
+          "active_experts": [
+            2,
+            3
+          ],
+          "queries": 59,
+          "support_prefixes": 131
+        }
+      }
+    },
+    {
+      "case_budget": 128,
+      "log": "sepsis",
+      "tasks": {
+        "classification": {
+          "active_experts": [
+            0,
+            2
+          ],
+          "queries": 256,
+          "support_prefixes": 1493
+        },
+        "regression": {
+          "active_experts": [
+            2,
+            3
+          ],
+          "queries": 256,
+          "support_prefixes": 1493
+        }
+      }
+    }
+  ],
+  "max_queries_per_log": 256,
+  "retrieval_k": 20,
+  "tasks": {
+    "classification": {
+      "aggregate": {
+        "deployed_strength": 0.25,
+        "features": [
+          {
+            "logit_correlation": 0.0871624512102967,
+            "name": "raw_cosine",
+            "normalized_permutation_importance": 0.011347635581216348,
+            "observed": {
+              "median": 0.9977761507034302,
+              "p10": 0.9517229199409485,
+              "p90": 0.9999838471412659
+            },
+            "permutation_mean_absolute_log_weight_change": 0.0007621818957360167
+          },
+          {
+            "logit_correlation": 0.8247899708505889,
+            "name": "centered_cosine",
+            "normalized_permutation_importance": 0.4046793839481549,
+            "observed": {
+              "median": -0.10248750448226929,
+              "p10": -0.9517977237701416,
+              "p90": 0.9696419835090637
+            },
+            "permutation_mean_absolute_log_weight_change": 0.02718093102438408
+          },
+          {
+            "logit_correlation": 0.8273916960159752,
+            "name": "neighborhood_zscore",
+            "normalized_permutation_importance": 0.3725902017666362,
+            "observed": {
+              "median": -0.16461558640003204,
+              "p10": -0.8252164721488953,
+              "p90": 0.8710962533950806
+            },
+            "permutation_mean_absolute_log_weight_change": 0.025025610338177597
+          },
+          {
+            "logit_correlation": -0.1175148641547394,
+            "name": "support_centrality",
+            "normalized_permutation_importance": 0.007551201345507099,
+            "observed": {
+              "median": 0.9987664222717285,
+              "p10": 0.9801634550094604,
+              "p90": 0.9999900460243225
+            },
+            "permutation_mean_absolute_log_weight_change": 0.0005071883843476443
+          },
+          {
+            "logit_correlation": -0.2694197214735158,
+            "name": "same_class_coherence",
+            "normalized_permutation_importance": 0.04302337024970039,
+            "observed": {
+              "median": 0.9987156987190247,
+              "p10": 0.9735507965087891,
+              "p90": 0.9999889731407166
+            },
+            "permutation_mean_absolute_log_weight_change": 0.002889732725656869
+          },
+          {
+            "logit_correlation": -0.2751137937015169,
+            "name": "normalized_class_support",
+            "normalized_permutation_importance": 0.16080820710878505,
+            "observed": {
+              "median": 0.9305936694145203,
+              "p10": 0.4553404748439789,
+              "p90": 1.0
+            },
+            "permutation_mean_absolute_log_weight_change": 0.010800937628536894
+          }
+        ],
+        "logs_and_experts": 10,
+        "neighbors_per_query": 20,
+        "queries": 1824,
+        "scored_support_examples": 36480,
+        "selection_log_weight": {
+          "mean": -0.040877554565668106,
+          "median": -0.04045313969254494,
+          "p10": -0.12472831457853317,
+          "p90": 0.027431126683950424,
+          "p90_to_p10_weight_ratio": 1.164345866408088,
+          "std": 0.05488904193043709
+        },
+        "selector_only_effective_support_count": {
+          "mean": 19.951671600341797,
+          "median": 19.956653594970703,
+          "p10": 19.91483497619629,
+          "p90": 19.980712890625
+        }
+      },
+      "experts": {
+        "0": {
+          "deployed_strength": 0.25,
+          "features": [
+            {
+              "logit_correlation": 0.12424181000762478,
+              "name": "raw_cosine",
+              "normalized_permutation_importance": 0.02196826780284911,
+              "observed": {
+                "median": 0.9979716539382935,
+                "p10": 0.9562626481056213,
+                "p90": 0.9999828934669495
+              },
+              "permutation_mean_absolute_log_weight_change": 0.001278513120977502
+            },
+            {
+              "logit_correlation": 0.8792405920745451,
+              "name": "centered_cosine",
+              "normalized_permutation_importance": 0.4527814481161945,
+              "observed": {
+                "median": -0.10705507546663284,
+                "p10": -0.9566709399223328,
+                "p90": 0.9730228781700134
+              },
+              "permutation_mean_absolute_log_weight_change": 0.026351054509480793
+            },
+            {
+              "logit_correlation": 0.8636153623378964,
+              "name": "neighborhood_zscore",
+              "normalized_permutation_importance": 0.23830200771527488,
+              "observed": {
+                "median": -0.17081491649150848,
+                "p10": -0.8241256475448608,
+                "p90": 0.869926393032074
+              },
+              "permutation_mean_absolute_log_weight_change": 0.013868742240102667
+            },
+            {
+              "logit_correlation": -0.13525053245832716,
+              "name": "support_centrality",
+              "normalized_permutation_importance": 0.015716534499362157,
+              "observed": {
+                "median": 0.9989417791366577,
+                "p10": 0.9801117777824402,
+                "p90": 0.9999895095825195
+              },
+              "permutation_mean_absolute_log_weight_change": 0.0009146736444611298
+            },
+            {
+              "logit_correlation": -0.4203965256899353,
+              "name": "same_class_coherence",
+              "normalized_permutation_importance": 0.07237429985875712,
+              "observed": {
+                "median": 0.9988359808921814,
+                "p10": 0.9753317832946777,
+                "p90": 0.9999886751174927
+              },
+              "permutation_mean_absolute_log_weight_change": 0.004212052257437455
+            },
+            {
+              "logit_correlation": -0.4358757209471185,
+              "name": "normalized_class_support",
+              "normalized_permutation_importance": 0.19885744200756234,
+              "observed": {
+                "median": 0.9305936694145203,
+                "p10": 0.4553404748439789,
+                "p90": 1.0
+              },
+              "permutation_mean_absolute_log_weight_change": 0.011573140453874019
+            }
+          ],
+          "logs_and_experts": 5,
+          "neighbors_per_query": 20,
+          "queries": 912,
+          "scored_support_examples": 18240,
+          "selection_log_weight": {
+            "mean": -0.01815757341682911,
+            "median": -0.026696985587477684,
+            "p10": -0.06591030210256577,
+            "p90": 0.032233770936727524,
+            "p90_to_p10_weight_ratio": 1.1031217037568573,
+            "std": 0.04070614278316498
+          },
+          "selector_only_effective_support_count": {
+            "mean": 19.96847152709961,
+            "median": 19.970760345458984,
+            "p10": 19.947874069213867,
+            "p90": 19.98420524597168
+          }
+        },
+        "2": {
+          "deployed_strength": 0.25,
+          "features": [
+            {
+              "logit_correlation": 0.046423683283432174,
+              "name": "raw_cosine",
+              "normalized_permutation_importance": 0.003229141787555132,
+              "observed": {
+                "median": 0.9974931478500366,
+                "p10": 0.9472154378890991,
+                "p90": 0.9999847412109375
+              },
+              "permutation_mean_absolute_log_weight_change": 0.00024585067049453136
+            },
+            {
+              "logit_correlation": 0.9531372788715318,
+              "name": "centered_cosine",
+              "normalized_permutation_importance": 0.3679097923399365,
+              "observed": {
+                "median": -0.0974433571100235,
+                "p10": -0.947396457195282,
+                "p90": 0.9653247594833374
+              },
+              "permutation_mean_absolute_log_weight_change": 0.028010807539287367
+            },
+            {
+              "logit_correlation": 0.9638143836128641,
+              "name": "neighborhood_zscore",
+              "normalized_permutation_importance": 0.4752411407330875,
+              "observed": {
+                "median": -0.1580650508403778,
+                "p10": -0.8259506225585938,
+                "p90": 0.873475193977356
+              },
+              "permutation_mean_absolute_log_weight_change": 0.036182478436252524
+            },
+            {
+              "logit_correlation": -0.16054873389153917,
+              "name": "support_centrality",
+              "normalized_permutation_importance": 0.0013095572371907942,
+              "observed": {
+                "median": 0.9984533786773682,
+                "p10": 0.9802030920982361,
+                "p90": 0.999990701675415
+              },
+              "permutation_mean_absolute_log_weight_change": 9.970312423415874e-05
+            },
+            {
+              "logit_correlation": -0.2120845463206706,
+              "name": "same_class_coherence",
+              "normalized_permutation_importance": 0.020587291596683866,
+              "observed": {
+                "median": 0.9985377788543701,
+                "p10": 0.9718296527862549,
+                "p90": 0.9999895691871643
+              },
+              "permutation_mean_absolute_log_weight_change": 0.0015674131938762832
+            },
+            {
+              "logit_correlation": -0.23975649652158837,
+              "name": "normalized_class_support",
+              "normalized_permutation_importance": 0.13172307630554625,
+              "observed": {
+                "median": 0.9106809496879578,
+                "p10": 0.4553404748439789,
+                "p90": 1.0
+              },
+              "permutation_mean_absolute_log_weight_change": 0.010028734803199768
+            }
+          ],
+          "logs_and_experts": 5,
+          "neighbors_per_query": 20,
+          "queries": 912,
+          "scored_support_examples": 18240,
+          "selection_log_weight": {
+            "mean": -0.06359753757715225,
+            "median": -0.0718551054596901,
+            "p10": -0.1352536678314209,
+            "p90": 0.011520464904606342,
+            "p90_to_p10_weight_ratio": 1.1580923583345943,
+            "std": 0.057760097086429596
+          },
+          "selector_only_effective_support_count": {
+            "mean": 19.934873580932617,
+            "median": 19.938201904296875,
+            "p10": 19.897031784057617,
+            "p90": 19.963193893432617
+          }
+        }
+      }
+    },
+    "regression": {
+      "aggregate": {
+        "deployed_strength": 1.0,
+        "features": [
+          {
+            "logit_correlation": -0.014253374939261881,
+            "name": "raw_cosine",
+            "normalized_permutation_importance": 0.002915174279383116,
+            "observed": {
+              "median": 0.997445285320282,
+              "p10": 0.9541909098625183,
+              "p90": 0.9999826550483704
+            },
+            "permutation_mean_absolute_log_weight_change": 0.0010907175313485296
+          },
+          {
+            "logit_correlation": 0.32487552912408835,
+            "name": "centered_cosine",
+            "normalized_permutation_importance": 0.10814595548212808,
+            "observed": {
+              "median": -0.10032975673675537,
+              "p10": -0.9496340155601501,
+              "p90": 0.9689826965332031
+            },
+            "permutation_mean_absolute_log_weight_change": 0.04046299750344795
+          },
+          {
+            "logit_correlation": 0.3219888566199776,
+            "name": "neighborhood_zscore",
+            "normalized_permutation_importance": 0.1355213998855664,
+            "observed": {
+              "median": -0.16777196526527405,
+              "p10": -0.825675368309021,
+              "p90": 0.8716546297073364
+            },
+            "permutation_mean_absolute_log_weight_change": 0.050705567681998534
+          },
+          {
+            "logit_correlation": -0.06684188501771483,
+            "name": "support_centrality",
+            "normalized_permutation_importance": 0.0018323168744223874,
+            "observed": {
+              "median": 0.9985330104827881,
+              "p10": 0.9811356067657471,
+              "p90": 0.9999893307685852
+            },
+            "permutation_mean_absolute_log_weight_change": 0.0006855645482510067
+          },
+          {
+            "logit_correlation": -0.41591538678509954,
+            "name": "robust_target_deviation",
+            "normalized_permutation_importance": 0.1706920275308413,
+            "observed": {
+              "median": 0.5879261493682861,
+              "p10": 0.028110016137361526,
+              "p90": 0.9959954619407654
+            },
+            "permutation_mean_absolute_log_weight_change": 0.06386471924028898
+          },
+          {
+            "logit_correlation": -0.31946925888093525,
+            "name": "nearest_target_disagreement",
+            "normalized_permutation_importance": 0.08384951214332198,
+            "observed": {
+              "median": 0.7636507153511047,
+              "p10": 0.045726630836725235,
+              "p90": 0.9998193383216858
+            },
+            "permutation_mean_absolute_log_weight_change": 0.031372440933135515
+          },
+          {
+            "logit_correlation": -0.8232396834133793,
+            "name": "signed_target_position",
+            "normalized_permutation_importance": 0.4970436138043367,
+            "observed": {
+              "median": 0.0,
+              "p10": -0.8678053617477417,
+              "p90": 0.9709423184394836
+            },
+            "permutation_mean_absolute_log_weight_change": 0.18596973335533812
+          }
+        ],
+        "logs_and_experts": 10,
+        "neighbors_per_query": 20,
+        "queries": 1824,
+        "scored_support_examples": 36480,
+        "selection_log_weight": {
+          "mean": -0.022083228453993797,
+          "median": 0.025264348834753036,
+          "p10": -0.3698849380016327,
+          "p90": 0.23166745901107788,
+          "p90_to_p10_weight_ratio": 1.8249496489049137,
+          "std": 0.21546365320682526
+        },
+        "selector_only_effective_support_count": {
+          "mean": 19.23438835144043,
+          "median": 19.281333923339844,
+          "p10": 18.81343650817871,
+          "p90": 19.592456817626953
+        }
+      },
+      "experts": {
+        "2": {
+          "deployed_strength": 1.0,
+          "features": [
+            {
+              "logit_correlation": 0.011246057275458358,
+              "name": "raw_cosine",
+              "normalized_permutation_importance": 0.002406597404278613,
+              "observed": {
+                "median": 0.997530460357666,
+                "p10": 0.9457746744155884,
+                "p90": 0.9999843239784241
+              },
+              "permutation_mean_absolute_log_weight_change": 0.0009947552362032104
+            },
+            {
+              "logit_correlation": 0.5377293583265705,
+              "name": "centered_cosine",
+              "normalized_permutation_importance": 0.16312489736603425,
+              "observed": {
+                "median": -0.09540429711341858,
+                "p10": -0.949978768825531,
+                "p90": 0.9671725034713745
+              },
+              "permutation_mean_absolute_log_weight_change": 0.06742687643620006
+            },
+            {
+              "logit_correlation": 0.5345026614477961,
+              "name": "neighborhood_zscore",
+              "normalized_permutation_importance": 0.19126028403323928,
+              "observed": {
+                "median": -0.15413665771484375,
+                "p10": -0.8266544342041016,
+                "p90": 0.872472882270813
+              },
+              "permutation_mean_absolute_log_weight_change": 0.07905650055199338
+            },
+            {
+              "logit_correlation": -0.07634286801558214,
+              "name": "support_centrality",
+              "normalized_permutation_importance": 0.0031293249606931294,
+              "observed": {
+                "median": 0.9984959959983826,
+                "p10": 0.9799617528915405,
+                "p90": 0.9999904036521912
+              },
+              "permutation_mean_absolute_log_weight_change": 0.0012934911277210502
+            },
+            {
+              "logit_correlation": -0.3888723663963367,
+              "name": "robust_target_deviation",
+              "normalized_permutation_importance": 0.16807485848915726,
+              "observed": {
+                "median": 0.5879261493682861,
+                "p10": 0.027453746646642685,
+                "p90": 0.9957051873207092
+              },
+              "permutation_mean_absolute_log_weight_change": 0.06947291859409266
+            },
+            {
+              "logit_correlation": -0.24409662995604609,
+              "name": "nearest_target_disagreement",
+              "normalized_permutation_importance": 0.03114278005335329,
+              "observed": {
+                "median": 0.7527806758880615,
+                "p10": 0.0454675666987896,
+                "p90": 0.9998341202735901
+              },
+              "permutation_mean_absolute_log_weight_change": 0.012872715425073055
+            },
+            {
+              "logit_correlation": -0.7703092938548107,
+              "name": "signed_target_position",
+              "normalized_permutation_importance": 0.440861257693244,
+              "observed": {
+                "median": 0.0,
+                "p10": -0.8552554249763489,
+                "p90": 0.9705765247344971
+              },
+              "permutation_mean_absolute_log_weight_change": 0.1822278390850937
+            }
+          ],
+          "logs_and_experts": 5,
+          "neighbors_per_query": 20,
+          "queries": 912,
+          "scored_support_examples": 18240,
+          "selection_log_weight": {
+            "mean": 0.007822928950190544,
+            "median": 0.025357559323310852,
+            "p10": -0.3283669948577881,
+            "p90": 0.3098103106021881,
+            "p90_to_p10_weight_ratio": 1.8930273223068463,
+            "std": 0.22466138005256653
+          },
+          "selector_only_effective_support_count": {
+            "mean": 19.133403778076172,
+            "median": 19.146799087524414,
+            "p10": 18.722352981567383,
+            "p90": 19.510726928710938
+          }
+        },
+        "3": {
+          "deployed_strength": 1.0,
+          "features": [
+            {
+              "logit_correlation": -0.03533882798241643,
+              "name": "raw_cosine",
+              "normalized_permutation_importance": 0.0035427679352731988,
+              "observed": {
+                "median": 0.997340202331543,
+                "p10": 0.9597574472427368,
+                "p90": 0.9999809861183167
+              },
+              "permutation_mean_absolute_log_weight_change": 0.0011866798264938488
+            },
+            {
+              "logit_correlation": 0.09465185705843306,
+              "name": "centered_cosine",
+              "normalized_permutation_importance": 0.040300882646680865,
+              "observed": {
+                "median": -0.10619862377643585,
+                "p10": -0.9495100975036621,
+                "p90": 0.9702181816101074
+              },
+              "permutation_mean_absolute_log_weight_change": 0.013499118570695844
+            },
+            {
+              "logit_correlation": 0.09204653888922,
+              "name": "neighborhood_zscore",
+              "normalized_permutation_importance": 0.0667385436648941,
+              "observed": {
+                "median": -0.17812317609786987,
+                "p10": -0.8242843747138977,
+                "p90": 0.8703345060348511
+              },
+              "permutation_mean_absolute_log_weight_change": 0.022354634812003688
+            },
+            {
+              "logit_correlation": -0.033082877388630666,
+              "name": "support_centrality",
+              "normalized_permutation_importance": 0.0002317839236970995,
+              "observed": {
+                "median": 0.9985710382461548,
+                "p10": 0.982327938079834,
+                "p90": 0.999988317489624
+              },
+              "permutation_mean_absolute_log_weight_change": 7.763796878096305e-05
+            },
+            {
+              "logit_correlation": -0.45487362131788245,
+              "name": "robust_target_deviation",
+              "normalized_permutation_importance": 0.17392166451859326,
+              "observed": {
+                "median": 0.5879261493682861,
+                "p10": 0.029404273256659508,
+                "p90": 0.9963098764419556
+              },
+              "permutation_mean_absolute_log_weight_change": 0.058256519886485315
+            },
+            {
+              "logit_correlation": -0.4094503079054766,
+              "name": "nearest_target_disagreement",
+              "normalized_permutation_importance": 0.1488906343444949,
+              "observed": {
+                "median": 0.7727571725845337,
+                "p10": 0.04590809717774391,
+                "p90": 0.9998062252998352
+              },
+              "permutation_mean_absolute_log_weight_change": 0.04987216644119798
+            },
+            {
+              "logit_correlation": -0.9019557936889427,
+              "name": "signed_target_position",
+              "normalized_permutation_importance": 0.5663737229663665,
+              "observed": {
+                "median": 0.0,
+                "p10": -0.8789111375808716,
+                "p90": 0.9715296626091003
+              },
+              "permutation_mean_absolute_log_weight_change": 0.18971162762558252
+            }
+          ],
+          "logs_and_experts": 5,
+          "neighbors_per_query": 20,
+          "queries": 912,
+          "scored_support_examples": 18240,
+          "selection_log_weight": {
+            "mean": -0.05198938772082329,
+            "median": 0.025065790861845016,
+            "p10": -0.3955441415309906,
+            "p90": 0.16220101714134216,
+            "p90_to_p10_weight_ratio": 1.7467294587284015,
+            "std": 0.20146386325359344
+          },
+          "selector_only_effective_support_count": {
+            "mean": 19.33537483215332,
+            "median": 19.362037658691406,
+            "p10": 19.021486282348633,
+            "p90": 19.621524810791016
+          }
+        }
+      }
+    }
+  }
+}

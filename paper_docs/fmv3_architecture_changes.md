@@ -1,4 +1,4 @@
-# FM-v3 architecture changes: from FM-v2 to promoted multi-metric FM-v3
+# FM-v3 architecture changes: from FM-v2 to selected example-aware FM-v3
 
 This document is the source of truth for the architecture currently selected
 for the paper. It explains what changed, why each change was made, which parts
@@ -14,11 +14,14 @@ The current state-aware prefix projection, its bottleneck audit, and its full
 confirmation are documented in
 [`fmv3_prefix_attention_report.md`](fmv3_prefix_attention_report.md). The
 promoted epoch-38 loss continuation and its transfer limitation are documented
-in [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md).
+in [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md). The
+current epoch-44 endpoint, including task-isolated support selection and its
+retained metric tradeoffs, is documented in
+[`fmv3_example_selector_report.md`](fmv3_example_selector_report.md).
 
 ## Short version
 
-The final system is not the original `06_full_fmv3` model. It has six selected
+The final system is not the original `06_full_fmv3` model. It has nine selected
 layers:
 
 1. **Corrected FM-v3 checkpoint:** retain FM-v2's reliable centered local
@@ -52,9 +55,21 @@ layers:
    confidence head. The learned classification-confidence head is disabled
    because it slightly lowers decision metrics; the low-support structured
    classifier remains the classification endpoint.
+7. **Learned half-expert routing:** select two of four experts independently
+   for each task before expert execution, then freeze that router for every
+   later continuation.
+8. **Task-isolated loss refinement:** add separate residual embedding adapters
+   for angular class separation and median-aware remaining-time refinement;
+   merge them only after an exact tensor-scope audit.
+9. **Explainable example selection:** add a bounded task-specific log weight
+   to every retrieved support example. Classification learns relative
+   relevance, class coherence, and class-support corrections; regression also
+   learns robust support-target consistency. Neither path sees a query label
+   or query target.
 
 The six-layer Transformer encoder and its four-expert mixture remain the frozen
-representation backbone. The structured transition memory remains
+representation backbone; the router materializes two experts per task. The
+structured transition memory remains
 classification-only. The two temporal input encoders are shared by both task
 paths and can change classification output; only the target-transform bank is
 regression-only. The new prefix adapter is task-conditioned and therefore
@@ -88,7 +103,8 @@ flowchart LR
     E --> TE[Temporally augmented event representation]
     IS --> TE
     IP --> TE
-    TE --> TR[Four frozen Transformer experts]
+    TE --> RT[Task router: select 2 of 4 experts]
+    RT --> TR[Selected frozen Transformer experts]
     TR --> LP[Historical CLS plus static-query projection]
     TR --> SP[CLS/last-event dynamic attention plus recency]
     LP --> Z[Task-conditioned prefix vector]
@@ -96,7 +112,9 @@ flowchart LR
     S[Labeled target support cases] --> SE[State-aware support embeddings per expert]
     Z --> R[Expert-specific cosine top-k retrieval]
     SE --> R
-    R --> L[Centered local class evidence]
+    R --> X[Bounded class-example trust weights]
+    S --> X
+    X --> L[Weighted centered local class evidence]
     SE --> G[Full-pool class prototypes]
     L --> C[Conservative coverage fallback]
     G --> C
@@ -121,7 +139,9 @@ The regression head after the shared temporal representation is separate:
 flowchart LR
     Q[State-aware temporal query embedding] --> R[Expert-specific top-50 retrieval]
     S[State-aware temporal support embeddings] --> R
-    R --> B[Four learned monotone target branches]
+    R --> X[Geometry and support-target trust weights]
+    S --> X
+    X --> B[Four learned monotone target branches]
     B --> D[Trained query-specific gate]
     S --> C[Self-excluded support calibration]
     C --> P[Log-level branch prior]
@@ -746,28 +766,69 @@ and RMSE by `7.7584` hours. This transfer regression is retained as a known
 limitation, not averaged away. Full controls, intervals, hashes, and commands
 are in [`fmv3_multimetric_loss_report.md`](fmv3_multimetric_loss_report.md).
 
+## Stage 8: pre-execution expert routing
+
+Stage 8 learns a task-specific router and selects exactly two of four experts
+before their encoders execute. Classification selects experts `[0, 2]` and
+regression selects `[2, 3]`. The selected task-bias router is frozen in all
+later stages; the complete routing payload remains identical through epoch 44.
+Design and compute/accuracy tradeoffs are in
+[`fmv3_expert_routing_report.md`](fmv3_expert_routing_report.md).
+
+## Stage 9: task-isolated loss refinement
+
+Stage 9 adds disjoint residual adapters after the shared encoder. The
+classification adapter receives a leave-case-out angular-margin objective;
+the regression adapter receives a median-aware multi-metric objective. Two
+independent continuations are merged only after verifying that shared and
+out-of-scope tensors are unchanged. The selected epoch-43 endpoint improves
+all reported aggregate metrics over epoch 42. See
+[`fmv3_loss_refinement_report.md`](fmv3_loss_refinement_report.md).
+
+## Stage 10: explainable support-example selection
+
+Stage 10 learns a bounded residual log weight for each retrieved support
+example. The classifier uses six scalar geometric, coherence, and class-
+support features. The regressor uses seven scalar geometric and robust support-
+target-consistency features. Query labels and query targets are unavailable.
+The MLPs are zero-initialized exact identities and are trained in disjoint
+epoch-44 continuations; an audited merge adds 16 tensors per task and changes
+no existing tensor.
+
+At deployment, classification uses selector strength 0.25 because its neural
+posterior is subsequently mixed with structured memory; regression uses full
+strength. On real top-20 neighborhoods, the selector-only effective support
+counts are 19.95 and 19.23 respectively. The full confirmation improves
+balanced accuracy by `0.000528`, macro-F1 by `0.000252`, MAE by `8.660` hours,
+and RMSE by `4.242` hours. Macro-precision, AURC, and RMSE skill tradeoffs are
+reported without suppression in
+[`fmv3_example_selector_report.md`](fmv3_example_selector_report.md).
+
 ## Final classification inference algorithm
 
 For each target log and support budget:
 
 1. Split support and query by case; a case cannot occur in both sets.
 2. Encode both prefix clocks with their independent learned components, add
-   both residuals to every event, and run each materialized support/query
-   prefix independently through all four frozen Transformer experts. Combine
-   the historical projection with the classification-specific last-state and
+   both residuals to every event, route to experts `[0, 2]`, and run each
+   materialized support/query prefix through those frozen experts. Combine the
+   historical projection with the classification-specific last-state and
    recency-aware prefix residual.
-3. For each expert, retrieve its own $k=20$ cosine-nearest support prefixes.
-4. Compute centered local evidence and full-pool global prototypes.
-5. Apply coverage fallback only to labels missing from that expert's local
+3. For each selected expert, retrieve its own $k=20$ cosine-nearest support
+   prefixes.
+4. Compute the six support-example features and add the bounded learned trust
+   log weight to centered similarity before local class aggregation.
+5. Compute weighted centered local evidence and full-pool global prototypes.
+6. Apply coverage fallback only to labels missing from that expert's local
    neighborhood.
-6. Average the aligned four-expert probabilities to obtain $p_{FM}$.
-7. Build order-1--3 transition counts from all labeled support prefixes.
-8. Select the longest observed suffix for the query and compute the balanced
+7. Average the two aligned expert probabilities to obtain $p_{FM}$.
+8. Build order-1--3 transition counts from all labeled support prefixes.
+9. Select the longest observed suffix for the query and compute the balanced
    structured posterior $p_{str}$.
-9. Compute the support-count gate $\lambda(s)$ and mix the two posterior
+10. Compute the support-count gate $\lambda(s)$ and mix the two posterior
    vectors.
-10. Predict the activity with maximum final probability and retain the final
-    maximum as confidence.
+11. Apply the monotone output temperature, predict the activity with maximum
+    probability, and retain that maximum as confidence.
 
 Across the full confirmation protocol, structured contexts covered 93.3% of
 queries, the mean selected suffix order was 2.55, and the mean effective
@@ -778,23 +839,26 @@ structured weight was 0.606.
 For the same case-disjoint target support/query split:
 
 1. Encode support and query prefixes with the same two independent temporal
-   input components used by classification, followed by each frozen expert and
-   the regression-specific last-state and recency-aware prefix residual.
-2. Retrieve the 50 nearest support prefixes independently in each expert's
-   embedding space.
-3. Run all four learned target transforms, their neighbor-attention scales,
+   input components used by classification, route to experts `[2, 3]`, and
+   apply the regression-specific last-state and recency-aware prefix residual.
+2. Retrieve the 50 nearest support prefixes independently in each selected
+   expert's embedding space.
+3. Compute the seven support-example features and add the bounded learned trust
+   log weight to the centered-similarity attention logits.
+4. Run all four learned target transforms, their neighbor-attention scales,
    and inverse maps to obtain branch predictions in hours.
-4. Produce the trained query-specific convex prediction in each expert and
-   aggregate across experts. The selected base checkpoint uses a uniform
-   expert average; the current endpoint uses the epoch-40 regression-confidence
-   logits as learned expert weights with softmax temperature 0.02.
-5. On labeled support prefixes only, repeat retrieval with the predicted
+5. Produce the trained query-specific convex prediction in each expert and
+   aggregate with the epoch-40 regression-confidence logits at softmax
+   temperature 0.018.
+6. On labeled support prefixes only, repeat retrieval with the predicted
    prefix itself excluded and estimate the target-log branch prior.
-6. Aggregate each branch across experts with the same expert weights, apply
+7. Aggregate each branch across experts with the same expert weights, apply
    the support prior, and form the calibrated prediction.
-7. Blend the query-gated and support-calibrated predictions and report raw
+8. Blend the query-gated and support-calibrated predictions and report raw
    hours. The default blend remains 50/50, with endpoint exceptions of 0.0
    support calibration at budget 2 and 0.6 support calibration at budget 4.
+9. Map the unchanged predictive standard deviation to interval bounds with the
+   selected 1.73 multiplier.
 
 ## Training-time versus inference-time changes
 
@@ -825,6 +889,12 @@ For the same case-disjoint target support/query split:
 | Query-specific regression gate | Yes | Yes | Yes |
 | Support-only regression branch prior | No | Yes | Yes |
 | Budget-aware regression prediction blend | No | Yes | Yes |
+| Pre-execution task-specific half-expert router | Yes | Yes | Yes |
+| Classification angular-separation adapter | Yes | Yes, classification | Yes |
+| Regression median-aware residual adapter | Yes | Yes, regression | Yes |
+| Bounded classification example selector | Yes | Yes, classification | Yes |
+| Bounded regression example selector | Yes | Yes, regression | Yes |
+| Post-selector output/interval calibration | No | Yes | Yes |
 
 ## What each result measures
 
@@ -836,6 +906,8 @@ For the same case-disjoint target support/query split:
 | Independent temporal FM-v3 | 0.4460 | 0.7082 | 0.4177 | Both learned clocks feed the classifier; small tradeoff for the selected regression checkpoint |
 | State-aware temporal FM-v3, epoch 36 | 0.4475 | **0.7094** | 0.4189 | Dynamic task-conditioned prefix projection plus joint continuation |
 | **Promoted multi-metric FM-v3, epoch 38** | **0.4477** | 0.7092 | **0.4192** | Same architecture continued with the promoted loss mixture |
+| Task-isolated refinement, epoch 43 | 0.4504 | 0.7164 | 0.4215 | Routed endpoint plus disjoint embedding/loss refinement |
+| **Example-aware endpoint, epoch 44** | **0.4510** | **0.7165** | **0.4218** | Bounded task-specific support-example selection |
 
 The corrected checkpoint contributes +0.0059 balanced accuracy over FM-v2.
 Structured memory then contributes +0.0269 over corrected FM-v3, for a total
@@ -860,6 +932,8 @@ support/query rows used by the strongest fixed-sqrt baseline:
 | State-aware temporal FM-v3, epoch 36 | 1,112.2914 | 1,660.6820 |
 | **Promoted multi-metric FM-v3, epoch 38** | **1,109.4089** | **1,659.6200** |
 | Current endpoint: low-support structured + regression confidence, T=0.02 + budget-aware calibration | **1,099.5167** | **1,652.9279** |
+| Task-isolated refinement, epoch 43 | **1,097.2543** | **1,651.7386** |
+| **Example-aware endpoint, epoch 44** | **1,088.5941** | **1,647.4967** |
 | Current endpoint minus fixed sqrt | **-26.3254** | **-12.7704** |
 | Current endpoint minus state-aware epoch 36 | **-12.7747** | **-7.7541** |
 
@@ -915,6 +989,7 @@ being mistaken for the final architecture.
 | Concern | Source |
 |---|---|
 | Neural local/global/fallback head | [`components/prototypical_head.py`](../components/prototypical_head.py) |
+| Task-specific support selectors and trust diagnostics | [`components/prototypical_head.py`](../components/prototypical_head.py) |
 | Classification/regression task sampling | [`training.py`](../training.py) |
 | Retrieval episode construction and missing-label logic | [`training_strategies/retrieval_strategy.py`](../training_strategies/retrieval_strategy.py) |
 | Case-disjoint protocol, per-expert retrieval, structured memory, and fusion | [`evaluation/fmv3_protocol.py`](../evaluation/fmv3_protocol.py) |
@@ -929,7 +1004,9 @@ being mistaken for the final architecture.
 | Independent temporal confirmation overlay | [`configs/fmv3/independent_temporal_confirmation_eval.yaml`](../configs/fmv3/independent_temporal_confirmation_eval.yaml) |
 | Historical and state-aware prefix projections | [`components/event_encoder.py`](../components/event_encoder.py) |
 | Stage-6 state-aware joint training configuration | [`configs/fmv3/prefix_state_attention_joint.yaml`](../configs/fmv3/prefix_state_attention_joint.yaml) |
-| **Canonical selected configuration** | [`configs/fmv3/selected.yaml`](../configs/fmv3/selected.yaml) |
+| Canonical epoch-38 architecture base alias | [`configs/fmv3/selected.yaml`](../configs/fmv3/selected.yaml) |
+| **Current example-aware endpoint** | [`configs/fmv3/example_selector_selected.yaml`](../configs/fmv3/example_selector_selected.yaml) |
+| Example-selector explanation diagnostic | [`analyze_example_selectors.py`](../analyze_example_selectors.py) |
 | Promoted experiment configuration | [`configs/fmv3/loss_multimetric_gate_aux_005.yaml`](../configs/fmv3/loss_multimetric_gate_aux_005.yaml) |
 | Current regression-confidence endpoint overlay | [`configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`](../configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml) |
 | Rejected raw-prediction regression ablation overlay | [`configs/fmv3/raw_prediction_regression_confidence_confirmation_eval.yaml`](../configs/fmv3/raw_prediction_regression_confidence_confirmation_eval.yaml) |

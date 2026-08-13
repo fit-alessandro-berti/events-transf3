@@ -69,6 +69,11 @@ The final end-to-end comparison is in
 | `raw_prediction_regression_confidence_confirmation_eval` | Current endpoint with the learned remaining-time transform bank bypassed in favor of direct raw-hour soft-kNN prediction | Rejected; worsens MAE, RMSE, median AE, normalized MAE, and R² |
 | `structured_tuning/current_endpoint/screens/low_support_w*` | Current endpoint with the promoted threshold-8 low-support structured rule retuned around weight/tau | Rejected; no decision gain and calibration worsens |
 | `virtual_support_bagging_screen_eval` | Current endpoint with test-time virtual expert replication through deterministic support sub-bags | Rejected for promotion; improves RMSE/R² on budgets 4+ but worsens MAE/median AE |
+| `expert_routing_bias`, epoch 42 | Frozen-backbone task-bias router selecting two of four experts before execution | Selected compute-efficient predecessor; routing retained unchanged |
+| `loss_refinement_selected`, epoch 43 | Audited merge of classification angular-separation and regression median-aware task-isolated continuations | Selected immediate predecessor |
+| `example_selector_classification`, epoch 44 | Classification-only bounded support-trust MLP continuation | Merged after strength/calibration screening |
+| `example_selector_regression`, epoch 44 | Regression-only bounded support-trust MLP continuation | Merged after strength/interval screening |
+| `example_selector_selected`, epoch 44 | Audited task-isolated merge with classification strength 0.25 and regression strength 1.0 | **Current selected endpoint** |
 
 The selected independent-temporal predecessor completed epoch 34 and was
 intentionally stopped during epoch 35 when that experiment was closed. Its
@@ -108,11 +113,13 @@ Raw no-rescaling regression ablations live under
 Virtual support-bagging screens live under
 `evaluation_results/virtual_support_bagging/`.
 
-`configs/fmv3/selected.yaml` is the stable configuration alias for the
-promoted base checkpoint; it resolves to `loss_multimetric_gate_aux_005` with
-`selected_checkpoint_epoch: 38`. The current best endpoint uses
-`checkpoints/fmv3/expert_confidence_heads/model_epoch_40.pth` with
-`configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml`.
+`configs/fmv3/selected.yaml` remains the stable alias for the epoch-38
+architecture base. The current selected endpoint is
+`checkpoints/fmv3/example_selector_selected/model_epoch_44.pth` with
+`configs/fmv3/example_selector_selected.yaml` and
+`configs/fmv3/example_selector_confirmation_eval.yaml`. Its design, selector
+diagnostics, full confirmation, and retained tradeoffs are documented in
+[`fmv3_example_selector_report.md`](fmv3_example_selector_report.md).
 
 Historical manifest folders contain their resolved `training_config.yaml`,
 serialized loader artifacts, and final `model_epoch_*.pth`. Independent
