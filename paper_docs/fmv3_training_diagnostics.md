@@ -175,9 +175,33 @@ python main.py \
   --checkpoint_dir checkpoints/fmv3/training_debug_full_retrain
 ```
 
-The final training curves, bottleneck diagnosis, regularization choice,
-matched rerun, and target-log confirmation will be added here after the full
-audit completes.
+The baseline completed all 20 epochs (6,000 sampled episodes) from a new random
+initialization. Its case-held-out results separate rapid early learning from
+strict overfitting:
+
+| Invariant/decision metric | Best | Last (epoch 20) |
+|---|---:|---:|
+| Classification NLL | **1.908373 (e20)** | **1.908373** |
+| Classification accuracy | **0.305672 (e16)** | 0.300665 |
+| Regression MAE (hours) | **837.320 (e13)** | 846.715 |
+| Regression RMSE (hours) | **1,129.434 (e13)** | 1,137.997 |
+
+The composite validation losses are front-loaded: 98.3% of the eventual
+classification improvement and 96.6% of the regression improvement are
+already present by epoch 14, and their final three-epoch relative ranges are
+0.16% and 0.24%. This confirms diminishing returns near the final third of the
+schedule. It does **not** confirm sustained overfitting. Classification NLL
+sets its best value at epoch 20; accuracy ends only 1.64% below its epoch-16
+best. Regression MAE ends 1.12% above its epoch-13 best, while noisy sampled
+training MAE does not continue to improve. All objective-, invariant-, and
+decision-level overfitting rules remain false at the predeclared 2%/three-epoch
+threshold.
+
+The baseline joint invariant score is best at epoch 16. This audit therefore
+retains per-task and joint best epochs instead of treating the last checkpoint
+or lowest reweighted training objective as universally optimal. Compact final
+curves and the machine-readable finding set are committed under
+`evaluation_results/training_debug/full_retrain_baseline`.
 
 ### Matched diagnostic ablations
 
