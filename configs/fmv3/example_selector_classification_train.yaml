@@ -1,0 +1,19 @@
+# Classification-only support-selector continuation from the promoted epoch-43
+# loss-refinement endpoint. All encoders, adapters, heads, and routers are
+# frozen; only the bounded classification support-trust MLP is optimized.
+extends: loss_refinement_selected.yaml
+experiment_name: example_selector_classification
+epochs: 44
+episodes_per_epoch: 300
+lr: 0.002
+weight_decay: 0.0
+trainable_scope: classification_example_selector
+classification_task_probability: 1.0
+classification_separation_weight: 0.0
+fmv3_head:
+  classification_example_selector_enabled: true
+  classification_example_selector_hidden_dim: 16
+  classification_example_selector_max_log_weight: 2.0
+  classification_expert_confidence_loss_weight: 0.0
+  regression_expert_confidence_loss_weight: 0.0
+  expert_routing_confidence_loss_weight: 0.0

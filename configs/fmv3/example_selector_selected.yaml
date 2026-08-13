@@ -1,0 +1,22 @@
+# Promoted task-isolated support selectors, assembled from two matched epoch-44
+# continuations. Only the small task-specific selector MLPs are merged into the
+# epoch-43 loss-refinement endpoint; all encoders, adapters, heads, and routers
+# remain byte-identical to that endpoint.
+extends: loss_refinement_selected.yaml
+experiment_name: example_selector_selected
+selected_checkpoint_epoch: 44
+epochs: 44
+fmv3_head:
+  classification_example_selector_enabled: true
+  classification_example_selector_hidden_dim: 16
+  classification_example_selector_max_log_weight: 2.0
+  classification_example_selector_strength: 0.25
+  regression_example_selector_enabled: true
+  regression_example_selector_hidden_dim: 16
+  regression_example_selector_max_log_weight: 2.0
+  regression_example_selector_strength: 1.0
+fmv3_evaluation:
+  # Calibrated after support selection. Temperature scaling preserves the
+  # selected class, while the interval multiplier preserves the point forecast.
+  classification_output_temperature: 0.65
+  regression_interval_std_multiplier: 1.73

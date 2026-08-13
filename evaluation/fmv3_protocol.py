@@ -1125,6 +1125,14 @@ def _regression_calibration_mix(eval_cfg, case_budget=None):
     return default
 
 
+def _regression_interval_std_multiplier(eval_cfg):
+    """Return the positive Gaussian-style scale used for time intervals."""
+    value = float((eval_cfg or {}).get("regression_interval_std_multiplier", 1.645))
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError("Regression interval std multiplier must be finite and positive")
+    return value
+
+
 @torch.no_grad()
 def predict_regression(
     experts, embeddings_by_expert, labels, query_indices, support_indices,
@@ -1240,14 +1248,20 @@ def predict_regression(
                 expert_weights * (stacked_predictions - mean_prediction.unsqueeze(0)).square()
             ).sum(dim=0)
         std_hours = torch.sqrt((within_variance + between_variance).clamp_min(1e-8)).cpu().numpy()
-        lower = np.maximum(0.0, predictions - 1.645 * std_hours)
-        upper = predictions + 1.645 * std_hours
+        interval_scale = _regression_interval_std_multiplier(eval_cfg)
+        lower = np.maximum(0.0, predictions - interval_scale * std_hours)
+        upper = predictions + interval_scale * std_hours
     else:
         transformed_prediction = mean_prediction.cpu().numpy()
         transformed_std = neighbor_targets.std(dim=1, correction=0).cpu().numpy()
         predictions = inverse_transform_time(transformed_prediction)
-        lower = inverse_transform_time(np.maximum(0.0, transformed_prediction - 1.645 * transformed_std))
-        upper = inverse_transform_time(transformed_prediction + 1.645 * transformed_std)
+        interval_scale = _regression_interval_std_multiplier(eval_cfg)
+        lower = inverse_transform_time(
+            np.maximum(0.0, transformed_prediction - interval_scale * transformed_std)
+        )
+        upper = inverse_transform_time(
+            transformed_prediction + interval_scale * transformed_std
+        )
     branch_diagnostics = None
     if expert_branch_predictions:
         stacked_branches = torch.stack(expert_branch_predictions)

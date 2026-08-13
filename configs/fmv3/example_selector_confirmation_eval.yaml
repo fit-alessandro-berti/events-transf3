@@ -1,0 +1,7 @@
+# Full fixed-query confirmation for the promoted support-selector endpoint.
+extends: loss_refinement_confirmation_eval.yaml
+experiment_name: example_selector_confirmation
+fmv3_evaluation:
+  tasks: [classification, regression]
+  classification_output_temperature: 0.65
+  regression_interval_std_multiplier: 1.73

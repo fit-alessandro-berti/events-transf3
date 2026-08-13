@@ -1,0 +1,19 @@
+# Regression-only support-selector continuation from the promoted epoch-43
+# loss-refinement endpoint. Only the bounded regression support-trust MLP is
+# optimized; the transform bank, confidence head, adapters, and router freeze.
+extends: loss_refinement_selected.yaml
+experiment_name: example_selector_regression
+epochs: 44
+episodes_per_epoch: 300
+lr: 0.002
+weight_decay: 0.0
+trainable_scope: regression_example_selector
+classification_task_probability: 0.0
+classification_separation_weight: 0.0
+fmv3_head:
+  regression_example_selector_enabled: true
+  regression_example_selector_hidden_dim: 16
+  regression_example_selector_max_log_weight: 2.0
+  classification_expert_confidence_loss_weight: 0.0
+  regression_expert_confidence_loss_weight: 0.0
+  expert_routing_confidence_loss_weight: 0.0

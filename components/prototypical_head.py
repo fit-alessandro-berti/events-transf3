@@ -323,6 +323,12 @@ class PrototypicalHead(nn.Module):
         self.regression_example_selector_enabled = _as_bool(
             config.get("regression_example_selector_enabled", False)
         )
+        self.classification_example_selector_strength = max(
+            float(config.get("classification_example_selector_strength", 1.0)), 0.0
+        )
+        self.regression_example_selector_strength = max(
+            float(config.get("regression_example_selector_strength", 1.0)), 0.0
+        )
         self.classification_example_selector = None
         self.regression_example_selector = None
         if self.classification_example_selector_enabled:
@@ -537,7 +543,9 @@ class PrototypicalHead(nn.Module):
             ],
             dim=-1,
         )
-        logits = self.classification_example_selector(features)
+        logits = self.classification_example_selector_strength * (
+            self.classification_example_selector(features)
+        )
         return (logits, features) if return_features else logits
 
     def regression_selection_logits(
@@ -602,7 +610,9 @@ class PrototypicalHead(nn.Module):
             ],
             dim=-1,
         )
-        logits = self.regression_example_selector(features)
+        logits = self.regression_example_selector_strength * (
+            self.regression_example_selector(features)
+        )
         return (logits, features) if return_features else logits
 
     @staticmethod

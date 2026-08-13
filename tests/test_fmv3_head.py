@@ -137,6 +137,18 @@ class FMV3HeadTests(unittest.TestCase):
             diagnostics["selection_logits"], torch.zeros(3, 7), atol=0.0, rtol=0.0
         )
 
+        classification_selected.classification_example_selector_strength = 0.0
+        with torch.no_grad():
+            classification_selected.classification_example_selector.network[-1].bias.fill_(
+                1.0
+            )
+        zero_strength_logits, _, _ = classification_selected.forward_classification(
+            support, labels, query
+        )
+        torch.testing.assert_close(
+            zero_strength_logits, plain_logits, atol=0.0, rtol=0.0
+        )
+
         regression_plain = PrototypicalHead(regression_mode="raw_hours_knn")
         regression_selected = PrototypicalHead(
             regression_mode="raw_hours_knn",

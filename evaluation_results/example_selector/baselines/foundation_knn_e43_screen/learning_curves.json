@@ -1,0 +1,86 @@
+[
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.1,
+      "128": 0.43097511312217196,
+      "16": 0.3679298642533937,
+      "4": 0.1,
+      "64": 0.3698710407239819
+    },
+    "cases_to_90pct_max_budget": 128,
+    "experiment": "example_selector_knn_reference",
+    "log": "billing",
+    "log2_case_budget_auc": 0.25802197802197807,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "foundation_knn",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.14285714285714285,
+      "128": 0.3177106227106227,
+      "16": 0.2651098901098901,
+      "4": 0.14285714285714285,
+      "64": 0.2977777777777778
+    },
+    "cases_to_90pct_max_budget": 64,
+    "experiment": "example_selector_knn_reference",
+    "log": "helpdesk",
+    "log2_case_budget_auc": 0.22347331240188387,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "foundation_knn",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.05263157894736842,
+      "128": 0.223548644338118,
+      "16": 0.16442583732057417,
+      "4": 0.05263157894736842,
+      "64": 0.20312599681020732
+    },
+    "cases_to_90pct_max_budget": 64,
+    "experiment": "example_selector_knn_reference",
+    "log": "receipt",
+    "log2_case_budget_auc": 0.12902996126680338,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "foundation_knn",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.25,
+      "16": 0.7222222222222222,
+      "4": 0.25,
+      "43": 0.7777777777777778
+    },
+    "cases_to_90pct_max_budget": 16,
+    "experiment": "example_selector_knn_reference",
+    "log": "roadtraffic100traces",
+    "log2_case_budget_auc": 0.46844761602281004,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "foundation_knn",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.07692307692307693,
+      "128": 0.43217493601441853,
+      "16": 0.2780183318827987,
+      "4": 0.11825443574257205,
+      "64": 0.3968971655392797
+    },
+    "cases_to_90pct_max_budget": 64,
+    "experiment": "example_selector_knn_reference",
+    "log": "sepsis",
+    "log2_case_budget_auc": 0.24012883264142104,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "foundation_knn",
+    "support_scenario": "natural"
+  }
+]

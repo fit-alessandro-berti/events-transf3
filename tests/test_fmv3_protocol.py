@@ -9,6 +9,7 @@ from evaluation.fmv3_protocol import (
     _batched_head_probabilities,
     _expert_confidence_weights,
     _fuse_structured_prediction,
+    _regression_interval_std_multiplier,
     _structured_class_probabilities,
     _weighted_stack_mean,
     _virtual_support_views,
@@ -94,6 +95,20 @@ class FMV3ProtocolTests(unittest.TestCase):
             _weighted_stack_mean(values, torch.zeros(3)),
             values.mean(dim=0),
         )
+
+    def test_regression_interval_multiplier_is_positive_and_configurable(self):
+        self.assertEqual(_regression_interval_std_multiplier({}), 1.645)
+        self.assertEqual(
+            _regression_interval_std_multiplier(
+                {"regression_interval_std_multiplier": 1.70}
+            ),
+            1.70,
+        )
+        for invalid in (0.0, -1.0, float("inf"), float("nan")):
+            with self.assertRaises(ValueError):
+                _regression_interval_std_multiplier(
+                    {"regression_interval_std_multiplier": invalid}
+                )
 
     def test_virtual_support_views_preserve_default_and_class_labels(self):
         support = np.arange(6)
