@@ -15,6 +15,8 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         for epoch, (train_loss, validation_loss) in enumerate(
             zip(train, validation), start=1
         ):
+            train_accuracy = [0.2, 0.4, 0.5, 0.6][epoch - 1]
+            validation_accuracy = [0.2, 0.5, 0.4, 0.3][epoch - 1]
             records.append(
                 {
                     "epoch": epoch,
@@ -22,6 +24,9 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
                         "task/classification/loss/total": _metric(train_loss),
                         "task/classification/head/classification/nll": _metric(
                             train_loss
+                        ),
+                        "task/classification/head/classification/accuracy": _metric(
+                            train_accuracy
                         ),
                         "optimization/gradient_clip_fraction": _metric(0.5),
                         "optimization/gradient_total_preclip": _metric(2.0),
@@ -31,6 +36,9 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
                         "task/classification/loss/total": _metric(validation_loss),
                         "task/classification/head/classification/nll": _metric(
                             validation_loss
+                        ),
+                        "task/classification/head/classification/accuracy": _metric(
+                            validation_accuracy
                         ),
                     },
                     "epoch_metrics": {"step_success_fraction": 1.0},
@@ -58,6 +66,11 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         )
         self.assertTrue(
             result["tasks"]["classification"]["invariant_overfitting"][
+                "overfitting_signal"
+            ]
+        )
+        self.assertTrue(
+            result["tasks"]["classification"]["decision_overfitting"][
                 "overfitting_signal"
             ]
         )

@@ -177,6 +177,48 @@ def _invariant_overfitting_summary(records, task, configuration):
     }
 
 
+def _classification_accuracy_overfitting(records, configuration):
+    key = "task/classification/head/classification/accuracy"
+    train = dict(_series(records, "train", key))
+    validation = _series(records, "validation", key)
+    curve = [
+        (epoch, train[epoch], value)
+        for epoch, value in validation
+        if epoch in train
+    ]
+    if not curve:
+        return {}
+    patience = max(1, int((configuration or {}).get("overfitting_patience", 3)))
+    tolerance = max(
+        0.0,
+        float(
+            (configuration or {}).get("overfitting_relative_tolerance", 0.02)
+        ),
+    )
+    best_index = max(range(len(curve)), key=lambda index: curve[index][2])
+    best_epoch, best_train, best_validation = curve[best_index]
+    last_epoch, last_train, last_validation = curve[-1]
+    degradation = (best_validation - last_validation) / max(
+        abs(best_validation), 1e-12
+    )
+    train_improvement = (last_train - best_train) / max(abs(best_train), 1e-12)
+    enough_epochs = len(curve) - 1 - best_index >= patience
+    return {
+        "metric": "head/classification/accuracy",
+        "best_validation_epoch": best_epoch,
+        "best_validation_value": best_validation,
+        "last_epoch": last_epoch,
+        "last_validation_value": last_validation,
+        "relative_validation_degradation": degradation,
+        "relative_train_improvement_since_best": train_improvement,
+        "overfitting_signal": bool(
+            enough_epochs and degradation > tolerance and train_improvement > 0.0
+        ),
+        "patience_epochs": patience,
+        "relative_tolerance": tolerance,
+    }
+
+
 def _optimization_summary(records):
     result = {}
     for name, section, key, aggregate in (
@@ -380,6 +422,13 @@ def analyze(summary, pool_names=None):
             "invariant_overfitting": _invariant_overfitting_summary(
                 records, task, diagnostics_configuration
             ),
+            "decision_overfitting": (
+                _classification_accuracy_overfitting(
+                    records, diagnostics_configuration
+                )
+                if task == "classification"
+                else {}
+            ),
         }
     optimization = _optimization_summary(records)
     heads = _head_summary(records)
@@ -392,7 +441,10 @@ def analyze(summary, pool_names=None):
         objective_overfit = task_result["automatic_overfitting"].get(
             "overfitting_signal"
         )
-        overfit = invariant_overfit or objective_overfit
+        decision_overfit = task_result["decision_overfitting"].get(
+            "overfitting_signal"
+        )
+        overfit = invariant_overfit or objective_overfit or decision_overfit
         if overfit:
             findings.append(
                 {
@@ -401,6 +453,7 @@ def analyze(summary, pool_names=None):
                     "task": task,
                     "evidence": {
                         "invariant": task_result["invariant_overfitting"],
+                        "decision": task_result["decision_overfitting"],
                         "objective": task_result["automatic_overfitting"],
                     },
                 }
@@ -689,6 +742,8 @@ def _markdown(analysis):
                 f"{result['automatic_overfitting'].get('overfitting_signal')}",
                 "- Invariant-metric overfitting signal: "
                 f"{result['invariant_overfitting'].get('overfitting_signal')}",
+                "- Decision-metric overfitting signal: "
+                f"{result['decision_overfitting'].get('overfitting_signal')}",
                 "",
             ]
         )

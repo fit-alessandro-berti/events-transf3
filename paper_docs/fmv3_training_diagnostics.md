@@ -137,7 +137,8 @@ The offline analyzer applies the same conservative rule to invariant output
 metrics as well: raw classifier NLL and raw-hour regression MAE. This matters
 when a reweighted auxiliary/composite objective improves while the deployed
 error measure degrades. Both the objective and invariant flags remain in the
-analysis output.
+analysis output. Classification accuracy has its own maximize-oriented rule,
+so falling validation accuracy can still flag memorization while NLL improves.
 
 The analyzer additionally screens for large auxiliary losses that stay nearly
 constant, selectors whose effective support remains indistinguishable from
