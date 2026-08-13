@@ -39,7 +39,8 @@ All files use `schema_version: 1`. Metric leaves in epoch aggregates contain
 
 - requested batch size, effective queries, skipped queries, unique cases and
   labels;
-- actual successful/skipped/non-finite step counts;
+- actual finite-loss, applied-optimizer, AMP-overflow, skipped, and non-finite
+  step counts;
 - task and expert step balance;
 - base/head learning rates, retrieval k, negative-random fraction, and active
   contrastive/variance/covariance weights.

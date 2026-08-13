@@ -247,7 +247,9 @@ def train(
             snapshot_trainable_parameters(model) if diagnostics.enabled else {}
         )
         total_loss = 0.0
-        successful_steps = 0
+        finite_loss_steps = 0
+        optimizer_steps = 0
+        amp_overflow_steps = 0
         skipped_steps = 0
         nonfinite_steps = 0
         task_counts = {"classification": 0, "regression": 0}
@@ -358,6 +360,7 @@ def train(
                 step_metrics["optimization/nonfinite_loss"] = 1.0
                 step_metrics["optimization/step_applied"] = 0.0
             else:
+                finite_loss_steps += 1
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 if sampled_step:
@@ -382,9 +385,12 @@ def train(
                     scale_after >= scale_before
                 )
                 total_loss += float(loss.detach().cpu())
-                successful_steps += 1
-                task_counts[task_type] += 1
-                expert_counts[expert_index] += 1
+                if scale_after >= scale_before:
+                    optimizer_steps += 1
+                    task_counts[task_type] += 1
+                    expert_counts[expert_index] += 1
+                else:
+                    amp_overflow_steps += 1
                 step_metrics["loss/total"] = loss
 
             diagnostics.add_step(
@@ -404,12 +410,13 @@ def train(
                 postfix["expert"] = expert_index
             progress_bar.set_postfix(postfix)
 
-        average_loss = total_loss / max(successful_steps, 1)
+        average_loss = total_loss / max(finite_loss_steps, 1)
         legacy_average_loss = total_loss / max(config["episodes_per_epoch"], 1)
         current_lr = optimizer.param_groups[0]["lr"]
         message = (
             f"\nEpoch {epoch + 1} finished. Average Loss: {average_loss:.4f} "
-            f"({successful_steps}/{config['episodes_per_epoch']} applied)"
+            f"({optimizer_steps}/{config['episodes_per_epoch']} optimizer steps; "
+            f"{finite_loss_steps} finite losses)"
         )
         if proto_group_index is not None:
             message += (
@@ -428,10 +435,12 @@ def train(
         )
         state_metrics = model_state_metrics(model) if diagnostics.enabled else {}
         epoch_metrics = {
-            "successful_steps": successful_steps,
+            "finite_loss_steps": finite_loss_steps,
+            "optimizer_steps_applied": optimizer_steps,
+            "amp_overflow_steps": amp_overflow_steps,
             "skipped_steps": skipped_steps,
             "nonfinite_steps": nonfinite_steps,
-            "step_success_fraction": successful_steps
+            "step_success_fraction": optimizer_steps
             / max(config["episodes_per_epoch"], 1),
             "average_loss_successful_steps": average_loss,
             "legacy_average_loss_scheduled_steps": legacy_average_loss,
