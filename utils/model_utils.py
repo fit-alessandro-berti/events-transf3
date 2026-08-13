@@ -46,6 +46,7 @@ def load_state_dict_compatible (model ,state_dict ):
     if '.proto_head.time_transform_bank.'in key
     or '.proto_head.classification_expert_confidence.'in key
     or '.proto_head.regression_expert_confidence.'in key
+    or '.task_confidence_head.'in key
     or '.embedder.time_input_adapter.'in key
     or '.embedder.temporal_input_encoder.'in key
     or 'encoder.state_aware_pool.'in key
@@ -59,6 +60,7 @@ def load_state_dict_compatible (model ,state_dict ):
     or '.proto_head.time_transform_bank.'in key
     or '.proto_head.classification_expert_confidence.'in key
     or '.proto_head.regression_expert_confidence.'in key
+    or '.task_confidence_head.'in key
     )
     ]
     disallowed_missing =sorted (set (incompatible .missing_keys )-set (allowed_missing ))

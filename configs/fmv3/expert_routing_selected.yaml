@@ -1,0 +1,5 @@
+# Promoted learned pre-execution router. Use epoch 42 from
+# checkpoints/fmv3/expert_routing_bias.
+extends: expert_routing_bias.yaml
+experiment_name: expert_routing_selected
+selected_checkpoint_epoch: 42

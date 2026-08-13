@@ -10,6 +10,7 @@ def configure_trainable_scope(model, scope):
         "time_transform",
         "regression_gate",
         "expert_confidence",
+        "expert_routing_confidence",
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",
@@ -31,6 +32,8 @@ def configure_trainable_scope(model, scope):
                     "proto_head.classification_expert_confidence." in name
                     or "proto_head.regression_expert_confidence." in name
                 )
+            elif selected == "expert_routing_confidence":
+                allowed = "task_confidence_head." in name
             elif selected == "temporal_joint":
                 allowed = (
                     "proto_head.time_transform_bank." in name
@@ -53,6 +56,7 @@ def configure_trainable_scope(model, scope):
         "time_transform",
         "regression_gate",
         "expert_confidence",
+        "expert_routing_confidence",
         "temporal_joint",
         "prefix_attention",
         "temporal_prefix_joint",

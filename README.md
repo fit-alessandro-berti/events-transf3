@@ -205,6 +205,23 @@ monotone target transforms and returns every branch to raw hours before
 aggregation. Its promoted primary objective combines MAE, RMSE, Huber,
 log-RMSE, relative-MAE, and bias control, plus transform-gate supervision.
 Reported MAE and RMSE remain raw-hour metrics—not square-root or log metrics.
+
+### Learned half-expert routing
+
+The MoE now has a learned pre-execution confidence head for every expert. The
+selected configuration (`configs/fmv3/expert_routing_selected.yaml`) activates
+exactly 2 of 4 experts independently for classification and regression, before
+expert encoding. Output-dependent expert confidence is still used as a
+second-stage weight among the selected experts. Three router architectures
+(task bias, linear descriptor, and MLP descriptor) were trained and compared;
+the 8-parameter task-bias router performed best on the matched screen.
+
+On the full 400-row five-log confirmation, every row records two active and two
+inactive experts. Relative to the previous all-four endpoint, the selected
+router changes balanced accuracy by `-0.000850` and macro-F1 by `-0.001310`,
+while improving MAE by `1.706` hours and RMSE by `1.045` hours. See
+[`paper_docs/fmv3_expert_routing_report.md`](paper_docs/fmv3_expert_routing_report.md)
+for design details, architecture results, hashes, and reproduction commands.
 The direct raw-hour soft-kNN replacement was tested as a no-rescaling ablation
 and rejected because it worsens MAE, RMSE, median AE, normalized MAE, and R² on
 the current endpoint confirmation.

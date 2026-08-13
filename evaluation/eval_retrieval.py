@@ -131,7 +131,7 @@ def _report_inter_expert_metrics (expert_task_embeddings ,task_type :str ):
 def _to_hours (values ):
     hours =inverse_transform_time (np .asarray (values ,dtype =float ))
     return np .maximum (hours ,0.0 )
-def _get_all_test_embeddings (model ,test_tasks_list ,batch_size =64 ):
+def _get_all_test_embeddings (model ,test_tasks_list ,batch_size =64 ,task_type =None ,models =None ):
     all_embeddings =[]
     all_labels =[]
     all_case_ids =[]
@@ -155,7 +155,13 @@ def _get_all_test_embeddings (model ,test_tasks_list ,batch_size =64 ):
             labels =[t [1 ]for t in batch_tasks ]
             case_ids =[t [2 ]for t in batch_tasks ]
             if not sequences :continue
-            encoded_batch =model ._process_batch (sequences )
+            if models is None :
+                encoded_batch =model ._process_batch (sequences ,task_type =task_type )
+            else :
+                encoded_batch =torch .stack ([
+                selected_model ._process_batch (sequences ,task_type =task_type )
+                for selected_model in models
+                ]).mean (dim =0 )
             all_embeddings .append (encoded_batch .cpu ())
             all_labels .extend (labels )
             all_case_ids .extend (case_ids )
@@ -286,7 +292,26 @@ report_confidence_buckets =False
     if first_expert_only and scope =="model" and len (all_experts )>1 :
         print ("  - Retrieval-augmented: eval_scope='model' ignores first_expert_only and uses all experts.")
 
-    experts_for_embedding =all_experts if scope =="model" else experts_for_eval
+    task_experts ={}
+    for task_type ,task_data in test_tasks .items ():
+        if not task_data :
+            continue
+        if getattr (model ,"expert_routing_confidence_enabled",False ):
+            split =max (1 ,len (task_data )//2 )
+            selected_indices ,_=model .route_experts (
+            task_data [:split ],task_data [split :],task_type )
+            selected =[(f"Expert {index }",model .experts [index ])for index in selected_indices ]
+            if first_expert_only and scope =="experts":
+                selected =selected [:1 ]
+            task_experts [task_type ]=selected
+            print (
+            f"  - Learned routing selected experts {selected_indices } for {task_type }; "
+            f"{num_experts -len (selected_indices )} inactive.")
+        else :
+            task_experts [task_type ]=(
+            all_experts if scope =="model" else experts_for_eval )
+
+    experts_for_embedding =all_experts
     expert_task_embeddings ={}
     if num_experts >1 :
         print (f"  - (MoE) Retrieval evaluation scope: {scope }")
@@ -295,7 +320,10 @@ report_confidence_buckets =False
         for task_type ,task_data in test_tasks .items ():
             if not task_data :
                 continue
-            embeddings_raw ,labels ,case_ids =_get_all_test_embeddings (expert ,task_data )
+            if expert_name not in {name for name ,_ in task_experts [task_type ]}:
+                continue
+            embeddings_raw ,labels ,case_ids =_get_all_test_embeddings (
+            expert ,task_data ,task_type =task_type )
             if embeddings_raw is None :
                 return
             embeddings_norm =F .normalize (embeddings_raw ,p =2 ,dim =1 )
@@ -330,9 +358,16 @@ report_confidence_buckets =False
             if not task_data :
                 print (f"Skipping {task_type }: No test data available.")
                 continue
-            embeddings_raw ,labels ,case_ids =_get_all_test_embeddings (model ,task_data )
-            if embeddings_raw is None :
+            selected_data =[
+            expert_task_embeddings .get (name ,{}).get (task_type )
+            for name ,_expert in task_experts [task_type ]
+            ]
+            selected_data =[data for data in selected_data if data is not None ]
+            if not selected_data :
                 return
+            embeddings_raw =torch .stack ([data [3 ]for data in selected_data ]).mean (dim =0 )
+            labels =selected_data [0 ][1 ]
+            case_ids =selected_data [0 ][2 ]
             embeddings_norm =F .normalize (embeddings_raw ,p =2 ,dim =1 )
             model_task_embeddings [task_type ]=(embeddings_norm ,labels ,case_ids ,embeddings_raw )
             try :
@@ -362,7 +397,7 @@ report_confidence_buckets =False
                 continue
             eval_units =[("Model",model ,*model_task_embeddings [task_type ])]
             experts_for_agg =[]
-            for expert_name ,expert in all_experts :
+            for expert_name ,expert in task_experts .get (task_type ,[]):
                 data =expert_task_embeddings .get (expert_name ,{}).get (task_type )
                 if data is None :
                     continue
@@ -370,7 +405,7 @@ report_confidence_buckets =False
         else :
             eval_units =[]
             experts_for_agg =[]
-            for expert_name ,expert in experts_for_eval :
+            for expert_name ,expert in task_experts .get (task_type ,[]):
                 data =expert_task_embeddings .get (expert_name ,{}).get (task_type )
                 if data is None :
                     continue
@@ -530,12 +565,22 @@ report_confidence_buckets =False
                                             continue
                                         if proto_classes_ref is None :
                                             proto_classes_ref =proto_classes
-                                        expert_outputs .append ((logits ,query_label_tensor ,confidence ))
+                                        learned_logit =(
+                                        expert_model .proto_head .classification_expert_confidence_logit (confidence )
+                                        if expert_model .proto_head .classification_expert_confidence_enabled else None )
+                                        expert_outputs .append ((
+                                        logits ,query_label_tensor ,confidence ,learned_logit ))
                                     else :
-                                        prediction ,confidence =expert_model .proto_head .forward_regression (
-                                        expert_support_embeddings ,expert_support_labels .float (),expert_query_embedding
-                                        )
-                                        expert_outputs .append ((prediction .view (-1 ),query_label_tensor .float (),confidence .view (-1 )))
+                                        prediction ,confidence ,diagnostics =expert_model .proto_head .forward_regression (
+                                        expert_support_embeddings ,expert_support_labels .float (),expert_query_embedding ,
+                                        return_diagnostics =True )
+                                        learned_logit =(
+                                        expert_model .proto_head .regression_expert_confidence_logit (
+                                        prediction ,confidence ,diagnostics )
+                                        if expert_model .proto_head .regression_expert_confidence_enabled else None )
+                                        expert_outputs .append ((
+                                        prediction .view (-1 ),query_label_tensor .float (),
+                                        confidence .view (-1 ),learned_logit ))
                             if not expert_outputs :
                                 continue
                             final_preds ,_ ,final_conf =model ._aggregate_outputs (expert_outputs ,task_type ,query_label_tensor )

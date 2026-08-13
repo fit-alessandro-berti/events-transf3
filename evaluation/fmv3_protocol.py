@@ -1283,6 +1283,22 @@ def _bootstrap_balanced_accuracy(prediction_data, tasks, query_indices, universe
     return {"lower": float(np.percentile(estimates, 2.5)), "upper": float(np.percentile(estimates, 97.5))}
 
 
+@torch.no_grad()
+def _route_task_experts(model, experts, support_tasks, query_tasks, task_type):
+    """Route before encoding so unselected experts do no task-level work."""
+    if not getattr(model, "expert_routing_confidence_enabled", False):
+        return list(experts), None
+    selected_indices, _ = model.route_experts(
+        support_tasks, query_tasks, task_type
+    )
+    diagnostics = dict(model.last_routing_diagnostics or {})
+    diagnostics["inactive_expert_count"] = len(experts) - len(selected_indices)
+    selected = [experts[index] for index in selected_indices]
+    if not selected:
+        raise RuntimeError(f"Expert routing selected no experts for {task_type}")
+    return selected, diagnostics
+
+
 def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_plan=None):
     eval_cfg = config.get("fmv3_evaluation", {})
     requested_tasks = set(eval_cfg.get("tasks", ["classification", "regression"]))
@@ -1335,19 +1351,47 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
     selected_counts = []
     class_embeddings = []
     reg_embeddings = []
+    routing_support_class = [
+        task for task in class_tasks if str(task[2]) in used_support_cases
+    ]
+    routing_query_class = [
+        class_tasks[int(index)] for index in class_query_indices
+    ]
+    routing_support_reg = [
+        task for task in reg_tasks if str(task[2]) in used_support_cases
+    ]
+    routing_query_reg = [reg_tasks[int(index)] for index in reg_query_indices]
+    class_experts, class_routing = _route_task_experts(
+        model, experts, routing_support_class, routing_query_class, "classification"
+    )
+    reg_experts, reg_routing = _route_task_experts(
+        model, experts, routing_support_reg, routing_query_reg, "regression"
+    )
     if "classification" in requested_tasks:
         selected_counts.append(f"{len(class_tasks)} classification")
         class_embeddings = [
             encode_tasks(expert, class_tasks, eval_cfg.get("embedding_batch_size", 128), "classification")
-            for expert in experts
+            for expert in class_experts
         ]
     if "regression" in requested_tasks:
         selected_counts.append(f"{len(reg_tasks)} regression")
         reg_embeddings = [
             encode_tasks(expert, reg_tasks, eval_cfg.get("embedding_batch_size", 128), "regression")
-            for expert in experts
+            for expert in reg_experts
         ]
     print(f"[{log_name}] encoding {' and '.join(selected_counts)} prefixes")
+    if class_routing is not None and "classification" in requested_tasks:
+        print(
+            f"[{log_name}] classification experts "
+            f"{class_routing['selected_expert_indices']} active; "
+            f"{class_routing['inactive_expert_count']} inactive"
+        )
+    if reg_routing is not None and "regression" in requested_tasks:
+        print(
+            f"[{log_name}] regression experts "
+            f"{reg_routing['selected_expert_indices']} active; "
+            f"{reg_routing['inactive_expert_count']} inactive"
+        )
 
     rows = []
     for repetition in range(int(eval_cfg.get("repetitions", 5))):
@@ -1373,7 +1417,7 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                 for prior_strength in profile.get("prior_strengths", [1.0]):
                                     for retrieval_k in profile.get("retrieval_k", [20]):
                                         prediction = predict_classification(
-                                            experts, class_embeddings, class_labels, class_query_indices,
+                                            class_experts, class_embeddings, class_labels, class_query_indices,
                                             class_support_indices, universe, int(retrieval_k), retrieval_mode,
                                             prior_mode, float(prior_strength), eval_cfg,
                                             structured_contexts=class_contexts,
@@ -1433,6 +1477,8 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                             **_virtual_expert_row(eval_cfg, "classification"),
                                             **structured_diagnostics,
                                         }
+                                        if class_routing is not None:
+                                            row["expert_routing"] = class_routing
                                         if (
                                             eval_cfg.get("expert_aggregation_diagnostics", False)
                                             and "classification_expert_confidence_weights_mean" in prediction
@@ -1449,7 +1495,7 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                 if "regression" in requested_tasks and len(reg_support_indices):
                     regression_k = int(max(eval_cfg.get("retrieval_k", [20])))
                     truth, pred, lower, upper, branch_diagnostics = predict_regression(
-                        experts, reg_embeddings, reg_labels, reg_query_indices,
+                        reg_experts, reg_embeddings, reg_labels, reg_query_indices,
                         reg_support_indices, regression_k,
                         support_case_ids=[reg_tasks[int(idx)][2] for idx in reg_support_indices],
                         eval_cfg=eval_cfg,
@@ -1462,19 +1508,21 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                         "case_budget": budget, "support_prefixes": int(len(reg_support_indices)),
                         "retrieval_k": regression_k,
                         "regression_mode": str(
-                            experts[0].proto_head.regression_mode
+                            reg_experts[0].proto_head.regression_mode
                         ),
                         "regression_num_transforms": int(
-                            experts[0].proto_head.time_transform_bank.num_transforms
-                            if experts[0].proto_head.time_transform_bank is not None else 1
+                            reg_experts[0].proto_head.time_transform_bank.num_transforms
+                            if reg_experts[0].proto_head.time_transform_bank is not None else 1
                         ),
                         "regression_transform_aggregation": str(
-                            experts[0].proto_head.time_transform_bank.aggregation
-                            if experts[0].proto_head.time_transform_bank is not None else "single"
+                            reg_experts[0].proto_head.time_transform_bank.aggregation
+                            if reg_experts[0].proto_head.time_transform_bank is not None else "single"
                         ),
                         **_virtual_expert_row(eval_cfg, "regression"),
                         **regression_metrics(truth, pred, lower, upper),
                     }
+                    if reg_routing is not None:
+                        row["expert_routing"] = reg_routing
                     if eval_cfg.get("regression_branch_diagnostics", False):
                         row["regression_branch_diagnostics"] = branch_diagnostics
                     rows.append(row)

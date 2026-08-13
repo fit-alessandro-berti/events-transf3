@@ -28,6 +28,7 @@ def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_
     if predictions is None :
         return None ,progress_bar_task
     head_cfg =config .get ('fmv3_head',{})
+    routing_w =float (head_cfg .get ('expert_routing_confidence_loss_weight',0.0 ))
     if task_type =='classification':
         smoothing =min (max (float (config .get ('classification_label_smoothing',0.05 )),0.0 ),1.0 )
         loss =F .cross_entropy (predictions ,true_labels ,ignore_index =-100 ,label_smoothing =smoothing )
@@ -37,6 +38,12 @@ def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_
             probabilities =torch .exp (log_probs )
             loss =loss +confidence_w *model .proto_head .classification_expert_confidence_loss (
             probabilities ,true_labels )
+        if routing_w >0 and getattr (model ,'task_confidence_head',None )is not None :
+            valid =true_labels !=-100
+            if valid .any ():
+                reliability =(predictions [valid ].argmax (dim =-1 )==true_labels [valid ]).float ().mean ().detach ()
+                loss =loss +routing_w *model .task_confidence_loss (
+                support_set ,query_set ,task_type ,reliability )
     else :
         branch_predictions =None
         aggregation_weights =None
@@ -63,4 +70,11 @@ def run_episodic_step (model ,task_data_pool ,task_type ,config ,should_shuffle_
             loss =loss +confidence_w *model .proto_head .regression_expert_confidence_loss (
             predictions .squeeze (),true_labels ,base_confidence ,diagnostics ,
             labels_in_output_space =True )
+        if routing_w >0 and getattr (model ,'task_confidence_head',None )is not None :
+            predictions_flat =predictions .reshape (-1 )
+            targets_flat =true_labels .reshape (-1 )
+            reliability =torch .exp (-((predictions_flat .detach ()-targets_flat .detach ()).abs ()/
+            targets_flat .detach ().abs ().clamp_min (1.0 )).clamp (0.0 ,20.0 )).mean ()
+            loss =loss +routing_w *model .task_confidence_loss (
+            support_set ,query_set ,task_type ,reliability )
     return loss ,progress_bar_task

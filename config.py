@@ -156,6 +156,13 @@ CONFIG ={
 'expert_confidence_hidden_dim':16,
 'classification_expert_confidence_loss_weight':0.0,
 'regression_expert_confidence_loss_weight':0.0,
+'expert_routing_confidence_enabled':False,
+'expert_routing_architecture':'mlp', # task_bias, linear, mlp
+'expert_routing_hidden_dim':32,
+'expert_routing_dropout':0.0,
+'expert_routing_confidence_loss_weight':0.0,
+'expert_active_fraction':0.5,
+'expert_routing_temperature':1.0,
 },
 'fmv3_training':{
 'episode_mix':{'balanced':1.0},

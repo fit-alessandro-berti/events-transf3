@@ -142,7 +142,7 @@ def main ():
     trainable_scope =str (CONFIG .get ('trainable_scope','all')).lower ()
     trainable_parameters =configure_trainable_scope (model ,trainable_scope )
     if trainable_scope in {
-    'time_transform','regression_gate','temporal_joint','prefix_attention','temporal_prefix_joint'}:
+    'time_transform','regression_gate','expert_confidence','expert_routing_confidence','temporal_joint','prefix_attention','temporal_prefix_joint'}:
         print ("🔒 Frozen backbone; training only the selected adapter modules.")
         print (f"  - Trainable tensors: {len (trainable_parameters )}")
     print (f"Model has {sum (p .numel ()for p in model .parameters ()if p .requires_grad ):,} trainable parameters.")

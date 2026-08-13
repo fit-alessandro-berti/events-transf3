@@ -1,0 +1,86 @@
+[
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.3311085972850679,
+      "128": 0.5323137254901961,
+      "16": 0.4540723981900453,
+      "4": 0.3838235294117647,
+      "64": 0.5269766214177979
+    },
+    "cases_to_90pct_max_budget": 64,
+    "experiment": "expert_routing_screen",
+    "log": "billing",
+    "log2_case_budget_auc": 0.4376460353372118,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.27915140415140416,
+      "128": 0.3512576312576313,
+      "16": 0.34294871794871795,
+      "4": 0.2906654456654456,
+      "64": 0.35214896214896213
+    },
+    "cases_to_90pct_max_budget": 16,
+    "experiment": "expert_routing_screen",
+    "log": "helpdesk",
+    "log2_case_budget_auc": 0.3214617128902843,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.15026315789473682,
+      "128": 0.5242264752791068,
+      "16": 0.3278309409888357,
+      "4": 0.2151993620414673,
+      "64": 0.42264752791068577
+    },
+    "cases_to_90pct_max_budget": 128,
+    "experiment": "expert_routing_screen",
+    "log": "receipt",
+    "log2_case_budget_auc": 0.30462975620870353,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.5972222222222223,
+      "16": 0.8080808080808082,
+      "4": 0.7421085858585859,
+      "43": 0.7986111111111112
+    },
+    "cases_to_90pct_max_budget": 4,
+    "experiment": "expert_routing_screen",
+    "log": "roadtraffic100traces",
+    "log2_case_budget_auc": 0.7436615079512083,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  },
+  {
+    "balanced_accuracy_by_budget": {
+      "1": 0.20470997265734175,
+      "128": 0.6099632177082432,
+      "16": 0.45371363899470396,
+      "4": 0.3584383287576953,
+      "64": 0.5382002162821071
+    },
+    "cases_to_90pct_max_budget": 128,
+    "experiment": "expert_routing_screen",
+    "log": "sepsis",
+    "log2_case_budget_auc": 0.4201851202056318,
+    "prior_mode": "balanced",
+    "retrieval_k": 20,
+    "retrieval_mode": "fm_structured_mix",
+    "support_scenario": "natural"
+  }
+]

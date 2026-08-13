@@ -6,6 +6,7 @@ from .learned_event_embedder import LearnedEventEmbedder
 from .pretrained_event_embedder import PretrainedEventEmbedder
 from .event_encoder import EventEncoder
 from .prototypical_head import PrototypicalHead
+from .task_confidence import TaskConfidenceHead, build_task_descriptor
 class MetaLearner (nn .Module ):
     def __init__ (self ,strategy :str ,num_feat_dim :int ,d_model :int ,n_heads :int ,n_layers :int ,dropout :float =0.1 ,proto_head_config =None ,**kwargs ):
         super ().__init__ ()
@@ -13,6 +14,18 @@ class MetaLearner (nn .Module ):
         self .encoder =EventEncoder (
         d_model ,n_heads ,n_layers ,dropout ,prefix_config =proto_head_config )
         self .proto_head =PrototypicalHead (**(proto_head_config or {}))
+        routing_config =proto_head_config or {}
+        routing_enabled =routing_config .get ('expert_routing_confidence_enabled',False )
+        if isinstance (routing_enabled ,str ):
+            routing_enabled =routing_enabled .strip ().lower ()in {'1','true','yes','y','on'}
+        self .expert_routing_confidence_enabled =bool (routing_enabled )
+        self .task_confidence_head =None
+        if self .expert_routing_confidence_enabled :
+            self .task_confidence_head =TaskConfidenceHead (
+            architecture =routing_config .get ('expert_routing_architecture','mlp'),
+            hidden_dim =routing_config .get ('expert_routing_hidden_dim',32 ),
+            dropout =routing_config .get ('expert_routing_dropout',0.0 ),
+            )
         self .proj_head =nn .Sequential (
         nn .Linear (d_model ,d_model ),
         nn .GELU (),
@@ -50,6 +63,21 @@ class MetaLearner (nn .Module ):
         if self .strategy =='learned':
             self .embedder .char_to_id =char_to_id
             print ("Character vocabulary set in LearnedEventEmbedder.")
+    def task_confidence_descriptor (self ,support_set ,query_set ,task_type ):
+        parameter =next (self .parameters ())
+        return build_task_descriptor (
+        support_set ,query_set ,task_type ,device =parameter .device ,dtype =parameter .dtype )
+    def task_confidence_logit (self ,support_set ,query_set ,task_type ):
+        """Return a pre-execution task reliability logit for this expert."""
+        if self .task_confidence_head is None :
+            return next (self .parameters ()).new_zeros (())
+        descriptor =self .task_confidence_descriptor (support_set ,query_set ,task_type )
+        return self .task_confidence_head (descriptor )
+    def task_confidence_loss (self ,support_set ,query_set ,task_type ,target ):
+        if self .task_confidence_head is None :
+            return next (self .parameters ()).new_zeros (())
+        descriptor =self .task_confidence_descriptor (support_set ,query_set ,task_type )
+        return self .task_confidence_head .reliability_loss (descriptor ,target )
     def _process_batch (self ,batch_of_sequences ,task_type =None ,time_scale_factor =None ):
         device =next (self .parameters ()).device
         max_len =max (len (seq )for seq in batch_of_sequences )if batch_of_sequences else 0

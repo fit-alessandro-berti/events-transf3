@@ -6,7 +6,7 @@ from sklearn .metrics import accuracy_score ,mean_absolute_error ,r2_score
 from collections import defaultdict
 from tqdm import tqdm
 from time_transf import inverse_transform_time
-def _get_all_test_embeddings (model ,test_tasks_list ,batch_size =64 ):
+def _get_all_test_embeddings (model ,test_tasks_list ,batch_size =64 ,task_type =None ,experts =None ):
     all_embeddings =[]
     all_labels =[]
     device =next (model .parameters ()).device
@@ -26,7 +26,13 @@ def _get_all_test_embeddings (model ,test_tasks_list ,batch_size =64 ):
             sequences =[t [0 ]for t in batch_tasks ]
             labels =[t [1 ]for t in batch_tasks ]
             if not sequences :continue
-            encoded_batch =model ._process_batch (sequences )
+            if experts is None :
+                encoded_batch =model ._process_batch (sequences ,task_type =task_type )
+            else :
+                encoded_batch =torch .stack ([
+                expert ._process_batch (sequences ,task_type =task_type )
+                for expert in experts
+                ]).mean (dim =0 )
             all_embeddings .append (encoded_batch .cpu ())
             all_labels .extend (labels )
     if not all_embeddings :
@@ -38,17 +44,30 @@ def evaluate_model (model ,test_tasks ,num_shots_list ,num_test_episodes =100 ):
     print ("\n🔬 Starting meta-testing on the Transformer-based Meta-Learner (Optimized)...")
     model .eval ()
     task_embeddings ={}
+    task_experts ={}
     with torch .no_grad ():
         model .eval ()
         for task_type ,task_data in test_tasks .items ():
             if not task_data :
                 print (f"Skipping {task_type }: No test data available.")
                 continue
+            if getattr (model ,'expert_routing_confidence_enabled',False ):
+                split =max (1 ,len (task_data )//2 )
+                selected_indices ,_=model .route_experts (
+                task_data [:split ],task_data [split :],task_type )
+                selected_experts =[model .experts [index ]for index in selected_indices ]
+                print (
+                f"  - Learned routing selected experts {selected_indices } for {task_type }; "
+                f"{len (model .experts )-len (selected_indices )} inactive.")
+            else :
+                selected_experts =list (model .experts )
             print (f"Pre-computing embeddings for meta-eval {task_type }...")
-            embeddings ,labels =_get_all_test_embeddings (model ,task_data )
+            embeddings ,labels =_get_all_test_embeddings (
+            model ,task_data ,task_type =task_type ,experts =selected_experts )
             if embeddings is None :
                 return
             task_embeddings [task_type ]=(embeddings ,labels )
+            task_experts [task_type ]=selected_experts
     for task_type ,data in task_embeddings .items ():
         print (f"\n--- Evaluating task: {task_type } ---")
         all_embeddings ,all_labels =data
@@ -94,18 +113,25 @@ def evaluate_model (model ,test_tasks ,num_shots_list ,num_test_episodes =100 ):
                 query_labels_torch =all_labels [query_indices ]
                 expert_outputs =[]
                 with torch .no_grad ():
-                    for expert in model .experts :
+                    for expert in task_experts [task_type ]:
                         proto_head =expert .proto_head
                         if task_type =='classification':
                             preds ,proto_classes ,confs =proto_head .forward_classification (
                             support_features ,support_labels_torch ,query_features
                             )
-                            expert_outputs .append ((preds ,query_labels_torch ,confs ))
+                            learned_logit =(
+                            expert .proto_head .classification_expert_confidence_logit (confs )
+                            if expert .proto_head .classification_expert_confidence_enabled else None )
+                            expert_outputs .append ((preds ,query_labels_torch ,confs ,learned_logit ))
                         else :
-                            preds ,confs =proto_head .forward_regression (
-                            support_features ,support_labels_torch .float (),query_features
-                            )
-                            expert_outputs .append ((preds ,query_labels_torch ,confs ))
+                            preds ,confs ,diagnostics =proto_head .forward_regression (
+                            support_features ,support_labels_torch .float (),query_features ,
+                            return_diagnostics =True )
+                            learned_logit =(
+                            expert .proto_head .regression_expert_confidence_logit (
+                            preds ,confs ,diagnostics )
+                            if expert .proto_head .regression_expert_confidence_enabled else None )
+                            expert_outputs .append ((preds ,query_labels_torch ,confs ,learned_logit ))
                 if not expert_outputs :continue
                 predictions ,true_labels ,confidence =model ._aggregate_outputs (
                 expert_outputs ,task_type ,query_labels_torch

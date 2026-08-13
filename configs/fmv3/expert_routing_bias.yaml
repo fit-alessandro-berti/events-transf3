@@ -1,0 +1,17 @@
+extends: expert_confidence_heads.yaml
+experiment_name: expert_routing_bias
+epochs: 42
+episodes_per_epoch: 300
+lr: 0.0005
+weight_decay: 0.0
+trainable_scope: expert_routing_confidence
+fmv3_head:
+  classification_expert_confidence_loss_weight: 0.0
+  regression_expert_confidence_loss_weight: 0.0
+  expert_routing_confidence_enabled: true
+  expert_routing_architecture: task_bias
+  expert_routing_hidden_dim: 32
+  expert_routing_dropout: 0.0
+  expert_routing_confidence_loss_weight: 1.0
+  expert_active_fraction: 0.5
+  expert_routing_temperature: 1.0

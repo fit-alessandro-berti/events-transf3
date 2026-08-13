@@ -310,6 +310,9 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             config.get("regression_expert_confidence_loss_weight", 0.0),
         )
     )
+    routing_confidence_w = float(
+        head_cfg.get("expert_routing_confidence_loss_weight", 0.0)
+    )
 
     if len(task_data_pool) < retrieval_batch_size:
         return None, progress_bar_task
@@ -388,6 +391,7 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
 
     total_loss_for_batch = 0.0
     queries_processed = 0
+    routing_reliability = None
     use_regression_gate_aux = (
         model.proto_head.regression_outputs_hours
         and model.proto_head.regression_gate_aux_weight > 0
@@ -462,9 +466,11 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             regression_targets.append(labels_float[query_idx])
 
         if regression_predictions:
+            joined_predictions = torch.cat(regression_predictions, dim=0)
+            joined_targets = torch.cat(regression_targets, dim=0)
             total_loss_for_batch = model.proto_head.regression_loss(
-                torch.cat(regression_predictions, dim=0),
-                torch.cat(regression_targets, dim=0),
+                joined_predictions,
+                joined_targets,
                 branch_predictions=(
                     torch.cat(regression_branch_predictions, dim=1)
                     if regression_branch_predictions else None
@@ -475,11 +481,21 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
                 ),
             )
             queries_processed = 1
+            output_targets = model.proto_head.regression_labels_to_output(
+                joined_targets
+            )
+            routing_reliability = torch.exp(
+                -(
+                    (joined_predictions.detach() - output_targets.detach()).abs()
+                    / output_targets.detach().abs().clamp_min(1.0)
+                ).clamp(0.0, 20.0)
+            ).mean()
             if regression_confidence_losses:
                 total_loss_for_batch = total_loss_for_batch + (
                     reg_confidence_w * torch.stack(regression_confidence_losses).mean()
                 )
     else:
+        routing_correctness = []
         for i in range(retrieval_batch_size):
             query_label = batch_labels[i]
             query_case_id = batch_case_ids[i]
@@ -563,6 +579,10 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             if mapped_label.item() == -100:
                 continue
 
+            routing_correctness.append(
+                (probabilities.argmax(dim=-1) == mapped_label).float().mean().detach()
+            )
+
             smoothing = min(
                 max(float(config.get("classification_label_smoothing", 0.05)), 0.0),
                 1.0,
@@ -579,6 +599,8 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             if loss is not None and not torch.isnan(loss):
                 total_loss_for_batch = total_loss_for_batch + loss
                 queries_processed += 1
+        if routing_correctness:
+            routing_reliability = torch.stack(routing_correctness).mean()
 
     loss_out = None
     if queries_processed > 0:
@@ -593,6 +615,21 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             loss_out = knn_aux_w * nca_loss
         else:
             loss_out = loss_out + (knn_aux_w * nca_loss)
+
+    if (
+        loss_out is not None
+        and routing_confidence_w > 0
+        and routing_reliability is not None
+        and getattr(model, "task_confidence_head", None) is not None
+    ):
+        split = max(1, len(batch_tasks_raw) // 2)
+        routing_loss = model.task_confidence_loss(
+            batch_tasks_raw[:split],
+            batch_tasks_raw[split:],
+            task_type,
+            routing_reliability,
+        )
+        loss_out = loss_out + routing_confidence_w * routing_loss
 
     var_w = float(config.get("retrieval_var_weight", 0.0))
     cov_w = float(config.get("retrieval_cov_weight", 0.0))
