@@ -1,0 +1,7 @@
+# Matched clipping dose-response control. Clip 5 improved all four held-out
+# invariant/decision metrics at epoch 14 but still clipped more than half of
+# optimizer steps. A cap of 10 sits above the observed 6--7 mean pre-clip norm
+# while retaining protection against the largest outliers.
+extends: training_debug_full_retrain.yaml
+experiment_name: training_debug_clip10_retrain
+gradient_clip_norm: 10.0

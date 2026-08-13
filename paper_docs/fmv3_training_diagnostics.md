@@ -181,12 +181,15 @@ audit completes.
 
 ### Matched diagnostic ablations
 
-Three one-factor, full-schedule runs are reserved for hypotheses that can be
-read directly from the baseline telemetry:
+Four one-factor, full-schedule runs and one head-focused curriculum are
+reserved for hypotheses that can be read directly from the telemetry. The
+clip-10 dose-response control is conditional on clip 5 retaining a held-out
+gain while still clipping a majority of steps:
 
 | Configuration | Isolated change | Diagnostic hypothesis |
 |---|---|---|
 | `training_debug_clip5_retrain.yaml` | Global clip cap 1 → 5 | Near-100% clipping throttles otherwise finite gradients and front-loads effective learning |
+| `training_debug_clip10_retrain.yaml` | Global clip cap 1 → 10 | Clip 5 improves invariant outputs but its residual majority clipping still throttles updates |
 | `training_debug_smoothing010_retrain.yaml` | Classification label smoothing 0.05 → 0.10 | Held-out confidence grows faster than accuracy |
 | `training_debug_regression_balanced_retrain.yaml` | Median/relative weights 0.40/0.05 → 0.20/0.025 | These two terms contribute disproportionate regression gradient energy |
 | `training_debug_head_focused_retrain.yaml` | Smoothing 0.10 plus staged-module LR multipliers 5×/20× | Shared backbone overfits while selectors remain uniform under a joint LR 20× below their historical stage |
@@ -218,6 +221,7 @@ python compare_training_debug.py \
   --baseline baseline \
   --run baseline=checkpoints/fmv3/training_debug_full_retrain/training_debug_summary.json \
   --run clip5=checkpoints/fmv3/training_debug_clip5_retrain/training_debug_summary.json \
+  --run clip10=checkpoints/fmv3/training_debug_clip10_retrain/training_debug_summary.json \
   --run smoothing010=checkpoints/fmv3/training_debug_smoothing010_retrain/training_debug_summary.json \
   --run regression_balanced=checkpoints/fmv3/training_debug_regression_balanced_retrain/training_debug_summary.json \
   --output_dir evaluation_results/training_debug/matched_comparison
