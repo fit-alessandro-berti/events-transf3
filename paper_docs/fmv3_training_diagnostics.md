@@ -139,6 +139,10 @@ when a reweighted auxiliary/composite objective improves while the deployed
 error measure degrades. Both the objective and invariant flags remain in the
 analysis output. Classification accuracy has its own maximize-oriented rule,
 so falling validation accuracy can still flag memorization while NLL improves.
+The analyzer also emits a lower-severity generalization-gap signal after the
+same patience when the training invariant improves by at least 10% while the
+held-out invariant fails to improve, even if degradation has not crossed the
+strict 2% overfitting tolerance.
 
 The analyzer additionally screens for large auxiliary losses that stay nearly
 constant, selectors whose effective support remains indistinguishable from

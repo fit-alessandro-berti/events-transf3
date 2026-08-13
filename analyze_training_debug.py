@@ -161,6 +161,11 @@ def _invariant_overfitting_summary(records, task, configuration):
     )
     train_improvement = (best_train - last_train) / max(abs(best_train), 1e-12)
     enough_epochs = len(curve) - 1 - best_index >= patience
+    generalization_gap_signal = bool(
+        enough_epochs
+        and train_improvement >= 0.10
+        and last_validation >= best_validation
+    )
     return {
         "metric": metric,
         "best_validation_epoch": best_epoch,
@@ -172,6 +177,7 @@ def _invariant_overfitting_summary(records, task, configuration):
         "overfitting_signal": bool(
             enough_epochs and degradation > tolerance and train_improvement > 0.0
         ),
+        "generalization_gap_signal": generalization_gap_signal,
         "patience_epochs": patience,
         "relative_tolerance": tolerance,
     }
@@ -458,6 +464,17 @@ def analyze(summary, pool_names=None):
                     },
                 }
             )
+        elif task_result["invariant_overfitting"].get(
+            "generalization_gap_signal"
+        ):
+            findings.append(
+                {
+                    "severity": "medium",
+                    "kind": "generalization_gap",
+                    "task": task,
+                    "evidence": task_result["invariant_overfitting"],
+                }
+            )
         validation = task_result["validation_loss"]
         fraction = validation.get(
             "fraction_of_best_improvement_reached_by_two_thirds"
@@ -742,6 +759,8 @@ def _markdown(analysis):
                 f"{result['automatic_overfitting'].get('overfitting_signal')}",
                 "- Invariant-metric overfitting signal: "
                 f"{result['invariant_overfitting'].get('overfitting_signal')}",
+                "- Invariant-metric generalization-gap signal: "
+                f"{result['invariant_overfitting'].get('generalization_gap_signal')}",
                 "- Decision-metric overfitting signal: "
                 f"{result['decision_overfitting'].get('overfitting_signal')}",
                 "",

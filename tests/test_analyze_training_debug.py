@@ -70,6 +70,11 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
             ]
         )
         self.assertTrue(
+            result["tasks"]["classification"]["invariant_overfitting"][
+                "generalization_gap_signal"
+            ]
+        )
+        self.assertTrue(
             result["tasks"]["classification"]["decision_overfitting"][
                 "overfitting_signal"
             ]
