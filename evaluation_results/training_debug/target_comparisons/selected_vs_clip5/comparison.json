@@ -13,6 +13,228 @@
   ],
   "tasks": {
     "classification": {
+      "by_log": {
+        "billing": {
+          "accuracy": {
+            "candidate_mean": 0.8572115384615385,
+            "candidate_minus_reference": -0.0028846153846153965,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.8600961538461538
+          },
+          "balanced_accuracy": {
+            "candidate_mean": 0.4427330316742082,
+            "candidate_minus_reference": -0.006157466063348415,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.4488904977375566
+          },
+          "ece_10": {
+            "candidate_mean": 0.10693065247263633,
+            "candidate_minus_reference": 0.013693063943650417,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.09323758852898592
+          },
+          "macro_f1": {
+            "candidate_mean": 0.42054291020307755,
+            "candidate_minus_reference": -0.000878523807340073,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.4214214340104176
+          },
+          "multiclass_brier": {
+            "candidate_mean": 0.2532159840266151,
+            "candidate_minus_reference": 0.014410847488084097,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.238805136538531
+          },
+          "nll": {
+            "candidate_mean": 2.498698998613297,
+            "candidate_minus_reference": 0.04906079553712593,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 2.449638203076171
+          }
+        },
+        "helpdesk": {
+          "accuracy": {
+            "candidate_mean": 0.6627586206896552,
+            "candidate_minus_reference": -0.008965517241379306,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.6717241379310345
+          },
+          "balanced_accuracy": {
+            "candidate_mean": 0.32034310134310134,
+            "candidate_minus_reference": -0.00645787545787545,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.3268009768009768
+          },
+          "ece_10": {
+            "candidate_mean": 0.12002300554268845,
+            "candidate_minus_reference": -0.002553489687919231,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.12257649523060768
+          },
+          "macro_f1": {
+            "candidate_mean": 0.29402763043041713,
+            "candidate_minus_reference": -0.005462251597129322,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.29948988202754645
+          },
+          "multiclass_brier": {
+            "candidate_mean": 0.5139412813148961,
+            "candidate_minus_reference": -0.005849709359448579,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.5197909906743448
+          },
+          "nll": {
+            "candidate_mean": 3.0669218161963507,
+            "candidate_minus_reference": -0.010036057215122329,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 3.0769578734114726
+          }
+        },
+        "receipt": {
+          "accuracy": {
+            "candidate_mean": 0.725,
+            "candidate_minus_reference": 0.0069672131147540785,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.7180327868852459
+          },
+          "balanced_accuracy": {
+            "candidate_mean": 0.33856140350877195,
+            "candidate_minus_reference": 0.004990430622009584,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.33357097288676235
+          },
+          "ece_10": {
+            "candidate_mean": 0.10267244678558227,
+            "candidate_minus_reference": -0.0017614627912127714,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.10443390957679503
+          },
+          "macro_f1": {
+            "candidate_mean": 0.3173772009635568,
+            "candidate_minus_reference": 0.008895123439279395,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.3084820775242775
+          },
+          "multiclass_brier": {
+            "candidate_mean": 0.4353799503856809,
+            "candidate_minus_reference": -0.010219572324324726,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.4455995227100056
+          },
+          "nll": {
+            "candidate_mean": 3.8640297293856944,
+            "candidate_minus_reference": -0.034876653348947226,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 3.8989063827346415
+          }
+        },
+        "roadtraffic100traces": {
+          "accuracy": {
+            "candidate_mean": 0.7584745762711864,
+            "candidate_minus_reference": -0.012711864406779669,
+            "direction": "max",
+            "paired_rows": 8,
+            "reference_mean": 0.771186440677966
+          },
+          "balanced_accuracy": {
+            "candidate_mean": 0.7260890151515151,
+            "candidate_minus_reference": -0.010416666666666699,
+            "direction": "max",
+            "paired_rows": 8,
+            "reference_mean": 0.7365056818181819
+          },
+          "ece_10": {
+            "candidate_mean": 0.12428411608286527,
+            "candidate_minus_reference": -0.016951893421525446,
+            "direction": "min",
+            "paired_rows": 8,
+            "reference_mean": 0.14123600950439072
+          },
+          "macro_f1": {
+            "candidate_mean": 0.6750596770793171,
+            "candidate_minus_reference": -0.00596106537362124,
+            "direction": "max",
+            "paired_rows": 8,
+            "reference_mean": 0.6810207424529384
+          },
+          "multiclass_brier": {
+            "candidate_mean": 0.36976149706294903,
+            "candidate_minus_reference": 0.004148741340334945,
+            "direction": "min",
+            "paired_rows": 8,
+            "reference_mean": 0.3656127557226141
+          },
+          "nll": {
+            "candidate_mean": 2.4919352601867106,
+            "candidate_minus_reference": 0.020307048526476114,
+            "direction": "min",
+            "paired_rows": 8,
+            "reference_mean": 2.4716282116602346
+          }
+        },
+        "sepsis": {
+          "accuracy": {
+            "candidate_mean": 0.528,
+            "candidate_minus_reference": -0.003999999999999998,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.532
+          },
+          "balanced_accuracy": {
+            "candidate_mean": 0.42128140301749345,
+            "candidate_minus_reference": -0.010670499372114856,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.4319519023896083
+          },
+          "ece_10": {
+            "candidate_mean": 0.15988258870406782,
+            "candidate_minus_reference": 0.00930064309932938,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.15058194560473842
+          },
+          "macro_f1": {
+            "candidate_mean": 0.4050534758830371,
+            "candidate_minus_reference": -0.007507972951002982,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.41256144883404006
+          },
+          "multiclass_brier": {
+            "candidate_mean": 0.6854957249625502,
+            "candidate_minus_reference": 0.008269863810307993,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.6772258611522421
+          },
+          "nll": {
+            "candidate_mean": 3.135404547532013,
+            "candidate_minus_reference": 0.0365082359841802,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 3.0988963115478327
+          }
+        }
+      },
       "metrics": {
         "accuracy": {
           "candidate_losses": 24,
@@ -78,6 +300,228 @@
       "paired_rows": 48
     },
     "regression": {
+      "by_log": {
+        "billing": {
+          "mae_hours": {
+            "candidate_mean": 1321.7928744018088,
+            "candidate_minus_reference": 318.2474903732475,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 1003.5453840285614
+          },
+          "mae_skill_vs_median": {
+            "candidate_mean": -0.20806728986207595,
+            "candidate_minus_reference": -0.2908658312858658,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.08279854142378987
+          },
+          "median_absolute_error_hours": {
+            "candidate_mean": 636.1363537504387,
+            "candidate_minus_reference": 189.92331564698998,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 446.2130381034488
+          },
+          "normalized_mae": {
+            "candidate_mean": 1.0362505015491805,
+            "candidate_minus_reference": 0.24949757855616594,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.7867529229930147
+          },
+          "rmse_hours": {
+            "candidate_mean": 2300.6529694724136,
+            "candidate_minus_reference": 391.19844955751194,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 1909.454519914902
+          },
+          "rmse_skill_vs_median": {
+            "candidate_mean": -0.08385384675828421,
+            "candidate_minus_reference": -0.18429634978630358,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.10044250302801935
+          }
+        },
+        "helpdesk": {
+          "mae_hours": {
+            "candidate_mean": 0.2584330189274157,
+            "candidate_minus_reference": -0.0009758019099000703,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.2594088208373158
+          },
+          "mae_skill_vs_median": {
+            "candidate_mean": -0.03709750572034939,
+            "candidate_minus_reference": 0.003915914967192147,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": -0.04101342068754153
+          },
+          "median_absolute_error_hours": {
+            "candidate_mean": 0.2287816343646636,
+            "candidate_minus_reference": 0.0009503135700143162,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.22783132079464927
+          },
+          "normalized_mae": {
+            "candidate_mean": 0.31745183381087116,
+            "candidate_minus_reference": -0.0011986475529310314,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.31865048136380214
+          },
+          "rmse_hours": {
+            "candidate_mean": 0.31572410483368424,
+            "candidate_minus_reference": -0.004064043175513043,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.3197881480091973
+          },
+          "rmse_skill_vs_median": {
+            "candidate_mean": -0.029361111574118637,
+            "candidate_minus_reference": 0.013250074785499865,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": -0.042611186359618504
+          }
+        },
+        "receipt": {
+          "mae_hours": {
+            "candidate_mean": 96.78976209612992,
+            "candidate_minus_reference": 3.66066288823088,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 93.12909920789903
+          },
+          "mae_skill_vs_median": {
+            "candidate_mean": -0.8332829306977263,
+            "candidate_minus_reference": -0.06933616368812877,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": -0.7639467670095975
+          },
+          "median_absolute_error_hours": {
+            "candidate_mean": 66.59271748084284,
+            "candidate_minus_reference": 5.113991145196212,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 61.47872633564663
+          },
+          "normalized_mae": {
+            "candidate_mean": 1.8323198166045185,
+            "candidate_minus_reference": 0.0692997379759276,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 1.7630200786285908
+          },
+          "rmse_hours": {
+            "candidate_mean": 172.98967667957658,
+            "candidate_minus_reference": -1.7870180532486386,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 174.7766947328252
+          },
+          "rmse_skill_vs_median": {
+            "candidate_mean": -0.12859929061688122,
+            "candidate_minus_reference": 0.011658657013109974,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": -0.14025794762999122
+          }
+        },
+        "roadtraffic100traces": {
+          "mae_hours": {
+            "candidate_mean": 3746.9762571262963,
+            "candidate_minus_reference": -58.321409607333806,
+            "direction": "min",
+            "paired_rows": 8,
+            "reference_mean": 3805.29766673363
+          },
+          "mae_skill_vs_median": {
+            "candidate_mean": -0.06951324299634401,
+            "candidate_minus_reference": 0.016646894894683947,
+            "direction": "max",
+            "paired_rows": 8,
+            "reference_mean": -0.08616013789102796
+          },
+          "median_absolute_error_hours": {
+            "candidate_mean": 2951.5679257184092,
+            "candidate_minus_reference": 3.9984144701538753,
+            "direction": "min",
+            "paired_rows": 8,
+            "reference_mean": 2947.5695112482554
+          },
+          "normalized_mae": {
+            "candidate_mean": 0.44181713540150364,
+            "candidate_minus_reference": -0.006876851188016876,
+            "direction": "min",
+            "paired_rows": 8,
+            "reference_mean": 0.4486939865895205
+          },
+          "rmse_hours": {
+            "candidate_mean": 4776.540957193791,
+            "candidate_minus_reference": -46.09160178236141,
+            "direction": "min",
+            "paired_rows": 8,
+            "reference_mean": 4822.632558976153
+          },
+          "rmse_skill_vs_median": {
+            "candidate_mean": -0.10088369803109531,
+            "candidate_minus_reference": 0.010623062478282014,
+            "direction": "max",
+            "paired_rows": 8,
+            "reference_mean": -0.11150676050937733
+          }
+        },
+        "sepsis": {
+          "mae_hours": {
+            "candidate_mean": 735.1898513432117,
+            "candidate_minus_reference": 25.72565630723029,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 709.4641950359813
+          },
+          "mae_skill_vs_median": {
+            "candidate_mean": -0.10412752726874827,
+            "candidate_minus_reference": -0.03863546978235928,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": -0.065492057486389
+          },
+          "median_absolute_error_hours": {
+            "candidate_mean": 199.54966383316432,
+            "candidate_minus_reference": 38.57992789325726,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 160.96973593990705
+          },
+          "normalized_mae": {
+            "candidate_mean": 0.9946637047397984,
+            "candidate_minus_reference": 0.0348051276315387,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 0.9598585771082597
+          },
+          "rmse_hours": {
+            "candidate_mean": 1699.774141626108,
+            "candidate_minus_reference": 2.0883630471261996,
+            "direction": "min",
+            "paired_rows": 10,
+            "reference_mean": 1697.685778578982
+          },
+          "rmse_skill_vs_median": {
+            "candidate_mean": -0.0006263846109598736,
+            "candidate_minus_reference": -0.001229381665732332,
+            "direction": "max",
+            "paired_rows": 10,
+            "reference_mean": 0.0006029970547724584
+          }
+        }
+      },
       "metrics": {
         "mae_hours": {
           "candidate_losses": 33,

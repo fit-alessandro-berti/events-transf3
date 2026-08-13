@@ -296,6 +296,8 @@ repetition, support scenario/budget, retrieval/prior mode and strength, and
 retrieval k. It reports candidate-minus-reference means and row-level
 wins/ties/losses separately for classification and regression; a missing or
 extra target row is an error rather than an implicit unpaired comparison.
+The same output includes per-log deltas for the primary metrics, preventing an
+aggregate gain or regression from hiding a process-specific transfer failure.
 
 The source-selected baseline e16 and clip-5 e14 checkpoints completed this
 screen. Clip 5 is not promoted. Relative to baseline, it improves ordinary

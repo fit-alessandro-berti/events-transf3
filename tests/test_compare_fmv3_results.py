@@ -48,6 +48,12 @@ class CompareFMV3ResultsTests(unittest.TestCase):
             self.assertEqual(
                 classification["balanced_accuracy"]["candidate_wins"], 1
             )
+            self.assertAlmostEqual(
+                result["tasks"]["classification"]["by_log"]["fixed"][
+                    "balanced_accuracy"
+                ]["candidate_minus_reference"],
+                0.05,
+            )
             regression = result["tasks"]["regression"]["metrics"]["mae_hours"]
             self.assertEqual(regression["candidate_wins"], 1)
             self.assertEqual(regression["candidate_minus_reference"], -2.0)

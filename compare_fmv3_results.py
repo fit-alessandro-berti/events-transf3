@@ -76,7 +76,7 @@ def compare(reference_path: Path, candidate_path: Path):
     output = {"pair_fields": PAIR_FIELDS, "tasks": {}}
     for task, metrics in METRICS.items():
         keys = [key for key in reference if reference[key].get("task") == task]
-        task_result = {"paired_rows": len(keys), "metrics": {}}
+        task_result = {"paired_rows": len(keys), "metrics": {}, "by_log": {}}
         for metric, direction in metrics:
             pairs = []
             for key in keys:
@@ -102,6 +102,33 @@ def compare(reference_path: Path, candidate_path: Path):
                 "ties": ties,
                 "candidate_losses": len(pairs) - wins - ties,
             }
+        for log_name in sorted({reference[key].get("log", "") for key in keys}):
+            log_keys = [
+                key for key in keys if reference[key].get("log", "") == log_name
+            ]
+            log_result = {}
+            for metric, direction in metrics:
+                pairs = []
+                for key in log_keys:
+                    left = _finite(reference[key], metric)
+                    right = _finite(candidate[key], metric)
+                    if left is not None and right is not None:
+                        pairs.append((left, right))
+                if pairs:
+                    log_result[metric] = {
+                        "direction": direction,
+                        "paired_rows": len(pairs),
+                        "reference_mean": statistics.fmean(
+                            left for left, _ in pairs
+                        ),
+                        "candidate_mean": statistics.fmean(
+                            right for _, right in pairs
+                        ),
+                        "candidate_minus_reference": statistics.fmean(
+                            right - left for left, right in pairs
+                        ),
+                    }
+            task_result["by_log"][log_name] = log_result
         output["tasks"][task] = task_result
     return output
 
@@ -130,6 +157,32 @@ def _markdown(result, reference_label, candidate_label):
                 f"{values['candidate_minus_reference']:+.6g} | "
                 f"{values['candidate_wins']}/{values['ties']}/"
                 f"{values['candidate_losses']} |"
+            )
+        lines.append("")
+        primary_metrics = (
+            ("balanced_accuracy", "accuracy", "macro_f1")
+            if task == "classification"
+            else ("mae_hours", "rmse_hours")
+        )
+        lines.extend(
+            [
+                "### Per-log candidate-minus-reference deltas",
+                "",
+                "| Log | " + " | ".join(primary_metrics) + " |",
+                "|---|" + "---:|" * len(primary_metrics),
+            ]
+        )
+        for log_name, metrics in task_result["by_log"].items():
+            deltas = [
+                metrics.get(metric, {}).get("candidate_minus_reference")
+                for metric in primary_metrics
+            ]
+            lines.append(
+                f"| {log_name} | "
+                + " | ".join(
+                    "" if value is None else f"{value:+.6g}" for value in deltas
+                )
+                + " |"
             )
         lines.append("")
     return "\n".join(lines)

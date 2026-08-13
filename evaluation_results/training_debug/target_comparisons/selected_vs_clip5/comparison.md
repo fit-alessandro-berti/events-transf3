@@ -13,6 +13,16 @@ Reference: `selected_e44`. Candidate: `clip5_e14`.
 | multiclass_brier | min | 0.452898 | 0.454967 | +0.00206884 | 21/0/27 |
 | ece_10 | min | 0.121629 | 0.122695 | +0.00106609 | 15/0/33 |
 
+### Per-log candidate-minus-reference deltas
+
+| Log | balanced_accuracy | accuracy | macro_f1 |
+|---|---:|---:|---:|
+| billing | -0.00615747 | -0.00288462 | -0.000878524 |
+| helpdesk | -0.00645788 | -0.00896552 | -0.00546225 |
+| receipt | +0.00499043 | +0.00696721 | +0.00889512 |
+| roadtraffic100traces | -0.0104167 | -0.0127119 | -0.00596107 |
+| sepsis | -0.0106705 | -0.004 | -0.00750797 |
+
 ## Regression (48 paired rows)
 
 | Metric | Direction | Reference | Candidate | Delta | Wins/ties/losses |
@@ -23,3 +33,13 @@ Reference: `selected_e44`. Candidate: `clip5_e14`.
 | normalized_mae | min | 0.872341 | 0.944612 | +0.0722713 | 15/0/33 |
 | mae_skill_vs_median | max | -0.178455 | -0.257955 | -0.0795008 | 15/0/33 |
 | rmse_skill_vs_median | max | -0.0356311 | -0.0673224 | -0.0316914 | 26/0/22 |
+
+### Per-log candidate-minus-reference deltas
+
+| Log | mae_hours | rmse_hours |
+|---|---:|---:|
+| billing | +318.247 | +391.198 |
+| helpdesk | -0.000975802 | -0.00406404 |
+| receipt | +3.66066 | -1.78702 |
+| roadtraffic100traces | -58.3214 | -46.0916 |
+| sepsis | +25.7257 | +2.08836 |
