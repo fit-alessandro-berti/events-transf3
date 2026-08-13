@@ -187,6 +187,18 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
                 "overfitting_signal"
             ]
         )
+        self.assertAlmostEqual(
+            result["tasks"]["classification"]["validation_loss"]["epoch_three"][
+                "fraction_of_best_improvement"
+            ],
+            2.0 / 3.0,
+        )
+        self.assertAlmostEqual(
+            result["tasks"]["classification"]["decision_overfitting"][
+                "epoch_three"
+            ]["fraction_of_best_improvement"],
+            2.0 / 3.0,
+        )
 
     def test_analysis_reports_pool_and_stagnant_auxiliary(self):
         records = []

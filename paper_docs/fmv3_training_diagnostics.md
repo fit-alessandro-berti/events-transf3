@@ -200,6 +200,15 @@ training MAE does not continue to improve. All objective-, invariant-, and
 decision-level overfitting rules remain false at the predeclared 2%/three-epoch
 threshold.
 
+Interpreting "the first 2/3 epochs" as epochs 2--3 gives a more moderate
+result. By epoch 3, classification composite loss/NLL have reached 47.4%/48.7%
+of their eventual best improvements and classification accuracy 21.5%;
+regression composite loss/MAE have reached 24.8%/45.9%. Thus the model does
+learn unusually quickly in its first three epochs, especially on the invariant
+NLL/MAE outputs, but roughly half or more of the useful gain still arrives
+later. The analyzer persists both the epoch-3 fraction and the two-thirds-of-
+schedule fraction so these two meanings cannot be conflated.
+
 The baseline joint invariant score is best at epoch 16. This audit therefore
 retains per-task and joint best epochs instead of treating the last checkpoint
 or lowest reweighted training objective as universally optimal. Compact final

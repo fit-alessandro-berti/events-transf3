@@ -843,6 +843,11 @@
       "decision_overfitting": {
         "best_validation_epoch": 15,
         "best_validation_value": 0.31010753689726456,
+        "epoch_three": {
+          "fraction_of_best_improvement": 0.3042435993752903,
+          "milestone_epoch": 3,
+          "milestone_value": 0.22628081282149895
+        },
         "last_epoch": 20,
         "last_validation_value": 0.3043678789481275,
         "metric": "head/classification/accuracy",
@@ -855,6 +860,11 @@
       "invariant_overfitting": {
         "best_validation_epoch": 20,
         "best_validation_value": 1.8759164271548023,
+        "epoch_three": {
+          "fraction_of_best_improvement": 0.48515356040144586,
+          "milestone_epoch": 3,
+          "milestone_value": 2.379581861910074
+        },
         "generalization_gap_signal": false,
         "last_epoch": 20,
         "last_validation_value": 1.8759164271548023,
@@ -869,6 +879,11 @@
         "best_epoch": 13,
         "best_value": 2.9583656479077165,
         "early_improvement": 1.1009802008249676,
+        "epoch_three": {
+          "fraction_of_best_improvement": 0.31071042074201377,
+          "milestone_epoch": 3,
+          "milestone_value": 3.7419837151804276
+        },
         "first_epoch": 1,
         "first_value": 4.095214500484697,
         "fraction_of_best_improvement_reached_by_two_thirds": 0.9684490584032288,
@@ -884,6 +899,11 @@
         "best_epoch": 20,
         "best_value": 3.2659436139193447,
         "early_improvement": 1.1071916060014204,
+        "epoch_three": {
+          "fraction_of_best_improvement": 0.4731096434732579,
+          "milestone_epoch": 3,
+          "milestone_value": 3.861319065093994
+        },
         "first_epoch": 1,
         "first_value": 4.39592339775779,
         "fraction_of_best_improvement_reached_by_two_thirds": 0.9798331101467892,
@@ -912,6 +932,11 @@
       "invariant_overfitting": {
         "best_validation_epoch": 6,
         "best_validation_value": 841.8722255013206,
+        "epoch_three": {
+          "fraction_of_best_improvement": 0.5425454732780441,
+          "milestone_epoch": 3,
+          "milestone_value": 862.2864463979548
+        },
         "generalization_gap_signal": false,
         "last_epoch": 20,
         "last_validation_value": 850.2518792585893,
@@ -926,6 +951,11 @@
         "best_epoch": 12,
         "best_value": 1.819861040264368,
         "early_improvement": 0.4149142869975515,
+        "epoch_three": {
+          "fraction_of_best_improvement": 0.3009186491560125,
+          "milestone_epoch": 3,
+          "milestone_value": 2.290239980303008
+        },
         "first_epoch": 1,
         "first_value": 2.4927139771518423,
         "fraction_of_best_improvement_reached_by_two_thirds": 0.6166492917707818,
@@ -941,6 +971,11 @@
         "best_epoch": 20,
         "best_value": 1.9218529571186413,
         "early_improvement": 0.34185174378481786,
+        "epoch_three": {
+          "fraction_of_best_improvement": 0.5431811616267842,
+          "milestone_epoch": 3,
+          "milestone_value": 2.0810395804318516
+        },
         "first_epoch": 1,
         "first_value": 2.2703206864270298,
         "fraction_of_best_improvement_reached_by_two_thirds": 0.9810140653864808,

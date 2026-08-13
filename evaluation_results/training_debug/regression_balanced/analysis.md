@@ -8,7 +8,9 @@ Epochs analyzed: 20.
 
 - Best validation epoch: 20
 - Best validation loss: 3.309167601845481
+- Fraction of best validation-loss improvement reached by epoch 3: 0.48696970449523497
 - Fraction of best improvement reached by two-thirds: 0.9674292368306935
+- Fraction of best invariant-metric improvement reached by epoch 3: 0.4944377841030541
 - Automatic overfitting signal: False
 - Invariant-metric overfitting signal: False
 - Invariant-metric generalization-gap signal: False
@@ -18,7 +20,9 @@ Epochs analyzed: 20.
 
 - Best validation epoch: 12
 - Best validation loss: 1.9138716892762617
+- Fraction of best validation-loss improvement reached by epoch 3: 0.5358164522125214
 - Fraction of best improvement reached by two-thirds: 0.988212674154945
+- Fraction of best invariant-metric improvement reached by epoch 3: 0.41936737949494324
 - Automatic overfitting signal: False
 - Invariant-metric overfitting signal: False
 - Invariant-metric generalization-gap signal: False

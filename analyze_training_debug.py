@@ -101,6 +101,28 @@ def _series(records, section, key, aggregate=True):
     return result
 
 
+def _improvement_by_epoch(series, milestone_epoch, maximize=False):
+    if not series:
+        return {}
+    milestone_index = max(
+        (index for index, (epoch, _) in enumerate(series) if epoch <= milestone_epoch),
+        default=0,
+    )
+    values = [value for _, value in series]
+    first = values[0]
+    milestone = values[milestone_index]
+    best = (max if maximize else min)(values)
+    total = (best - first) if maximize else (first - best)
+    reached = (milestone - first) if maximize else (first - milestone)
+    return {
+        "milestone_epoch": series[milestone_index][0],
+        "milestone_value": milestone,
+        "fraction_of_best_improvement": (
+            reached / total if total > 1e-12 else None
+        ),
+    }
+
+
 def _learning_phase_summary(series):
     if not series:
         return {}
@@ -118,6 +140,7 @@ def _learning_phase_summary(series):
     late_change = cutoff - last
     window = values[-min(3, len(values)) :]
     recent_relative_range = (max(window) - min(window)) / max(abs(min(window)), 1e-12)
+    epoch_three = _improvement_by_epoch(series, 3)
     return {
         "first_epoch": series[0][0],
         "first_value": first,
@@ -134,6 +157,7 @@ def _learning_phase_summary(series):
             if total_best_improvement > 1e-12
             else None
         ),
+        "epoch_three": epoch_three,
         "recent_three_epoch_relative_range": recent_relative_range,
         "recent_plateau_signal": recent_relative_range < 0.01,
     }
@@ -175,6 +199,9 @@ def _invariant_overfitting_summary(records, task, configuration):
         and train_improvement >= 0.10
         and last_validation >= best_validation
     )
+    epoch_three = _improvement_by_epoch(
+        [(epoch, value) for epoch, _, value in curve], 3
+    )
     return {
         "metric": metric,
         "best_validation_epoch": best_epoch,
@@ -189,6 +216,7 @@ def _invariant_overfitting_summary(records, task, configuration):
         "generalization_gap_signal": generalization_gap_signal,
         "patience_epochs": patience,
         "relative_tolerance": tolerance,
+        "epoch_three": epoch_three,
     }
 
 
@@ -218,6 +246,9 @@ def _classification_accuracy_overfitting(records, configuration):
     )
     train_improvement = (last_train - best_train) / max(abs(best_train), 1e-12)
     enough_epochs = len(curve) - 1 - best_index >= patience
+    epoch_three = _improvement_by_epoch(
+        [(epoch, value) for epoch, _, value in curve], 3, maximize=True
+    )
     return {
         "metric": "head/classification/accuracy",
         "best_validation_epoch": best_epoch,
@@ -231,6 +262,7 @@ def _classification_accuracy_overfitting(records, configuration):
         ),
         "patience_epochs": patience,
         "relative_tolerance": tolerance,
+        "epoch_three": epoch_three,
     }
 
 
@@ -861,8 +893,12 @@ def _markdown(analysis):
                 "",
                 f"- Best validation epoch: {validation.get('best_epoch')}",
                 f"- Best validation loss: {validation.get('best_value')}",
+                "- Fraction of best validation-loss improvement reached by epoch 3: "
+                f"{validation.get('epoch_three', {}).get('fraction_of_best_improvement')}",
                 "- Fraction of best improvement reached by two-thirds: "
                 f"{validation.get('fraction_of_best_improvement_reached_by_two_thirds')}",
+                "- Fraction of best invariant-metric improvement reached by epoch 3: "
+                f"{result['invariant_overfitting'].get('epoch_three', {}).get('fraction_of_best_improvement')}",
                 "- Automatic overfitting signal: "
                 f"{result['automatic_overfitting'].get('overfitting_signal')}",
                 "- Invariant-metric overfitting signal: "
