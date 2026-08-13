@@ -296,6 +296,13 @@ The full selected-architecture retraining audit starts from
 semantics, per-source-pool aggregation, JSONL artifacts, analysis CSVs, and
 overfitting rule are documented in
 [`paper_docs/fmv3_training_diagnostics.md`](paper_docs/fmv3_training_diagnostics.md).
+The matched 20-epoch audit found front-loaded learning and task-specific
+plateaus, but no sustained objective-, invariant-, or decision-level
+overfitting at the declared tolerance. Module-specific head learning rates
+fixed nearly uniform selector/transform use and produced the strongest new
+from-scratch run; the fixed target screen still leaves selected epoch 44 as
+the promoted checkpoint. Stronger smoothing, reweighted regression losses,
+and clip caps of 5 or 10 were not transferable replacements.
 
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.

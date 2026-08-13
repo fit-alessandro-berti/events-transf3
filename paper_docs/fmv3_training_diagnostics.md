@@ -345,6 +345,41 @@ classification metric and by 65.643/69.223 MAE/RMSE hours. A larger clip cap
 is therefore rejected as a generalization strategy; source-only aggregate
 improvement was not sufficient evidence for promotion.
 
+### Interpretation and training policy
+
+The evidence supports a plateau/optimization diagnosis rather than sustained
+memorization. The baseline completes about half of its invariant NLL/MAE gain
+by epoch 3 and more than 96% of both composite gains by epoch 14, but its late
+held-out metrics do not deteriorate consistently enough to satisfy the
+predeclared overfitting rules. Consequently, blanket regularization is not the
+first intervention: stronger smoothing loses accuracy and regression quality,
+and looser clipping produces source-only gains that fail the target screen.
+
+For a new from-scratch run, the most promising tested recipe is module-specific
+optimization: keep the backbone at the base LR, train the small adapters,
+router, confidence and transform modules faster, and train selectors fastest.
+The matched smoothing-only control is worse, while adding these multipliers
+removes the selector/branch-utilization warnings and materially improves the
+fixed target screen over the from-scratch baseline. A follow-up factorial run
+should combine the same multipliers with the original 0.05 smoothing to remove
+the remaining calibration confound before treating this as a final recipe.
+
+Checkpointing should be task-aware. Continue classification while case-held-
+out NLL or accuracy improves, but stop or move regression to an isolated stage
+when raw-hour MAE/RMSE plateau. Do not splice arbitrary task epochs from a
+shared-backbone run: the existing selected e44 checkpoint already uses safer
+task-isolated/staged training and remains the validated endpoint. Calibrate
+classification temperature after feature learning instead of increasing
+training-time smoothing merely to narrow the confidence gap.
+
+Finally, retain the robust regression terms. Their isolated gradients are
+large, but halving them does not improve the joint invariant result. Report
+equal-log and normalized metrics alongside raw hours: the p2p source accounts
+for about 96.4% of summed per-pool MAE and is roughly 277 times the median
+source MAE, so an aggregate raw-hour optimum can be a scale-concentration
+artifact. Any future log-balanced sampler or per-process target scaling should
+be validated as its own target-blind matched control.
+
 ```bash
 python compare_training_debug.py \
   --baseline baseline \
