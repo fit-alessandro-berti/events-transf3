@@ -288,6 +288,17 @@ retrieval k. It reports candidate-minus-reference means and row-level
 wins/ties/losses separately for classification and regression; a missing or
 extra target row is an error rather than an implicit unpaired comparison.
 
+The source-selected baseline e16 and clip-5 e14 checkpoints completed this
+screen. Clip 5 is not promoted. Relative to baseline, it improves ordinary
+accuracy by 0.001895, NLL by 0.016678, Brier by 0.004843, and ECE by 0.000318,
+but reduces balanced accuracy by 0.001082 and macro-F1 by 0.000455 while
+worsening MAE/RMSE by 7.860/9.452 hours. Relative to the existing selected e44
+endpoint, clip 5 is lower by 0.005548 balanced accuracy, 0.003969 accuracy, and
+0.002026 macro-F1, and worse by 62.703 MAE hours and 73.880 RMSE hours. The
+from-scratch baseline also remains below selected e44. The deployed checkpoint
+therefore stays unchanged; relaxing clipping remains a useful optimization
+finding, not a validated replacement model.
+
 ```bash
 python compare_training_debug.py \
   --baseline baseline \
