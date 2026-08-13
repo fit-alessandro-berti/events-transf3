@@ -298,6 +298,16 @@ overfitting rule fires. The source-selected epoch 17 is therefore sent to the
 fixed target screen; the result does not justify using the last checkpoint or
 the same larger LR for all task heads.
 
+The target screen confirms that head-focused e17 is a genuine improvement over
+the from-scratch baseline: balanced accuracy/ordinary accuracy change by
++0.002934/+0.004529, NLL by -0.011861, and MAE/RMSE by -47.983/-36.624 hours;
+macro-F1 is effectively flat at -0.000243. The gain does not exceed the
+existing selected e44 endpoint. Relative to e44, balanced accuracy, accuracy,
+and macro-F1 are lower by 0.001531, 0.001335, and 0.001813, while MAE/RMSE are
+worse by 6.860/27.804 hours. The result supports module-specific optimization
+as a better from-scratch recipe but does not authorize replacing the deployed
+task-isolated/staged checkpoint.
+
 Candidates are selected exclusively from the source-case holdout, then run
 once through `training_debug_target_screen_eval.yaml`. That overlay inherits
 the established five-log, 96-row selector screen unchanged; target results do
