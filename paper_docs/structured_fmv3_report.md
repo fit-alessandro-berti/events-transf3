@@ -98,7 +98,29 @@ lower macro-F1 (`-0.002204`), and worse NLL/ECE/Brier. The endpoint therefore
 keeps the threshold-8 rule: it captures the low-support decision gain without
 allowing structured suffix counts to perturb medium-support rows.
 
-Reproduce with:
+### Low-support retune screen on the current endpoint
+
+The remaining uncommitted structured-memory sweep retuned the already promoted
+low-support rule itself on the current regression-confidence endpoint. It kept
+the threshold at eight support prefixes and tried stronger or sharper
+low-support mixtures. All rows are paired against
+`regression_confidence_temp0020_budget_calibration_e40`. The sweep is rejected:
+two settings leave decisions unchanged while worsening calibration, and two
+settings slightly reduce balanced accuracy and macro-F1.
+
+| Low-support setting | Rows | Balanced accuracy Δ | Accuracy Δ | Macro-F1 Δ | NLL Δ | ECE-10 Δ | Brier Δ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| w=0.90, tau=0.10 | 200 | +0.000000 | +0.000000 | +0.000000 | +0.000254 | +0.000022 | +0.000148 |
+| w=1.00, tau=0.00 | 200 | -0.000167 | +0.000179 | -0.000497 | +0.007682 | +0.003734 | +0.003945 |
+| w=1.00, tau=0.10 | 200 | +0.000000 | +0.000000 | +0.000000 | +0.003943 | +0.001363 | +0.001900 |
+| w=1.20, tau=0.25 | 200 | -0.000167 | +0.000179 | -0.000495 | +0.006187 | +0.002423 | +0.003090 |
+
+The screen artifacts live under
+`evaluation_results/structured_tuning/current_endpoint/screens/`. The endpoint
+therefore keeps `structured_low_support_weight: 1.0` and
+`structured_low_support_tau: 0.25`.
+
+Reproduce the promoted low-support confirmation with:
 
 ```bash
 python evaluate_fmv3.py \
@@ -108,6 +130,21 @@ python evaluate_fmv3.py \
   --logs billing helpdesk receipt roadtraffic100traces sepsis \
   --output_dir evaluation_results/structured_tuning/confirmations/adaptive_low_support_w100_tau025_thr8 \
   --set 'fmv3_evaluation.tasks=[classification]'
+```
+
+Reproduce a current-endpoint low-support retune screen by changing the weight,
+tau, and output directory:
+
+```bash
+python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/expert_confidence_heads \
+  --checkpoint_epoch 40 \
+  --eval_config configs/fmv3/regression_confidence_low_support_confirmation_eval.yaml \
+  --set 'fmv3_evaluation.tasks=[classification]' \
+  --set fmv3_evaluation.structured_low_support_weight=1.2 \
+  --set fmv3_evaluation.structured_low_support_tau=0.25 \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/structured_tuning/current_endpoint/screens/low_support_w120_tau025
 ```
 
 Reproduce the threshold-extension screens by changing the threshold override

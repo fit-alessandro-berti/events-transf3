@@ -124,6 +124,14 @@ fmv3_evaluation:
   structured_low_support_threshold: 0
   structured_low_support_weight:
   structured_low_support_tau:
+  virtual_expert_replicates: 1
+  virtual_expert_support_fraction: 1.0
+  virtual_expert_min_support_prefixes: 1
+  virtual_expert_include_full_support: true
+  virtual_expert_preserve_labels: true
+  virtual_expert_full_support_weight: 1.0
+  virtual_expert_subbag_weight: 1.0
+  virtual_expert_seed: 42
   regression_branch_diagnostics: false
   regression_support_calibration: false
   regression_calibration_max_prefixes: 512

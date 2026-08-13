@@ -1,0 +1,17 @@
+# Screen test-time virtual expert replication on the current endpoint.
+#
+# Each physical expert keeps the full-support regression prediction and adds
+# three deterministic support sub-bag predictions. Classification stays on the
+# selected endpoint because early smoke tests showed no decision gain.
+extends: regression_confidence_low_support_confirmation_eval.yaml
+experiment_name: virtual_support_bagging_screen
+fmv3_evaluation:
+  classification_virtual_expert_replicates: 1
+  regression_virtual_expert_replicates: 4
+  regression_virtual_expert_support_fraction: 0.9
+  virtual_expert_min_support_prefixes: 8
+  virtual_expert_include_full_support: true
+  virtual_expert_preserve_labels: true
+  virtual_expert_full_support_weight: 1.0
+  virtual_expert_subbag_weight: 0.5
+  virtual_expert_seed: 2027

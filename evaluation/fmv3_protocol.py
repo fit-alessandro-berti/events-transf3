@@ -399,14 +399,152 @@ def _fuse_structured_prediction(
     return fused
 
 
-def _expert_confidence_weights(logits: torch.Tensor, temperature: float = 1.0):
+def _expert_confidence_weights(
+    logits: torch.Tensor,
+    temperature: float = 1.0,
+    prior_weights: torch.Tensor | None = None,
+):
     """Softmax expert-confidence logits with a configurable temperature."""
     temperature = float(temperature)
     if not math.isfinite(temperature) or temperature <= 0.0:
         raise ValueError(
             "Expert-confidence temperature must be finite and positive"
         )
-    return F.softmax(logits / temperature, dim=0)
+    scaled = logits / temperature
+    if prior_weights is not None:
+        prior = prior_weights.to(device=logits.device, dtype=logits.dtype).clamp_min(1e-8)
+        while prior.ndim < scaled.ndim:
+            prior = prior.unsqueeze(-1)
+        scaled = scaled + prior.log()
+    return F.softmax(scaled, dim=0)
+
+
+def _weighted_stack_mean(values: torch.Tensor, weights: torch.Tensor):
+    weights = weights.to(device=values.device, dtype=values.dtype).clamp_min(0.0)
+    if float(weights.sum().item()) <= 0.0:
+        weights = torch.ones_like(weights)
+    weights = weights / weights.sum().clamp_min(1e-8)
+    while weights.ndim < values.ndim:
+        weights = weights.unsqueeze(-1)
+    return (weights * values).sum(dim=0)
+
+
+def _eval_cfg_value(eval_cfg, task_type, key, default):
+    eval_cfg = eval_cfg or {}
+    task_key = f"{task_type}_{key}"
+    return eval_cfg.get(task_key, eval_cfg.get(key, default))
+
+
+def _eval_cfg_bool(eval_cfg, task_type, key, default):
+    value = _eval_cfg_value(eval_cfg, task_type, key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _virtual_expert_row(eval_cfg, task_type):
+    return {
+        "virtual_expert_replicates": int(
+            _eval_cfg_value(eval_cfg, task_type, "virtual_expert_replicates", 1)
+        ),
+        "virtual_expert_support_fraction": float(
+            _eval_cfg_value(eval_cfg, task_type, "virtual_expert_support_fraction", 1.0)
+        ),
+        "virtual_expert_min_support_prefixes": int(
+            _eval_cfg_value(eval_cfg, task_type, "virtual_expert_min_support_prefixes", 1)
+        ),
+        "virtual_expert_full_support_weight": float(
+            _eval_cfg_value(eval_cfg, task_type, "virtual_expert_full_support_weight", 1.0)
+        ),
+        "virtual_expert_subbag_weight": float(
+            _eval_cfg_value(eval_cfg, task_type, "virtual_expert_subbag_weight", 1.0)
+        ),
+    }
+
+
+def _stable_hash_scores(indices, seed):
+    values = np.asarray(indices, dtype=np.uint64)
+    x = values + np.uint64(int(seed) & 0xFFFFFFFFFFFFFFFF)
+    x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+    x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    return x ^ (x >> np.uint64(31))
+
+
+def _virtual_support_views(
+    support_indices,
+    eval_cfg=None,
+    task_type="classification",
+    labels=None,
+    salt=0,
+):
+    """Return deterministic support sub-bags for test-time virtual experts."""
+    base = np.asarray(support_indices, dtype=np.int64)
+    if base.size == 0:
+        return [base]
+    replicas = max(1, int(_eval_cfg_value(eval_cfg, task_type, "virtual_expert_replicates", 1)))
+    if replicas <= 1:
+        return [base]
+    min_prefixes = max(1, int(_eval_cfg_value(eval_cfg, task_type, "virtual_expert_min_support_prefixes", 1)))
+    if base.size < min_prefixes:
+        return [base]
+    fraction = float(_eval_cfg_value(eval_cfg, task_type, "virtual_expert_support_fraction", 1.0))
+    fraction = min(1.0, max(0.0, fraction))
+    target = int(math.ceil(base.size * fraction))
+    target = min(base.size, max(1, target))
+    if target >= base.size:
+        return [base]
+
+    include_full = _eval_cfg_bool(eval_cfg, task_type, "virtual_expert_include_full_support", True)
+    preserve_labels = (
+        task_type == "classification"
+        and labels is not None
+        and _eval_cfg_bool(eval_cfg, task_type, "virtual_expert_preserve_labels", True)
+    )
+    if preserve_labels:
+        labels_np = labels.detach().cpu().numpy() if torch.is_tensor(labels) else np.asarray(labels)
+        support_labels = labels_np[base]
+    else:
+        support_labels = None
+
+    seed = int(_eval_cfg_value(eval_cfg, task_type, "virtual_expert_seed", 42))
+    seed += int(salt) * 1000003
+    views = [base] if include_full else []
+    replica = 1
+    while len(views) < replicas and replica <= replicas * 4:
+        scores = _stable_hash_scores(base, seed + replica * 0x9E3779B1)
+        selected = np.zeros(base.size, dtype=bool)
+        if preserve_labels and support_labels is not None:
+            for label in sorted(set(map(int, support_labels.tolist()))):
+                positions = np.flatnonzero(support_labels == label)
+                if positions.size:
+                    selected[positions[np.argmin(scores[positions])]] = True
+        remaining = np.flatnonzero(~selected)
+        needed = max(0, target - int(selected.sum()))
+        if needed > 0 and remaining.size:
+            chosen = remaining[np.argsort(scores[remaining])[:needed]]
+            selected[chosen] = True
+        candidate = base[selected]
+        if candidate.size and not any(np.array_equal(candidate, view) for view in views):
+            views.append(candidate)
+        replica += 1
+    return views or [base]
+
+
+def _virtual_support_view_specs(
+    support_indices,
+    eval_cfg=None,
+    task_type="classification",
+    labels=None,
+    salt=0,
+):
+    base = np.asarray(support_indices, dtype=np.int64)
+    full_weight = float(_eval_cfg_value(eval_cfg, task_type, "virtual_expert_full_support_weight", 1.0))
+    subbag_weight = float(_eval_cfg_value(eval_cfg, task_type, "virtual_expert_subbag_weight", 1.0))
+    specs = []
+    for view in _virtual_support_views(support_indices, eval_cfg, task_type, labels=labels, salt=salt):
+        weight = full_weight if np.array_equal(view, base) else subbag_weight
+        specs.append((view, max(0.0, float(weight))))
+    return specs
 
 
 def _batched_head_probabilities(
@@ -584,6 +722,7 @@ def _predict_classification_fixed_k(
     retrieval_mode,
     prior_mode,
     prior_strength,
+    eval_cfg=None,
 ):
     support_labels_cpu = labels[support_indices]
     support_counts = Counter(int(value) for value in support_labels_cpu.tolist())
@@ -596,44 +735,53 @@ def _predict_classification_fixed_k(
     embeddings_device = [embedding.to(device) for embedding in embeddings_by_expert]
     k_eff = min(int(retrieval_k), len(support_indices))
 
-    expert_probabilities, abstain_probabilities, expert_confidence_logits = [], [], []
-    for expert, embeddings in zip(experts, embeddings_device):
+    expert_probabilities, abstain_probabilities, expert_confidence_logits, view_weights = [], [], [], []
+    for expert_index, (expert, embeddings) in enumerate(zip(experts, embeddings_device)):
         expert_queries = embeddings[query_indices_device]
-        expert_pool = embeddings[support_indices_device]
-        local_positions = torch.topk(expert_queries @ expert_pool.t(), k_eff, dim=1).indices
-        probabilities, abstain = _batched_head_probabilities(
-            expert.proto_head,
-            expert_queries,
-            expert_pool,
-            labels_device[support_indices_device],
-            local_positions,
-            prediction_classes,
-            retrieval_mode,
-            prior_mode,
-            prior_strength,
-        )
-        expert_probabilities.append(probabilities)
-        abstain_probabilities.append(abstain)
-        if expert.proto_head.classification_expert_confidence_enabled:
-            expert_confidence_logits.append(
-                expert.proto_head.classification_expert_confidence_logit(probabilities)
+        for view_indices, view_weight in _virtual_support_view_specs(
+            support_indices, eval_cfg, "classification", labels=labels, salt=expert_index
+        ):
+            view_device = torch.as_tensor(view_indices, device=device)
+            view_k = min(int(retrieval_k), int(view_device.numel()))
+            expert_pool = embeddings[view_device]
+            local_positions = torch.topk(expert_queries @ expert_pool.t(), view_k, dim=1).indices
+            probabilities, abstain = _batched_head_probabilities(
+                expert.proto_head,
+                expert_queries,
+                expert_pool,
+                labels_device[view_device],
+                local_positions,
+                prediction_classes,
+                retrieval_mode,
+                prior_mode,
+                prior_strength,
             )
-        else:
-            expert_confidence_logits.append(probabilities.new_zeros(probabilities.size(0)))
+            expert_probabilities.append(probabilities)
+            abstain_probabilities.append(abstain)
+            view_weights.append(float(view_weight))
+            if expert.proto_head.classification_expert_confidence_enabled:
+                expert_confidence_logits.append(
+                    expert.proto_head.classification_expert_confidence_logit(probabilities)
+                )
+            else:
+                expert_confidence_logits.append(probabilities.new_zeros(probabilities.size(0)))
     reference_queries = embeddings_device[0][query_indices_device]
     reference_pool = embeddings_device[0][support_indices_device]
     reference_positions = torch.topk(reference_queries @ reference_pool.t(), k_eff, dim=1).indices
     local_labels = labels_device[support_indices_device][reference_positions]
     stacked_probabilities = torch.stack(expert_probabilities)
     stacked_abstain = torch.stack(abstain_probabilities)
+    view_weights_tensor = torch.as_tensor(view_weights, device=device)
     if any(expert.proto_head.classification_expert_confidence_enabled for expert in experts):
-        expert_weights = F.softmax(torch.stack(expert_confidence_logits), dim=0)
+        expert_weights = _expert_confidence_weights(
+            torch.stack(expert_confidence_logits), prior_weights=view_weights_tensor
+        )
         mean_probs = (expert_weights.unsqueeze(-1) * stacked_probabilities).sum(dim=0)
         mean_abstain = (expert_weights * stacked_abstain).sum(dim=0)
     else:
         expert_weights = None
-        mean_probs = stacked_probabilities.mean(dim=0)
-        mean_abstain = stacked_abstain.mean(dim=0)
+        mean_probs = _weighted_stack_mean(stacked_probabilities, view_weights_tensor)
+        mean_abstain = _weighted_stack_mean(stacked_abstain, view_weights_tensor)
     best_conf, best_idx = mean_probs.max(dim=1)
     predicted = torch.as_tensor(prediction_classes, device=device)[best_idx]
     abstain_mask = mean_abstain > best_conf
@@ -700,7 +848,7 @@ def _predict_classification_dynamic_batched(
         subset = np.asarray([query_indices[position] for position in positions], dtype=np.int64)
         result = _predict_classification_fixed_k(
             experts, embeddings_by_expert, labels, subset, support_indices, class_universe,
-            effective, "configured", prior_mode, prior_strength,
+            effective, "configured", prior_mode, prior_strength, eval_cfg=eval_cfg,
         )
         support_counts = result["support_counts"]
         for local_position, output_position in enumerate(positions):
@@ -741,6 +889,7 @@ def predict_classification(
         base = _predict_classification_fixed_k(
             experts, embeddings_by_expert, labels, query_indices, support_indices,
             class_universe, retrieval_k, "configured", prior_mode, prior_strength,
+            eval_cfg=eval_cfg,
         )
         fusion = "mixture" if retrieval_mode == "fm_structured_mix" else "product"
         return _fuse_structured_prediction(
@@ -765,6 +914,7 @@ def predict_classification(
         return _predict_classification_fixed_k(
             experts, embeddings_by_expert, labels, query_indices, support_indices,
             class_universe, retrieval_k, retrieval_mode, prior_mode, prior_strength,
+            eval_cfg=eval_cfg,
         )
     support_labels_cpu = labels[support_indices]
     support_counts = Counter(int(value) for value in support_labels_cpu.tolist())
@@ -975,35 +1125,43 @@ def predict_regression(
     expert_branch_predictions = []
     expert_aggregation_weights = []
     expert_confidence_logits = []
-    for expert, embeddings in zip(experts, embeddings_device):
+    view_weights = []
+    for expert_index, (expert, embeddings) in enumerate(zip(experts, embeddings_device)):
         query = F.normalize(embeddings[query_indices_device], p=2, dim=1)
-        pool = F.normalize(embeddings[support_indices_device], p=2, dim=1)
-        positions = torch.topk(query @ pool.t(), k_eff, dim=1).indices
-        local = pool[positions]
-        local_targets = labels_device[support_indices_device][positions]
-        prediction, confidence, diagnostics = expert.proto_head.forward_regression_batched(
-            local, local_targets, query, return_diagnostics=True
-        )
-        expert_predictions.append(prediction)
-        if expert.proto_head.regression_expert_confidence_enabled:
-            expert_confidence_logits.append(
-                expert.proto_head.regression_expert_confidence_logit(
-                    prediction, confidence, diagnostics
-                )
+        for view_indices, view_weight in _virtual_support_view_specs(
+            support_indices, eval_cfg, "regression", salt=expert_index
+        ):
+            view_device = torch.as_tensor(view_indices, device=device)
+            view_k = min(int(retrieval_k), int(view_device.numel()))
+            pool = F.normalize(embeddings[view_device], p=2, dim=1)
+            positions = torch.topk(query @ pool.t(), view_k, dim=1).indices
+            local = pool[positions]
+            local_targets = labels_device[view_device][positions]
+            prediction, confidence, diagnostics = expert.proto_head.forward_regression_batched(
+                local, local_targets, query, return_diagnostics=True
             )
-        else:
-            expert_confidence_logits.append(prediction.new_zeros(prediction.numel()))
-        if expert.proto_head.regression_outputs_hours:
-            expert_stds.append(diagnostics["std_hours"])
-            if "branch_predictions_hours" in diagnostics:
-                expert_branch_predictions.append(diagnostics["branch_predictions_hours"])
-                expert_aggregation_weights.append(diagnostics["aggregation_weights"])
+            expert_predictions.append(prediction)
+            view_weights.append(float(view_weight))
+            if expert.proto_head.regression_expert_confidence_enabled:
+                expert_confidence_logits.append(
+                    expert.proto_head.regression_expert_confidence_logit(
+                        prediction, confidence, diagnostics
+                    )
+                )
+            else:
+                expert_confidence_logits.append(prediction.new_zeros(prediction.numel()))
+            if expert.proto_head.regression_outputs_hours:
+                expert_stds.append(diagnostics["std_hours"])
+                if "branch_predictions_hours" in diagnostics:
+                    expert_branch_predictions.append(diagnostics["branch_predictions_hours"])
+                    expert_aggregation_weights.append(diagnostics["aggregation_weights"])
     reference = F.normalize(embeddings_device[0], p=2, dim=1)
     reference_positions = torch.topk(
         reference[query_indices_device] @ reference[support_indices_device].t(), k_eff, dim=1
     ).indices
     neighbor_targets = labels_device[support_indices_device][reference_positions]
     stacked_predictions = torch.stack(expert_predictions)
+    view_weights_tensor = torch.as_tensor(view_weights, device=device)
     if any(expert.proto_head.regression_expert_confidence_enabled for expert in experts):
         expert_confidence_temperature = float(
             eval_cfg.get("regression_expert_confidence_temperature", 1.0)
@@ -1011,19 +1169,20 @@ def predict_regression(
         expert_weights = _expert_confidence_weights(
             torch.stack(expert_confidence_logits),
             temperature=expert_confidence_temperature,
+            prior_weights=view_weights_tensor,
         )
         mean_prediction = (expert_weights * stacked_predictions).sum(dim=0)
     else:
         expert_confidence_temperature = None
         expert_weights = None
-        mean_prediction = stacked_predictions.mean(dim=0)
+        mean_prediction = _weighted_stack_mean(stacked_predictions, view_weights_tensor)
     transformed_truth = labels_device[query_indices_device].cpu().numpy()
     truths = inverse_transform_time(transformed_truth)
     if experts[0].proto_head.regression_outputs_hours:
         if calibrated_weights is not None:
             stacked_branches = torch.stack(expert_branch_predictions)
             if expert_weights is None:
-                mean_branches = stacked_branches.mean(dim=0)
+                mean_branches = _weighted_stack_mean(stacked_branches, view_weights_tensor)
             else:
                 mean_branches = (
                     expert_weights.unsqueeze(1) * stacked_branches
@@ -1042,8 +1201,11 @@ def predict_regression(
         predictions = mean_prediction.cpu().numpy()
         stacked_stds = torch.stack(expert_stds)
         if expert_weights is None:
-            within_variance = stacked_stds.square().mean(dim=0)
-            between_variance = stacked_predictions.var(dim=0, correction=0)
+            within_variance = _weighted_stack_mean(stacked_stds.square(), view_weights_tensor)
+            between_variance = _weighted_stack_mean(
+                (stacked_predictions - mean_prediction.unsqueeze(0)).square(),
+                view_weights_tensor,
+            )
         else:
             within_variance = (expert_weights * stacked_stds.square()).sum(dim=0)
             between_variance = (
@@ -1062,8 +1224,10 @@ def predict_regression(
     if expert_branch_predictions:
         stacked_branches = torch.stack(expert_branch_predictions)
         if expert_weights is None:
-            mean_branch_tensor = stacked_branches.mean(dim=0)
-            mean_aggregation_tensor = torch.stack(expert_aggregation_weights).mean(dim=0)
+            mean_branch_tensor = _weighted_stack_mean(stacked_branches, view_weights_tensor)
+            mean_aggregation_tensor = _weighted_stack_mean(
+                torch.stack(expert_aggregation_weights), view_weights_tensor
+            )
         else:
             mean_branch_tensor = (expert_weights.unsqueeze(1) * stacked_branches).sum(dim=0)
             mean_aggregation_tensor = (
@@ -1266,6 +1430,7 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                             ),
                                             "structured_weight": float(eval_cfg.get("structured_weight", 0.5)),
                                             "structured_tau": float(eval_cfg.get("structured_tau", 2.0)),
+                                            **_virtual_expert_row(eval_cfg, "classification"),
                                             **structured_diagnostics,
                                         }
                                         if (
@@ -1307,6 +1472,7 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                             experts[0].proto_head.time_transform_bank.aggregation
                             if experts[0].proto_head.time_transform_bank is not None else "single"
                         ),
+                        **_virtual_expert_row(eval_cfg, "regression"),
                         **regression_metrics(truth, pred, lower, upper),
                     }
                     if eval_cfg.get("regression_branch_diagnostics", False):

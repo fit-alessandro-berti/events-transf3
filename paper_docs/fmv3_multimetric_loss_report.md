@@ -254,6 +254,55 @@ aggregate RMSE/R² tradeoff while preserving the budget-specific improvements.
 | 0.500 | +1.448 | +1.192 | +1.472 | +0.001972 | -0.002180 |
 | 1.500 | +1.681 | +1.399 | +1.633 | +0.002262 | -0.002584 |
 
+#### Test-time virtual support-bagging ablation
+
+A follow-up inference-only ablation lets each physical expert act as multiple
+virtual experts by evaluating deterministic support sub-bags. The implementation
+is controlled by the `virtual_expert_*` evaluation keys. Defaults keep exactly
+one full-support view, so historical runs are unchanged. Classification sub-bags
+can preserve at least one prefix per support-covered class; regression sub-bags
+can be downweighted relative to the full-support view. Expert-confidence
+softmax aggregation incorporates those view priors.
+
+The screen focused on budgets 4+ as requested for continued work. It used the
+current epoch-40 endpoint, regression-only rows, five logs, five repetitions,
+support scenarios `natural` and `class_aware`, and no full-support rows. All
+rows are paired against the current endpoint. The ablation is **not promoted**:
+it consistently helps RMSE/R² but fails the endpoint because MAE and median
+absolute error do not improve together.
+
+| Virtual regression views | Rows | MAE Δ (h) | RMSE Δ (h) | Median AE Δ (h) | Normalized MAE Δ | R² Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| 2x, 90% support, equal sub-bag weight | 145 | +0.089 | -0.736 | +1.061 | +0.000397 | +0.001294 |
+| 4x, 90% support, equal sub-bag weight | 145 | +0.407 | -1.260 | +6.950 | -0.000901 | +0.003581 |
+| 4x, 90% support, sub-bag weight 0.5 | 145 | +0.199 | -1.244 | +5.314 | -0.000790 | +0.003125 |
+
+The weighted four-view candidate shows why the idea remains useful as a future
+variance-control tool but not as the selected endpoint:
+
+| Log | Rows | MAE Δ (h) | RMSE Δ (h) | Median AE Δ (h) | R² Δ |
+|---|---:|---:|---:|---:|---:|
+| billing | 30 | -6.616 | -12.945 | +2.561 | +0.015356 |
+| helpdesk | 30 | -0.000 | -0.000 | +0.000 | +0.002669 |
+| receipt | 30 | +0.062 | +0.009 | -0.168 | +0.000181 |
+| roadtraffic100traces | 25 | +9.377 | +9.617 | +24.915 | -0.005509 |
+| sepsis | 30 | -0.299 | -1.091 | +2.529 | +0.001488 |
+
+Reproduce the weighted screen with:
+
+```bash
+python evaluate_fmv3.py \
+  --checkpoint_dir checkpoints/fmv3/expert_confidence_heads \
+  --checkpoint_epoch 40 \
+  --eval_config configs/fmv3/virtual_support_bagging_screen_eval.yaml \
+  --logs billing helpdesk receipt roadtraffic100traces sepsis \
+  --output_dir evaluation_results/virtual_support_bagging/screens/regression_reg4_f090_w05_budgets4plus \
+  --set 'fmv3_evaluation.tasks=[regression]' \
+  --set 'fmv3_evaluation.case_budgets=[4,8,16,32,64,128]' \
+  --set 'fmv3_evaluation.include_full_budget=false' \
+  --device cpu
+```
+
 Reproduce the endpoint with:
 
 ```bash

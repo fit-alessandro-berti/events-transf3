@@ -10,6 +10,8 @@ from evaluation.fmv3_protocol import (
     _expert_confidence_weights,
     _fuse_structured_prediction,
     _structured_class_probabilities,
+    _weighted_stack_mean,
+    _virtual_support_views,
     fixed_case_split,
     support_case_order,
 )
@@ -71,8 +73,49 @@ class FMV3ProtocolTests(unittest.TestCase):
         self.assertGreater(sharp[-1, 0].item(), default[-1, 0].item())
         self.assertLess(flat[-1, 0].item(), default[-1, 0].item())
         torch.testing.assert_close(default.sum(dim=0), torch.ones(1))
+        prior = _expert_confidence_weights(
+            torch.zeros(3, 1), temperature=1.0, prior_weights=torch.tensor([1.0, 2.0, 1.0])
+        )
+        torch.testing.assert_close(prior[:, 0], torch.tensor([0.25, 0.5, 0.25]))
         with self.assertRaises(ValueError):
             _expert_confidence_weights(logits, temperature=0.0)
+
+    def test_weighted_stack_mean_preserves_neutral_average(self):
+        values = torch.tensor([[1.0, 3.0], [3.0, 7.0], [5.0, 11.0]])
+        torch.testing.assert_close(
+            _weighted_stack_mean(values, torch.ones(3)),
+            values.mean(dim=0),
+        )
+        torch.testing.assert_close(
+            _weighted_stack_mean(values, torch.tensor([1.0, 0.0, 1.0])),
+            torch.tensor([3.0, 7.0]),
+        )
+        torch.testing.assert_close(
+            _weighted_stack_mean(values, torch.zeros(3)),
+            values.mean(dim=0),
+        )
+
+    def test_virtual_support_views_preserve_default_and_class_labels(self):
+        support = np.arange(6)
+        labels = torch.tensor([0, 0, 1, 1, 2, 2])
+        self.assertEqual(len(_virtual_support_views(support)), 1)
+
+        views = _virtual_support_views(
+            support,
+            {
+                "virtual_expert_replicates": 3,
+                "virtual_expert_support_fraction": 0.4,
+                "virtual_expert_min_support_prefixes": 1,
+                "virtual_expert_seed": 7,
+            },
+            "classification",
+            labels=labels,
+        )
+        self.assertEqual(len(views), 3)
+        np.testing.assert_array_equal(views[0], support)
+        for view in views[1:]:
+            self.assertLess(len(view), len(support))
+            self.assertEqual(set(labels[view].tolist()), {0, 1, 2})
 
     def test_batched_coverage_fallback_matches_head(self):
         head = PrototypicalHead(

@@ -67,6 +67,8 @@ The final end-to-end comparison is in
 | `structured_tuning/screens/endpoint_thr{16,32,64}_w100_tau025` | Current endpoint with the stronger structured suffix rule extended beyond the eight-prefix cutoff | Rejected; threshold extension lowers overall classification metrics |
 | `regression_confidence_low_support_confirmation_eval` | Expert-confidence epoch-40 checkpoint with classification confidence disabled, regression confidence enabled at softmax temperature 0.02, budget-aware support-calibration mix at budgets 2 and 4, and low-support structured classification overlay | **Current best endpoint** |
 | `raw_prediction_regression_confidence_confirmation_eval` | Current endpoint with the learned remaining-time transform bank bypassed in favor of direct raw-hour soft-kNN prediction | Rejected; worsens MAE, RMSE, median AE, normalized MAE, and R² |
+| `structured_tuning/current_endpoint/screens/low_support_w*` | Current endpoint with the promoted threshold-8 low-support structured rule retuned around weight/tau | Rejected; no decision gain and calibration worsens |
+| `virtual_support_bagging_screen_eval` | Current endpoint with test-time virtual expert replication through deterministic support sub-bags | Rejected for promotion; improves RMSE/R² on budgets 4+ but worsens MAE/median AE |
 
 The selected independent-temporal predecessor completed epoch 34 and was
 intentionally stopped during epoch 35 when that experiment was closed. Its
@@ -103,6 +105,8 @@ Low-support
 structured-memory tuning lives under `evaluation_results/structured_tuning/`.
 Raw no-rescaling regression ablations live under
 `evaluation_results/raw_hours_knn/confirmations/`.
+Virtual support-bagging screens live under
+`evaluation_results/virtual_support_bagging/`.
 
 `configs/fmv3/selected.yaml` is the stable configuration alias for the
 promoted base checkpoint; it resolves to `loss_multimetric_gate_aux_005` with
