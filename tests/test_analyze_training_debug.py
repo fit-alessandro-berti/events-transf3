@@ -51,6 +51,38 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         findings = {finding["kind"]: finding for finding in result["findings"]}
         self.assertEqual(findings["amp_overflow"]["severity"], "high")
 
+    def test_analysis_flags_auxiliary_gradient_near_primary_magnitude(self):
+        records = []
+        for epoch in range(1, 4):
+            records.append(
+                {
+                    "epoch": epoch,
+                    "train": {
+                        "task/regression/loss/total": _metric(1.0),
+                        "task/regression/optimization/loss_gradient/primary/all/l2_norm": _metric(4.0),
+                        "task/regression/optimization/loss_gradient/regression/median_ae_weighted/all/l2_norm": _metric(3.0),
+                    },
+                    "validation": {
+                        "task/regression/loss/total": _metric(1.0),
+                    },
+                    "epoch_metrics": {},
+                    "updates": {},
+                }
+            )
+        result = analyze({"epochs": records, "configuration": {}})
+        findings = [
+            finding
+            for finding in result["findings"]
+            if finding["kind"] == "large_auxiliary_gradient"
+        ]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(
+            findings[0]["metric"], "regression/median_ae_weighted"
+        )
+        self.assertAlmostEqual(
+            findings[0]["evidence"]["mean_gradient_ratio_to_primary"], 0.75
+        )
+
     def test_analysis_detects_front_loaded_overfitting_and_clipping(self):
         records = []
         train = [1.0, 0.8, 0.6, 0.5]

@@ -152,7 +152,9 @@ low-severity transient event; only a mean overflow rate of at least 1% or an
 overflow still present in the last epoch is high severity. These are
 hypotheses for a matched intervention, not proof that a component should be
 removed: scalar loss size and gradient influence are reported separately for
-that reason.
+that reason. In particular, the analyzer flags an auxiliary component when its
+mean isolated gradient norm reaches at least half the primary-loss gradient
+norm, even if its scalar contribution looks small.
 
 ## Full retraining audit
 

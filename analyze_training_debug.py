@@ -439,6 +439,7 @@ def analyze(summary, pool_names=None):
     optimization = _optimization_summary(records)
     heads = _head_summary(records)
     loss_contributions = _loss_contributions(records)
+    loss_gradients = _loss_gradient_summary(records)
     findings = []
     for task, task_result in task_summary.items():
         invariant_overfit = task_result["invariant_overfitting"].get(
@@ -601,6 +602,31 @@ def analyze(summary, pool_names=None):
                     },
                 }
             )
+    for task, components in loss_gradients.items():
+        primary_mean = components.get("primary", {}).get("mean")
+        if primary_mean is None or primary_mean <= 0.0:
+            continue
+        for component, values in components.items():
+            if component == "primary":
+                continue
+            component_mean = values.get("mean")
+            if component_mean is None:
+                continue
+            ratio = component_mean / primary_mean
+            if ratio >= 0.5:
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "kind": "large_auxiliary_gradient",
+                        "task": task,
+                        "metric": component,
+                        "evidence": {
+                            "mean_gradient_norm": component_mean,
+                            "primary_mean_gradient_norm": primary_mean,
+                            "mean_gradient_ratio_to_primary": ratio,
+                        },
+                    }
+                )
     return {
         "schema_version": 1,
         "epochs_analyzed": len(records),
@@ -608,7 +634,7 @@ def analyze(summary, pool_names=None):
         "optimization": optimization,
         "heads": heads,
         "gradients": _gradient_summary(records),
-        "loss_gradients": _loss_gradient_summary(records),
+        "loss_gradients": loss_gradients,
         "pools": _pool_summary(records, pool_names),
         "last_epoch_loss_contributions": loss_contributions,
         "findings": findings,
