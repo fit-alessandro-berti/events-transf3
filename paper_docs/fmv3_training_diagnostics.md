@@ -245,6 +245,21 @@ identical (1.90843 versus 1.90837). The joint score remains worse. The robust
 terms are therefore retained; scalar loss share alone would have led to the
 wrong removal decision.
 
+The clip-5 and label-smoothing controls also completed all 20 epochs without a
+strict overfitting signal. Clip 5 reduces mean clip incidence from 99.73% to
+55.32% and improves the best joint invariant score from 0.806643 (baseline
+e16) to 0.803059 (clip-5 e14). Its classification NLL continues to 1.87592 at
+epoch 20, but best regression MAE is 841.872 versus baseline 837.320 hours and
+its last confidence gap is larger (0.1731 versus 0.1660). The candidate is
+therefore checkpointed at its source-selected joint epoch 14 and sent to the
+fixed target screen rather than promoted from training loss alone.
+
+Increasing label smoothing from 0.05 to 0.10 slightly narrows the final
+confidence gap to 0.1604, but worsens best NLL (1.92285), accuracy (0.29949),
+MAE (845.103 hours), and joint score (0.811981). This control is rejected:
+post-training output-temperature calibration is better isolated from feature
+learning than stronger smoothing for this model.
+
 `compare_training_debug.py` creates a live or final matched comparison. Its
 joint screening score gives equal weight to held-out classification NLL and
 raw-hour regression MAE after normalizing both by baseline epoch 1. The two
