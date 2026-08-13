@@ -83,6 +83,39 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
             findings[0]["evidence"]["mean_gradient_ratio_to_primary"], 0.75
         )
 
+    def test_analysis_flags_uniform_branch_gate_despite_mae_spread(self):
+        records = []
+        for epoch in range(1, 4):
+            train = {"task/regression/loss/total": _metric(1.0)}
+            validation = {
+                "task/regression/loss/total": _metric(1.0),
+                "task/regression/head/regression/branch_weight_entropy_mean": _metric(0.999),
+            }
+            for branch, mae in enumerate([10.0, 10.5, 11.0, 12.0]):
+                validation[
+                    f"task/regression/head/regression/branch_{branch}/mae_hours"
+                ] = _metric(mae)
+                validation[
+                    f"task/regression/head/regression/branch_{branch}/weight_mean"
+                ] = _metric(0.25)
+            records.append(
+                {
+                    "epoch": epoch,
+                    "train": train,
+                    "validation": validation,
+                    "epoch_metrics": {},
+                    "updates": {},
+                }
+            )
+        result = analyze({"epochs": records, "configuration": {}})
+        findings = [
+            finding
+            for finding in result["findings"]
+            if finding["kind"] == "near_uniform_regression_branch_mixture"
+        ]
+        self.assertEqual(len(findings), 1)
+        self.assertAlmostEqual(findings[0]["evidence"]["relative_mae_spread"], 0.2)
+
     def test_analysis_detects_front_loaded_overfitting_and_clipping(self):
         records = []
         train = [1.0, 0.8, 0.6, 0.5]

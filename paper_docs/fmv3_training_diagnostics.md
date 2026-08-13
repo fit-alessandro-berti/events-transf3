@@ -154,7 +154,11 @@ hypotheses for a matched intervention, not proof that a component should be
 removed: scalar loss size and gradient influence are reported separately for
 that reason. In particular, the analyzer flags an auxiliary component when its
 mean isolated gradient norm reaches at least half the primary-loss gradient
-norm, even if its scalar contribution looks small.
+norm, even if its scalar contribution looks small. It also flags a regression
+transform mixture whose normalized weight entropy remains at least 0.99 while
+the best and worst branch MAE differ by at least 5%; branch MAE and mean weight
+are retained separately so a uniform mixture of genuinely equivalent branches
+is not mislabeled.
 
 ## Full retraining audit
 

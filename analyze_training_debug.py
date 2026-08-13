@@ -56,6 +56,14 @@ HEAD_METRICS = {
         "head/regression/bias_hours",
         "head/regression/relative_mae",
         "head/regression/branch_weight_entropy_mean",
+        "head/regression/branch_0/mae_hours",
+        "head/regression/branch_0/weight_mean",
+        "head/regression/branch_1/mae_hours",
+        "head/regression/branch_1/weight_mean",
+        "head/regression/branch_2/mae_hours",
+        "head/regression/branch_2/weight_mean",
+        "head/regression/branch_3/mae_hours",
+        "head/regression/branch_3/weight_mean",
         "head/regression/selector/log_weight/abs_mean",
         "head/regression/selector/effective_support/mean",
         "head/regression/selector/attention_entropy_mean",
@@ -578,6 +586,43 @@ def analyze(summary, pool_names=None):
                             },
                         }
                     )
+        regression_metrics = heads.get("regression", {})
+        branch_entropy = regression_metrics.get(
+            "head/regression/branch_weight_entropy_mean", {}
+        ).get("validation_last")
+        branch_maes = {
+            str(index): regression_metrics.get(
+                f"head/regression/branch_{index}/mae_hours", {}
+            ).get("validation_last")
+            for index in range(4)
+        }
+        branch_weights = {
+            str(index): regression_metrics.get(
+                f"head/regression/branch_{index}/weight_mean", {}
+            ).get("validation_last")
+            for index in range(4)
+        }
+        available_maes = [
+            value for value in branch_maes.values() if value is not None
+        ]
+        if branch_entropy is not None and len(available_maes) >= 2:
+            relative_spread = (max(available_maes) - min(available_maes)) / max(
+                min(available_maes), 1e-12
+            )
+            if branch_entropy >= 0.99 and relative_spread >= 0.05:
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "kind": "near_uniform_regression_branch_mixture",
+                        "task": "regression",
+                        "evidence": {
+                            "normalized_weight_entropy": branch_entropy,
+                            "branch_mae_hours": branch_maes,
+                            "branch_weights": branch_weights,
+                            "relative_mae_spread": relative_spread,
+                        },
+                    }
+                )
         class_metrics = heads.get("classification", {})
         accuracy = class_metrics.get("head/classification/accuracy", {}).get(
             "validation_last"
