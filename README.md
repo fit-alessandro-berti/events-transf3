@@ -282,6 +282,20 @@ See
 for equations, feature definitions, permutation diagnostics, complete tables,
 limitations, hashes, and reproduction commands.
 
+### Structured training diagnostics
+
+Training can now record decomposed classification/regression losses, head and
+selector behavior, transform-branch use, confidence/routing auxiliaries,
+per-component gradients and updates, AMP/clipping state, task/expert balance,
+and deterministic case-held-out source validation. Enable it with
+`training_diagnostics.enabled: true`; historical configurations keep it off and
+retain their original split/path.
+
+The full selected-architecture retraining audit starts from
+`configs/fmv3/training_debug_full_retrain.yaml`. The metric schema, validation
+semantics, JSONL artifacts, and overfitting rule are documented in
+[`paper_docs/fmv3_training_diagnostics.md`](paper_docs/fmv3_training_diagnostics.md).
+
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.
 The second observable prefix clock is `time_from_previous`.

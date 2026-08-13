@@ -11,6 +11,7 @@ from utils .data_utils import get_task_data
 from utils .model_utils import init_loader ,create_model ,load_state_dict_compatible
 from utils .parameter_utils import configure_trainable_scope
 from training import train
+from training_debug import save_validation_manifest, split_training_tasks_by_case
 def main ():
     pre_parser =argparse .ArgumentParser (add_help =False )
     pre_parser .add_argument ('--config',type =str ,default =None )
@@ -134,6 +135,23 @@ def main ():
     'classification':[get_task_data (log ,'classification')for log in training_logs .values ()],
     'regression':[get_task_data (log ,'regression')for log in training_logs .values ()]
     }
+    validation_tasks =None
+    diagnostics_config =CONFIG .get ('training_diagnostics',{})or {}
+    if diagnostics_config .get ('enabled',False ):
+        training_log_names =[os .path .basename (str (path ))for path in CONFIG ['log_paths']['training']]
+        training_tasks ,validation_tasks ,validation_manifest =split_training_tasks_by_case (
+        training_tasks ,
+        diagnostics_config .get ('validation_fraction',0.10 ),
+        seed ,
+        log_names =training_log_names ,
+        )
+        save_validation_manifest (checkpoint_dir ,validation_manifest ,CONFIG )
+        print ("🔬 Created deterministic case-disjoint training/validation split.")
+        for row in validation_manifest :
+            print (
+            f"  - {row ['log']}: {row ['validation_cases']}/{row ['total_cases']} "
+            "cases held out"
+            )
     print ("\n--- Phase 3: Initializing Model ---")
     model =create_model (CONFIG ,loader ,device )
     if latest_checkpoint_path :
@@ -161,7 +179,8 @@ def main ():
     checkpoint_dir =checkpoint_dir ,
     resume_epoch =start_epoch ,
     stop_after_epoch =args .stop_after_epoch ,
-    cleanup_checkpoints =args .cleanup_checkpoints
+    cleanup_checkpoints =args .cleanup_checkpoints ,
+    validation_tasks =validation_tasks ,
     )
     print ("\n✅ Training complete. Run 'testing.py' to evaluate.")
 if __name__ =='__main__':

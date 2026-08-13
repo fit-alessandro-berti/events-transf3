@@ -26,6 +26,17 @@ classification_label_smoothing: 0.05
 classification_separation_weight: 0.0
 classification_separation_temperature: 0.10
 classification_separation_margin: 0.15
+gradient_clip_norm: 1.0
+# Opt-in structured telemetry. Disabled defaults preserve the historical
+# training data and runtime path exactly.
+training_diagnostics:
+  enabled: false
+  step_interval: 25
+  validation_fraction: 0.10
+  validation_steps_per_pool: 1
+  validation_seed_offset: 100000
+  overfitting_patience: 3
+  overfitting_relative_tolerance: 0.02
 trainable_scope: all
 fmv3_head:
   regression_mode: sqrt_knn

@@ -1,0 +1,28 @@
+# End-to-end retraining audit of the complete selected epoch-44 architecture.
+# This is intentionally a new run from random initialization: every component
+# is trainable, while a deterministic source-case holdout measures whether
+# falling training loss transfers beyond the prefixes used for optimization.
+extends: example_selector_selected.yaml
+experiment_name: training_debug_full_retrain
+selected_checkpoint_epoch: 20
+epochs: 20
+episodes_per_epoch: 300
+lr: 0.0001
+weight_decay: 0.01
+trainable_scope: all
+classification_task_probability: 0.50
+proto_head_warmup_epochs: 0
+proto_head_lr_mult_after_warmup: 1.0
+fmv3_head:
+  # Train the classification selector at its natural scale. The selected
+  # structured-inference deployment still applies strength 0.25 afterwards.
+  classification_example_selector_strength: 1.0
+  regression_example_selector_strength: 1.0
+training_diagnostics:
+  enabled: true
+  step_interval: 25
+  validation_fraction: 0.10
+  validation_steps_per_pool: 1
+  validation_seed_offset: 100000
+  overfitting_patience: 3
+  overfitting_relative_tolerance: 0.02

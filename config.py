@@ -84,6 +84,16 @@ CONFIG ={
 'num_cases_for_testing':500 ,
 'seed':42,
 'training_enabled':True,
+'gradient_clip_norm':1.0,
+'training_diagnostics':{
+'enabled':False,
+'step_interval':25,
+'validation_fraction':0.10,
+'validation_steps_per_pool':1,
+'validation_seed_offset':100000,
+'overfitting_patience':3,
+'overfitting_relative_tolerance':0.02,
+},
 'fmv3_head':{
 'classification_mode':'legacy_soft_knn', # legacy_soft_knn, local, global, global_local, coverage_fallback
 'local_temperature':0.2,

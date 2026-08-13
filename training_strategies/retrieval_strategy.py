@@ -6,7 +6,19 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from training_debug import (
+    average_metric_dicts,
+    classification_head_metrics,
+    regression_head_metrics,
+    tensor_distribution,
+)
 from utils.retrieval_utils import find_knn_indices
+
+
+def _step_result(loss, task, diagnostics, return_diagnostics):
+    if return_diagnostics:
+        return loss, task, diagnostics
+    return loss, task
 
 
 def _encode_case_ids_to_int(case_ids_np: np.ndarray) -> torch.Tensor:
@@ -354,8 +366,14 @@ def _covariance_loss(z: torch.Tensor):
     return (off_diag ** 2).sum() / d
 
 
-def run_retrieval_step(model, task_data_pool, task_type, config):
+def run_retrieval_step(
+    model, task_data_pool, task_type, config, return_diagnostics=False
+):
     progress_bar_task = f"retrieval_{task_type}"
+    diagnostics_out = {
+        "data/episode_valid": 0.0,
+        "data/pool_prefixes": float(len(task_data_pool)),
+    }
     retrieval_k_train = int(config.get("retrieval_train_k", 5))
     retrieval_batch_size = int(config.get("retrieval_train_batch_size", 64))
     head_cfg = config.get("fmv3_head", {})
@@ -376,7 +394,9 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     )
 
     if len(task_data_pool) < retrieval_batch_size:
-        return None, progress_bar_task
+        return _step_result(
+            None, progress_bar_task, diagnostics_out, return_diagnostics
+        )
 
     episode_type = "regression"
     if task_type == "classification":
@@ -385,7 +405,12 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             task_data_pool, retrieval_batch_size, episode_type, config
         )
         if not batch_tasks_raw:
-            return None, f"{progress_bar_task}_empty"
+            return _step_result(
+                None,
+                f"{progress_bar_task}_empty",
+                diagnostics_out,
+                return_diagnostics,
+            )
         progress_bar_task = f"{progress_bar_task}_{episode_type}"
     else:
         batch_tasks_raw = random.sample(task_data_pool, retrieval_batch_size)
@@ -393,6 +418,15 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     batch_prefixes = [t[0] for t in batch_tasks_raw]
     batch_labels = np.array([t[1] for t in batch_tasks_raw])
     batch_case_ids = np.array([t[2] for t in batch_tasks_raw], dtype=object)
+    diagnostics_out.update(
+        {
+            "data/episode_valid": 1.0,
+            "data/batch_size": float(len(batch_tasks_raw)),
+            "data/unique_cases": float(len(set(batch_case_ids.tolist()))),
+            "data/unique_labels": float(len(set(batch_labels.tolist()))),
+            "schedule/retrieval_k": float(retrieval_k_train),
+        }
+    )
 
     time_scale_factor =None
     if task_type =="regression"and model .proto_head .regression_uses_time_transform_bank :
@@ -403,6 +437,13 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     )
     z_ssl = model.proj_head(all_embeddings) if hasattr(model, "proj_head") else all_embeddings
     device = all_embeddings.device
+    if return_diagnostics:
+        tensor_distribution(
+            diagnostics_out, "embedding/deployed", all_embeddings, quantiles=False
+        )
+        tensor_distribution(
+            diagnostics_out, "embedding/projection", z_ssl, quantiles=False
+        )
 
     all_embeddings_norm = F.normalize(all_embeddings, p=2, dim=1)
     all_embeddings_norm_detached = all_embeddings_norm.detach()
@@ -480,6 +521,15 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
     total_loss_for_batch = 0.0
     queries_processed = 0
     routing_reliability = None
+    classification_head_rows = []
+    regression_head_rows = []
+    primary_loss_value = None
+    confidence_loss_value = None
+    gate_auxiliary_value = None
+    routing_loss_value = None
+    variance_loss_value = None
+    covariance_loss_value = None
+    regression_components = None
     use_regression_gate_aux = (
         model.proto_head.regression_outputs_hours
         and model.proto_head.regression_gate_aux_weight > 0
@@ -519,7 +569,7 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             support_embeddings = all_embeddings[neighbors]
             support_labels_tensor = labels_float[neighbors]
             query_embeddings = all_embeddings[query_idx]
-            if use_regression_gate_aux or reg_confidence_w > 0:
+            if use_regression_gate_aux or reg_confidence_w > 0 or return_diagnostics:
                 prediction, confidence, diagnostics = model.proto_head.forward_regression_batched(
                     support_embeddings,
                     support_labels_tensor,
@@ -543,6 +593,17 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
                             diagnostics,
                         )
                     )
+                if return_diagnostics:
+                    regression_head_rows.append(
+                        regression_head_metrics(
+                            prediction,
+                            model.proto_head.regression_labels_to_output(
+                                labels_float[query_idx]
+                            ),
+                            confidence,
+                            diagnostics,
+                        )
+                    )
             else:
                 prediction, _ = model.proto_head.forward_regression_batched(
                     support_embeddings,
@@ -556,6 +617,19 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
         if regression_predictions:
             joined_predictions = torch.cat(regression_predictions, dim=0)
             joined_targets = torch.cat(regression_targets, dim=0)
+            regression_components = (
+                model.proto_head.regression_loss_components(
+                    joined_predictions, joined_targets
+                )
+                if model.proto_head.regression_outputs_hours
+                else None
+            )
+            primary_loss_value = model.proto_head.regression_loss(
+                joined_predictions,
+                joined_targets,
+                branch_predictions=None,
+                aggregation_weights=None,
+            )
             total_loss_for_batch = model.proto_head.regression_loss(
                 joined_predictions,
                 joined_targets,
@@ -579,11 +653,22 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
                 ).clamp(0.0, 20.0)
             ).mean()
             if regression_confidence_losses:
+                confidence_loss_value = torch.stack(
+                    regression_confidence_losses
+                ).mean()
                 total_loss_for_batch = total_loss_for_batch + (
-                    reg_confidence_w * torch.stack(regression_confidence_losses).mean()
+                    reg_confidence_w * confidence_loss_value
+                )
+            if regression_branch_predictions and regression_aggregation_weights:
+                gate_auxiliary_value = model.proto_head.regression_gate_auxiliary_loss(
+                    torch.cat(regression_branch_predictions, dim=1),
+                    torch.cat(regression_aggregation_weights, dim=1),
+                    regression_components["targets"],
                 )
     else:
         routing_correctness = []
+        classification_primary_losses = []
+        classification_confidence_losses = []
         for i in range(retrieval_batch_size):
             query_label = batch_labels[i]
             query_case_id = batch_case_ids[i]
@@ -645,13 +730,21 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             support_labels_tensor = labels_t[support_indices]
             global_embeddings = all_embeddings[pool_indices]
             global_labels = labels_t[pool_indices]
-            logits, proto_classes, probabilities = model.proto_head.forward_classification(
+            classification_result = model.proto_head.forward_classification(
                 support_embeddings,
                 support_labels_tensor,
                 query_embedding,
                 global_support_features=global_embeddings,
                 global_support_labels=global_labels,
+                return_diagnostics=return_diagnostics,
             )
+            if return_diagnostics:
+                logits, proto_classes, probabilities, head_diagnostics = (
+                    classification_result
+                )
+            else:
+                logits, proto_classes, probabilities = classification_result
+                head_diagnostics = None
             if logits is None:
                 continue
 
@@ -675,12 +768,24 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
                 max(float(config.get("classification_label_smoothing", 0.05)), 0.0),
                 1.0,
             )
-            loss = F.cross_entropy(logits, mapped_label, label_smoothing=smoothing)
+            primary_query_loss = F.cross_entropy(
+                logits, mapped_label, label_smoothing=smoothing
+            )
+            classification_primary_losses.append(primary_query_loss)
+            loss = primary_query_loss
             if cls_confidence_w > 0:
-                loss = loss + cls_confidence_w * (
+                confidence_query_loss = (
                     model.proto_head.classification_expert_confidence_loss(
-                        probabilities,
-                        mapped_label,
+                        probabilities, mapped_label
+                    )
+                )
+                classification_confidence_losses.append(confidence_query_loss)
+                loss = loss + cls_confidence_w * confidence_query_loss
+
+            if return_diagnostics:
+                classification_head_rows.append(
+                    classification_head_metrics(
+                        logits, mapped_label, probabilities, head_diagnostics
                     )
                 )
 
@@ -689,6 +794,12 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
                 queries_processed += 1
         if routing_correctness:
             routing_reliability = torch.stack(routing_correctness).mean()
+        if classification_primary_losses:
+            primary_loss_value = torch.stack(classification_primary_losses).mean()
+        if classification_confidence_losses:
+            confidence_loss_value = torch.stack(
+                classification_confidence_losses
+            ).mean()
 
     loss_out = None
     if queries_processed > 0:
@@ -725,6 +836,7 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
             task_type,
             routing_reliability,
         )
+        routing_loss_value = routing_loss
         loss_out = loss_out + routing_confidence_w * routing_loss
 
     var_w = float(config.get("retrieval_var_weight", 0.0))
@@ -733,9 +845,107 @@ def run_retrieval_step(model, task_data_pool, task_type, config):
         with _autocast_disabled_for(device):
             reg = torch.tensor(0.0, device=device)
             if var_w > 0:
-                reg = reg + (var_w * _variance_loss(z_ssl))
+                variance_loss_value = _variance_loss(z_ssl)
+                reg = reg + (var_w * variance_loss_value)
             if cov_w > 0:
-                reg = reg + (cov_w * _covariance_loss(z_ssl))
+                covariance_loss_value = _covariance_loss(z_ssl)
+                reg = reg + (cov_w * covariance_loss_value)
         loss_out = loss_out + reg
 
-    return loss_out, progress_bar_task
+    if return_diagnostics:
+        diagnostics_out.update(average_metric_dicts(classification_head_rows))
+        diagnostics_out.update(average_metric_dicts(regression_head_rows))
+        effective_queries = (
+            len(classification_head_rows)
+            if task_type == "classification"
+            else sum(
+                int(row.get("head/regression/query_count", 0))
+                for row in regression_head_rows
+            )
+        )
+        diagnostics_out["data/effective_queries"] = float(effective_queries)
+        diagnostics_out["data/skipped_queries"] = float(
+            max(0, retrieval_batch_size - effective_queries)
+        )
+        if regression_components is not None:
+            regression_weights = {
+                "mae": model.proto_head.regression_mae_weight,
+                "rmse": model.proto_head.regression_rmse_weight,
+                "huber": model.proto_head.regression_huber_weight,
+                "log_rmse": model.proto_head.regression_log_rmse_weight,
+                "relative_mae": model.proto_head.regression_relative_mae_weight,
+                "bias": model.proto_head.regression_bias_weight,
+                "median_ae": model.proto_head.regression_median_ae_weight,
+                "quantile": model.proto_head.regression_quantile_weight,
+            }
+            denominator = model.proto_head._regression_primary_weight_sum()
+            for name, weight in regression_weights.items():
+                diagnostics_out[f"loss/regression/{name}_raw"] = (
+                    regression_components[name]
+                )
+                diagnostics_out[f"loss/regression/{name}_weighted"] = (
+                    weight * regression_components[name] / denominator
+                )
+            diagnostics_out["loss/regression/normalizer_hours"] = (
+                regression_components["normalizer"]
+            )
+        diagnostic_losses = {
+            "loss/primary": primary_loss_value,
+            "loss/contrastive_raw": contrastive_loss,
+            "loss/contrastive_weighted": (
+                contrastive_w * contrastive_loss
+                if contrastive_loss is not None
+                else None
+            ),
+            "loss/nca_raw": nca_loss,
+            "loss/nca_weighted": (
+                knn_aux_w * nca_loss if nca_loss is not None else None
+            ),
+            "loss/classification_separation_raw": classification_separation_loss,
+            "loss/classification_separation_weighted": (
+                classification_separation_w * classification_separation_loss
+                if classification_separation_loss is not None
+                else None
+            ),
+            "loss/confidence_raw": confidence_loss_value,
+            "loss/confidence_weighted": (
+                (cls_confidence_w if task_type == "classification" else reg_confidence_w)
+                * confidence_loss_value
+                if confidence_loss_value is not None
+                else None
+            ),
+            "loss/regression_gate_aux_raw": gate_auxiliary_value,
+            "loss/regression_gate_aux_weighted": (
+                model.proto_head.regression_gate_aux_weight * gate_auxiliary_value
+                if gate_auxiliary_value is not None
+                else None
+            ),
+            "loss/routing_raw": routing_loss_value,
+            "loss/routing_weighted": (
+                routing_confidence_w * routing_loss_value
+                if routing_loss_value is not None
+                else None
+            ),
+            "loss/variance_raw": variance_loss_value,
+            "loss/variance_weighted": (
+                var_w * variance_loss_value
+                if variance_loss_value is not None
+                else None
+            ),
+            "loss/covariance_raw": covariance_loss_value,
+            "loss/covariance_weighted": (
+                cov_w * covariance_loss_value
+                if covariance_loss_value is not None
+                else None
+            ),
+            "loss/total": loss_out,
+        }
+        diagnostics_out.update(
+            {key: value for key, value in diagnostic_losses.items() if value is not None}
+        )
+        if routing_reliability is not None:
+            diagnostics_out["routing/target_reliability"] = routing_reliability
+
+    return _step_result(
+        loss_out, progress_bar_task, diagnostics_out, return_diagnostics
+    )

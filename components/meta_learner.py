@@ -65,6 +65,7 @@ class MetaLearner (nn .Module ):
             nn .init .zeros_ (self .regression_embedding_adapter [-1 ].weight )
             nn .init .zeros_ (self .regression_embedding_adapter [-1 ].bias )
         # Side-channel for episodic regression: branch diagnostics used by gate-aux.
+        self .last_classification_diagnostics =None
         self .last_regression_diagnostics =None
         self .last_expert_confidence_logit =None
         self .last_regression_base_confidence =None
@@ -153,18 +154,22 @@ class MetaLearner (nn .Module ):
         query_features =all_encoded [len (support_seqs ):]
         device =all_encoded .device
         if task_type =='classification':
+            self .last_classification_diagnostics =None
             self .last_regression_diagnostics =None
             self .last_expert_confidence_logit =None
             self .last_regression_base_confidence =None
             support_labels =torch .LongTensor ([s [1 ]for s in support_set ]).to (device )
             query_labels =torch .LongTensor ([q [1 ]for q in query_set ]).to (device )
-            predictions ,proto_classes ,confidence =self .proto_head .forward_classification (support_features ,support_labels ,query_features )
+            predictions ,proto_classes ,confidence ,diagnostics =self .proto_head .forward_classification (
+            support_features ,support_labels ,query_features ,return_diagnostics =True )
             if predictions is None :return None ,None ,None
+            self .last_classification_diagnostics =diagnostics
             self .last_expert_confidence_logit =self .proto_head .classification_expert_confidence_logit (confidence )
             label_map ={orig_label .item ():new_label for new_label ,orig_label in enumerate (proto_classes )}
             mapped_labels =torch .tensor ([label_map .get (l .item (),-100 )for l in query_labels ],device =device ,dtype =torch .long )
             return predictions ,mapped_labels ,confidence
         elif task_type =='regression':
+            self .last_classification_diagnostics =None
             self .last_expert_confidence_logit =None
             self .last_regression_base_confidence =None
             support_labels =torch .as_tensor ([s [1 ]for s in support_set ],dtype =torch .float32 ,device =device )
