@@ -120,8 +120,10 @@ def _validation_accumulator(model, validation_tasks, config):
                         prefixes=(
                             f"task/{task_type}",
                             f"expert/{expert_index}",
+                            f"pool/{pool_index}",
                             f"episode/{episode}",
                             f"task/{task_type}/expert/{expert_index}",
+                            f"task/{task_type}/pool/{pool_index}",
                         ),
                     )
 
@@ -175,9 +177,15 @@ def train(
     print(f"✅ Automatic Mixed Precision (AMP) enabled: {use_amp}")
 
     classification_pools = [
-        pool for pool in training_tasks["classification"] if pool
+        (index, pool)
+        for index, pool in enumerate(training_tasks["classification"])
+        if pool
     ]
-    regression_pools = [pool for pool in training_tasks["regression"] if pool]
+    regression_pools = [
+        (index, pool)
+        for index, pool in enumerate(training_tasks["regression"])
+        if pool
+    ]
     if not classification_pools and not regression_pools:
         print("❌ Error: No valid training tasks available. Aborting training.")
         return
@@ -322,14 +330,15 @@ def train(
                 else "regression"
             )
             if task_type == "classification" and classification_pools:
-                task_pool = random.choice(classification_pools)
+                pool_index, task_pool = random.choice(classification_pools)
             elif task_type == "regression" and regression_pools:
-                task_pool = random.choice(regression_pools)
+                pool_index, task_pool = random.choice(regression_pools)
             else:
                 task_type = "regression" if regression_pools else "classification"
-                task_pool = random.choice(
+                available_pools = (
                     regression_pools if regression_pools else classification_pools
                 )
+                pool_index, task_pool = random.choice(available_pools)
             if not task_pool:
                 skipped_steps += 1
                 continue
@@ -398,6 +407,7 @@ def train(
                 step,
                 task_type,
                 expert_index,
+                pool_index,
                 progress_task,
                 step_metrics,
                 sampled=sampled_step,

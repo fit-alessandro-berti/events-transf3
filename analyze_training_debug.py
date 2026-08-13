@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import math
+import re
 from pathlib import Path
 
 
@@ -21,6 +22,45 @@ REGRESSION_COMPONENTS = (
     "median_ae",
     "quantile",
 )
+LOSS_METRICS = (
+    "loss/total",
+    "loss/primary",
+    "loss/confidence_weighted",
+    "loss/routing_weighted",
+    "loss/regression_gate_aux_weighted",
+    "loss/classification_separation_weighted",
+    "loss/contrastive_weighted",
+    "loss/nca_weighted",
+    "loss/variance_weighted",
+    "loss/covariance_weighted",
+)
+HEAD_METRICS = {
+    "classification": (
+        "head/classification/accuracy",
+        "head/classification/nll",
+        "head/classification/true_probability_mean",
+        "head/classification/max_probability_mean",
+        "head/classification/entropy_mean",
+        "head/classification/probability_margin_mean",
+        "head/classification/local_class_coverage",
+        "head/classification/gate/mean",
+        "head/classification/prototype_variances/mean",
+        "head/classification/selector/log_weight/abs_mean",
+        "head/classification/selector/effective_support/mean",
+        "head/classification/selector/attention_entropy_mean",
+    ),
+    "regression": (
+        "head/regression/mae_hours",
+        "head/regression/rmse_hours",
+        "head/regression/median_ae_hours",
+        "head/regression/bias_hours",
+        "head/regression/relative_mae",
+        "head/regression/branch_weight_entropy_mean",
+        "head/regression/selector/log_weight/abs_mean",
+        "head/regression/selector/effective_support/mean",
+        "head/regression/selector/attention_entropy_mean",
+    ),
+}
 
 
 def _mean(section, key):
@@ -139,28 +179,7 @@ def _optimization_summary(records):
 
 def _head_summary(records):
     result = {}
-    metric_map = {
-        "classification": (
-            "head/classification/accuracy",
-            "head/classification/nll",
-            "head/classification/entropy_mean",
-            "head/classification/probability_margin_mean",
-            "head/classification/selector/log_weight/abs_mean",
-            "head/classification/selector/effective_support/mean",
-            "head/classification/selector/attention_entropy_mean",
-        ),
-        "regression": (
-            "head/regression/mae_hours",
-            "head/regression/rmse_hours",
-            "head/regression/median_ae_hours",
-            "head/regression/bias_hours",
-            "head/regression/branch_weight_entropy_mean",
-            "head/regression/selector/log_weight/abs_mean",
-            "head/regression/selector/effective_support/mean",
-            "head/regression/selector/attention_entropy_mean",
-        ),
-    }
-    for task, metrics in metric_map.items():
+    for task, metrics in HEAD_METRICS.items():
         result[task] = {}
         for metric in metrics:
             key = f"task/{task}/{metric}"
@@ -173,6 +192,69 @@ def _head_summary(records):
                     "validation_first": validation[0][1] if validation else None,
                     "validation_last": validation[-1][1] if validation else None,
                 }
+    return result
+
+
+def _gradient_summary(records):
+    result = {}
+    pattern = re.compile(
+        r"^task/(classification|regression)/optimization/gradient/(.+)/l2_norm$"
+    )
+    keys = set()
+    for record in records:
+        for key in record.get("train", {}):
+            if pattern.match(key):
+                keys.add(key)
+    for key in sorted(keys):
+        match = pattern.match(key)
+        task, group = match.groups()
+        values = _series(records, "train", key)
+        if not values:
+            continue
+        result.setdefault(task, {})[group] = {
+            "first": values[0][1],
+            "last": values[-1][1],
+            "mean": sum(value for _, value in values) / len(values),
+            "max": max(value for _, value in values),
+        }
+    return result
+
+
+def _pool_summary(records, pool_names=None):
+    """Report latest held-out behavior per source pool, when instrumented."""
+    if not records:
+        return {}
+    latest = records[-1].get("validation", {})
+    names = pool_names or {}
+    task_metrics = {
+        "classification": (
+            "loss/total",
+            "head/classification/accuracy",
+            "head/classification/nll",
+        ),
+        "regression": (
+            "loss/total",
+            "head/regression/mae_hours",
+            "head/regression/relative_mae",
+            "head/regression/error_p90_hours",
+        ),
+    }
+    result = {}
+    for task, metrics in task_metrics.items():
+        rows = []
+        for key in latest:
+            match = re.match(rf"^task/{task}/pool/(\d+)/loss/total$", key)
+            if not match:
+                continue
+            pool = int(match.group(1))
+            row = {"pool": pool, "log": names.get(pool, str(pool))}
+            for metric in metrics:
+                value = _mean(latest, f"task/{task}/pool/{pool}/{metric}")
+                if value is not None:
+                    row[metric] = value
+            rows.append(row)
+        if rows:
+            result[task] = sorted(rows, key=lambda row: row["pool"])
     return result
 
 
@@ -209,7 +291,7 @@ def _loss_contributions(records):
     return result
 
 
-def analyze(summary):
+def analyze(summary, pool_names=None):
     records = summary.get("epochs", [])
     task_summary = {}
     for task in TASKS:
@@ -225,6 +307,8 @@ def analyze(summary):
             ),
         }
     optimization = _optimization_summary(records)
+    heads = _head_summary(records)
+    loss_contributions = _loss_contributions(records)
     findings = []
     for task, task_result in task_summary.items():
         overfit = task_result["automatic_overfitting"].get("overfitting_signal")
@@ -270,13 +354,99 @@ def analyze(summary):
                 "evidence": optimization["amp_overflow_fraction"],
             }
         )
+    if len(records) >= 3:
+        for task in TASKS:
+            total = _series(records, "train", f"task/{task}/loss/total")
+            if not total or abs(total[-1][1]) <= 1e-12:
+                continue
+            for metric, last_value in loss_contributions.get(task, {}).items():
+                if metric in {"loss/primary"} or last_value <= 0.0:
+                    continue
+                values = _series(records, "train", f"task/{task}/{metric}")
+                if len(values) < 3:
+                    continue
+                relative_change = abs(values[-1][1] - values[0][1]) / max(
+                    abs(values[0][1]), 1e-12
+                )
+                contribution = last_value / abs(total[-1][1])
+                if contribution >= 0.10 and relative_change < 0.05:
+                    findings.append(
+                        {
+                            "severity": "medium",
+                            "kind": "large_stagnant_auxiliary_loss",
+                            "task": task,
+                            "metric": metric,
+                            "evidence": {
+                                "last_contribution_fraction": contribution,
+                                "relative_change_since_first_epoch": relative_change,
+                                "first": values[0][1],
+                                "last": values[-1][1],
+                            },
+                        }
+                    )
+        last_k = _number(records[-1].get("schedule", {}), "retrieval_k")
+        if last_k and last_k > 0:
+            for task in TASKS:
+                metrics = heads.get(task, {})
+                selector = metrics.get(
+                    f"head/{task}/selector/log_weight/abs_mean", {}
+                )
+                support = metrics.get(
+                    f"head/{task}/selector/effective_support/mean", {}
+                )
+                log_weight = selector.get("validation_last")
+                effective_support = support.get("validation_last")
+                if (
+                    log_weight is not None
+                    and effective_support is not None
+                    and log_weight < 0.05
+                    and effective_support / last_k > 0.98
+                ):
+                    findings.append(
+                        {
+                            "severity": "medium",
+                            "kind": "near_uniform_example_selector",
+                            "task": task,
+                            "evidence": {
+                                "absolute_log_weight": log_weight,
+                                "effective_support": effective_support,
+                                "retrieval_k": last_k,
+                            },
+                        }
+                    )
+        class_metrics = heads.get("classification", {})
+        accuracy = class_metrics.get("head/classification/accuracy", {}).get(
+            "validation_last"
+        )
+        max_probability = class_metrics.get(
+            "head/classification/max_probability_mean", {}
+        ).get("validation_last")
+        if (
+            accuracy is not None
+            and max_probability is not None
+            and max_probability - accuracy > 0.10
+        ):
+            findings.append(
+                {
+                    "severity": "medium",
+                    "kind": "classification_overconfidence",
+                    "task": "classification",
+                    "evidence": {
+                        "validation_accuracy": accuracy,
+                        "validation_max_probability": max_probability,
+                        "confidence_gap": max_probability - accuracy,
+                    },
+                }
+            )
     return {
         "schema_version": 1,
         "epochs_analyzed": len(records),
         "tasks": task_summary,
         "optimization": optimization,
-        "heads": _head_summary(records),
-        "last_epoch_loss_contributions": _loss_contributions(records),
+        "heads": heads,
+        "gradients": _gradient_summary(records),
+        "pools": _pool_summary(records, pool_names),
+        "last_epoch_loss_contributions": loss_contributions,
         "findings": findings,
     }
 
@@ -305,6 +475,84 @@ def _curve_rows(summary):
             row[column] = _mean(block, key) if aggregate else _number(block, key)
         rows.append(row)
     return rows
+
+
+def _long_metric_rows(summary, metric_kind):
+    records = summary.get("epochs", [])
+    rows = []
+    for record in records:
+        epoch = int(record["epoch"])
+        for phase in ("train", "validation"):
+            section = record.get(phase, {})
+            for task in TASKS:
+                if metric_kind == "loss":
+                    metrics = list(LOSS_METRICS)
+                    if task == "regression":
+                        metrics.extend(
+                            f"loss/regression/{component}_weighted"
+                            for component in REGRESSION_COMPONENTS
+                        )
+                else:
+                    metrics = HEAD_METRICS[task]
+                for metric in metrics:
+                    value = _mean(section, f"task/{task}/{metric}")
+                    if value is not None:
+                        rows.append(
+                            {
+                                "epoch": epoch,
+                                "phase": phase,
+                                "task": task,
+                                "metric": metric,
+                                "mean": value,
+                            }
+                        )
+    return rows
+
+
+def _pool_curve_rows(summary, pool_names=None):
+    names = pool_names or {}
+    rows = []
+    pattern = re.compile(
+        r"^task/(classification|regression)/pool/(\d+)/(loss/total|head/.+)$"
+    )
+    wanted = {
+        "loss/total",
+        "head/classification/accuracy",
+        "head/classification/nll",
+        "head/regression/mae_hours",
+        "head/regression/relative_mae",
+        "head/regression/error_p90_hours",
+    }
+    for record in summary.get("epochs", []):
+        epoch = int(record["epoch"])
+        for key in record.get("validation", {}):
+            match = pattern.match(key)
+            if not match or match.group(3) not in wanted:
+                continue
+            task, pool_text, metric = match.groups()
+            pool = int(pool_text)
+            value = _mean(record["validation"], key)
+            if value is not None:
+                rows.append(
+                    {
+                        "epoch": epoch,
+                        "task": task,
+                        "pool": pool,
+                        "log": names.get(pool, str(pool)),
+                        "metric": metric,
+                        "mean": value,
+                    }
+                )
+    return rows
+
+
+def _write_csv(path, rows):
+    if not rows:
+        return
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def _markdown(analysis):
@@ -348,20 +596,38 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--summary", required=True)
     parser.add_argument("--output_dir", required=True)
+    parser.add_argument(
+        "--validation_manifest",
+        help=(
+            "Optional training_validation_split.json. If omitted, the analyzer "
+            "uses the file next to --summary when present."
+        ),
+    )
     args = parser.parse_args()
-    summary = json.loads(Path(args.summary).read_text(encoding="utf-8"))
-    analysis = analyze(summary)
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    manifest_path = (
+        Path(args.validation_manifest)
+        if args.validation_manifest
+        else summary_path.with_name("training_validation_split.json")
+    )
+    pool_names = {}
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        pool_names = {
+            int(row["pool_index"]): str(row["log"])
+            for row in manifest.get("logs", [])
+        }
+    analysis = analyze(summary, pool_names)
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     (output / "analysis.json").write_text(
         json.dumps(analysis, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    rows = _curve_rows(summary)
-    if rows:
-        with (output / "curves.csv").open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-            writer.writeheader()
-            writer.writerows(rows)
+    _write_csv(output / "curves.csv", _curve_rows(summary))
+    _write_csv(output / "loss_curves.csv", _long_metric_rows(summary, "loss"))
+    _write_csv(output / "head_curves.csv", _long_metric_rows(summary, "head"))
+    _write_csv(output / "pool_curves.csv", _pool_curve_rows(summary, pool_names))
     (output / "analysis.md").write_text(_markdown(analysis), encoding="utf-8")
     print(f"Wrote training analysis to {output}")
 

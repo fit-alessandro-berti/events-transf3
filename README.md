@@ -293,7 +293,8 @@ retain their original split/path.
 
 The full selected-architecture retraining audit starts from
 `configs/fmv3/training_debug_full_retrain.yaml`. The metric schema, validation
-semantics, JSONL artifacts, and overfitting rule are documented in
+semantics, per-source-pool aggregation, JSONL artifacts, analysis CSVs, and
+overfitting rule are documented in
 [`paper_docs/fmv3_training_diagnostics.md`](paper_docs/fmv3_training_diagnostics.md).
 
 “Time from the end” is not an input feature: the true time until case end is

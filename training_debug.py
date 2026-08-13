@@ -502,15 +502,28 @@ class TrainingDiagnostics:
     def start_epoch(self):
         self.epoch_accumulator = MetricAccumulator()
 
-    def add_step(self, epoch, step, task, expert, episode, metrics, *, sampled=False):
+    def add_step(
+        self,
+        epoch,
+        step,
+        task,
+        expert,
+        pool,
+        episode,
+        metrics,
+        *,
+        sampled=False,
+    ):
         if not self.enabled:
             return
         metrics = scalar_metrics(metrics)
         prefixes = (
             f"task/{task}",
             f"expert/{int(expert)}",
+            f"pool/{int(pool)}",
             f"episode/{episode}",
             f"task/{task}/expert/{int(expert)}",
+            f"task/{task}/pool/{int(pool)}",
         )
         self.epoch_accumulator.add(metrics, prefixes=prefixes)
         if sampled:
@@ -520,6 +533,7 @@ class TrainingDiagnostics:
                 "step": int(step),
                 "task": str(task),
                 "expert": int(expert),
+                "pool": int(pool),
                 "episode": str(episode),
                 "metrics": metrics,
             }

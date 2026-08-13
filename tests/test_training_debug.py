@@ -73,6 +73,31 @@ class TrainingDebugTests(unittest.TestCase):
         self.assertEqual(regression_metrics["head/regression/mae_hours"], 2.0)
         self.assertIn("head/regression/branch_1/weight_mean", regression_metrics)
 
+    def test_step_metrics_preserve_task_pool_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostics = TrainingDiagnostics(
+                directory, {"training_diagnostics": {"enabled": True}}
+            )
+            diagnostics.start_epoch()
+            diagnostics.add_step(
+                1,
+                0,
+                "regression",
+                3,
+                7,
+                "retrieval_regression",
+                {"loss/total": 2.5},
+                sampled=True,
+            )
+            summary = diagnostics.epoch_accumulator.summary()
+            self.assertEqual(
+                summary["task/regression/pool/7/loss/total"]["mean"], 2.5
+            )
+            record = json.loads(
+                (Path(directory) / "training_debug_steps.jsonl").read_text()
+            )
+            self.assertEqual(record["pool"], 7)
+
     def test_epoch_summary_detects_validation_degradation_after_patience(self):
         with tempfile.TemporaryDirectory() as directory:
             diagnostics = TrainingDiagnostics(

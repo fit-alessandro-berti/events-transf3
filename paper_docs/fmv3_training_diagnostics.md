@@ -31,7 +31,30 @@ An instrumented checkpoint directory contains:
 
 All files use `schema_version: 1`. Metric leaves in epoch aggregates contain
 `count`, `mean`, `std`, `min`, and `max`. Metrics appear globally and under
-`task/...`, `expert/...`, `episode/...`, and `task/.../expert/...` prefixes.
+`task/...`, `expert/...`, `pool/...`, `episode/...`,
+`task/.../expert/...`, and `task/.../pool/...` prefixes. The numeric pool index
+maps to the source log in `training_validation_split.json`; this makes an
+extreme process scale or error distribution visible instead of hiding it in an
+eleven-log mean. Sampled step records also persist `pool` directly.
+
+`analyze_training_debug.py` converts the verbose history into:
+
+| File | Contents |
+|---|---|
+| `analysis.json` | Best epochs, generalization signals, bottlenecks, head/loss endpoints, gradient groups, and latest per-pool results |
+| `analysis.md` | Short human-readable decision summary |
+| `curves.csv` | Core task loss, accuracy/MAE, clipping, update success, and LR curves |
+| `loss_curves.csv` | Long-form primary and weighted auxiliary/component losses |
+| `head_curves.csv` | Long-form classifier, regressor, selector, branch, and calibration behavior |
+| `pool_curves.csv` | Held-out source-log loss and task metrics when pool-level telemetry is available |
+
+The analyzer automatically locates the validation manifest next to the summary:
+
+```bash
+python analyze_training_debug.py \
+  --summary checkpoints/fmv3/training_debug_full_retrain/training_debug_summary.json \
+  --output_dir evaluation_results/training_debug/full_retrain_baseline
+```
 
 ## Collected signals
 
@@ -105,6 +128,13 @@ held-out loss and flags overfitting only when validation has degraded beyond a
 configured relative tolerance for the configured patience while training loss
 continues to improve. The flag is a screening diagnostic, not an automatic
 stopping action.
+
+The analyzer additionally screens for large auxiliary losses that stay nearly
+constant, selectors whose effective support remains indistinguishable from
+uniform retrieval, classifier overconfidence, frequent gradient clipping, and
+AMP overflow. These are hypotheses for a matched intervention, not proof that
+a component should be removed: scalar loss size and gradient influence are
+reported separately for that reason.
 
 ## Full retraining audit
 

@@ -47,6 +47,37 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
             2,
         )
 
+    def test_analysis_reports_pool_and_stagnant_auxiliary(self):
+        records = []
+        for epoch in range(1, 4):
+            records.append(
+                {
+                    "epoch": epoch,
+                    "schedule": {"retrieval_k": 10},
+                    "train": {
+                        "task/classification/loss/total": _metric(2.0),
+                        "task/classification/loss/primary": _metric(1.3),
+                        "task/classification/loss/routing_weighted": _metric(0.7),
+                    },
+                    "validation": {
+                        "task/classification/loss/total": _metric(2.1),
+                        "task/classification/pool/4/loss/total": _metric(3.0),
+                        "task/classification/pool/4/head/classification/accuracy": (
+                            _metric(0.2)
+                        ),
+                    },
+                    "epoch_metrics": {},
+                    "updates": {},
+                }
+            )
+        result = analyze({"epochs": records}, {4: "source.xes.gz"})
+        kinds = {finding["kind"] for finding in result["findings"]}
+        self.assertIn("large_stagnant_auxiliary_loss", kinds)
+        self.assertEqual(result["pools"]["classification"][0]["pool"], 4)
+        self.assertEqual(
+            result["pools"]["classification"][0]["log"], "source.xes.gz"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
