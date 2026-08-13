@@ -206,6 +206,14 @@ or lowest reweighted training objective as universally optimal. Compact final
 curves and the machine-readable finding set are committed under
 `evaluation_results/training_debug/full_retrain_baseline`.
 
+The already-running baseline process predated the counter-label correction
+that separates finite losses from applied AMP optimizer steps. Its
+`successful_steps` field therefore means 6,000 finite-loss steps. The raw AMP
+metric records five scale-warm-up overflows in epoch 1 and none afterwards, so
+the applied-step total is 5,995. All matched ablations were launched after the
+correction and persist finite, applied, skipped, overflow, and non-finite
+counters separately.
+
 ### Matched diagnostic ablations
 
 Four one-factor, full-schedule runs and one head-focused curriculum are
