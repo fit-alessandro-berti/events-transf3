@@ -20,12 +20,18 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
                     "epoch": epoch,
                     "train": {
                         "task/classification/loss/total": _metric(train_loss),
+                        "task/classification/head/classification/nll": _metric(
+                            train_loss
+                        ),
                         "optimization/gradient_clip_fraction": _metric(0.5),
                         "optimization/gradient_total_preclip": _metric(2.0),
                         "optimization/amp_overflow": _metric(0.0),
                     },
                     "validation": {
-                        "task/classification/loss/total": _metric(validation_loss)
+                        "task/classification/loss/total": _metric(validation_loss),
+                        "task/classification/head/classification/nll": _metric(
+                            validation_loss
+                        ),
                     },
                     "epoch_metrics": {"step_success_fraction": 1.0},
                     "updates": {},
@@ -34,6 +40,10 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         result = analyze(
             {
                 "epochs": records,
+                "configuration": {
+                    "overfitting_patience": 2,
+                    "overfitting_relative_tolerance": 0.02,
+                },
                 "generalization": {
                     "classification": {"overfitting_signal": True}
                 },
@@ -45,6 +55,11 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         self.assertEqual(
             result["tasks"]["classification"]["validation_loss"]["best_epoch"],
             2,
+        )
+        self.assertTrue(
+            result["tasks"]["classification"]["invariant_overfitting"][
+                "overfitting_signal"
+            ]
         )
 
     def test_analysis_reports_pool_and_stagnant_auxiliary(self):

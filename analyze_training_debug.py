@@ -130,6 +130,53 @@ def _learning_phase_summary(series):
     }
 
 
+def _invariant_overfitting_summary(records, task, configuration):
+    metric = (
+        "head/classification/nll"
+        if task == "classification"
+        else "head/regression/mae_hours"
+    )
+    key = f"task/{task}/{metric}"
+    train = dict(_series(records, "train", key))
+    validation = _series(records, "validation", key)
+    curve = [
+        (epoch, train[epoch], value)
+        for epoch, value in validation
+        if epoch in train
+    ]
+    if not curve:
+        return {}
+    patience = max(1, int((configuration or {}).get("overfitting_patience", 3)))
+    tolerance = max(
+        0.0,
+        float(
+            (configuration or {}).get("overfitting_relative_tolerance", 0.02)
+        ),
+    )
+    best_index = min(range(len(curve)), key=lambda index: curve[index][2])
+    best_epoch, best_train, best_validation = curve[best_index]
+    last_epoch, last_train, last_validation = curve[-1]
+    degradation = (last_validation - best_validation) / max(
+        abs(best_validation), 1e-12
+    )
+    train_improvement = (best_train - last_train) / max(abs(best_train), 1e-12)
+    enough_epochs = len(curve) - 1 - best_index >= patience
+    return {
+        "metric": metric,
+        "best_validation_epoch": best_epoch,
+        "best_validation_value": best_validation,
+        "last_epoch": last_epoch,
+        "last_validation_value": last_validation,
+        "relative_validation_degradation": degradation,
+        "relative_train_improvement_since_best": train_improvement,
+        "overfitting_signal": bool(
+            enough_epochs and degradation > tolerance and train_improvement > 0.0
+        ),
+        "patience_epochs": patience,
+        "relative_tolerance": tolerance,
+    }
+
+
 def _optimization_summary(records):
     result = {}
     for name, section, key, aggregate in (
@@ -317,6 +364,7 @@ def _loss_contributions(records):
 
 def analyze(summary, pool_names=None):
     records = summary.get("epochs", [])
+    diagnostics_configuration = summary.get("configuration", {})
     task_summary = {}
     for task in TASKS:
         task_summary[task] = {
@@ -329,20 +377,32 @@ def analyze(summary, pool_names=None):
             "automatic_overfitting": summary.get("generalization", {}).get(
                 task, {}
             ),
+            "invariant_overfitting": _invariant_overfitting_summary(
+                records, task, diagnostics_configuration
+            ),
         }
     optimization = _optimization_summary(records)
     heads = _head_summary(records)
     loss_contributions = _loss_contributions(records)
     findings = []
     for task, task_result in task_summary.items():
-        overfit = task_result["automatic_overfitting"].get("overfitting_signal")
+        invariant_overfit = task_result["invariant_overfitting"].get(
+            "overfitting_signal"
+        )
+        objective_overfit = task_result["automatic_overfitting"].get(
+            "overfitting_signal"
+        )
+        overfit = invariant_overfit or objective_overfit
         if overfit:
             findings.append(
                 {
                     "severity": "high",
                     "kind": "overfitting",
                     "task": task,
-                    "evidence": task_result["automatic_overfitting"],
+                    "evidence": {
+                        "invariant": task_result["invariant_overfitting"],
+                        "objective": task_result["automatic_overfitting"],
+                    },
                 }
             )
         validation = task_result["validation_loss"]
@@ -627,6 +687,8 @@ def _markdown(analysis):
                 f"{validation.get('fraction_of_best_improvement_reached_by_two_thirds')}",
                 "- Automatic overfitting signal: "
                 f"{result['automatic_overfitting'].get('overfitting_signal')}",
+                "- Invariant-metric overfitting signal: "
+                f"{result['invariant_overfitting'].get('overfitting_signal')}",
                 "",
             ]
         )

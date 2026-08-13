@@ -133,6 +133,12 @@ configured relative tolerance for the configured patience while training loss
 continues to improve. The flag is a screening diagnostic, not an automatic
 stopping action.
 
+The offline analyzer applies the same conservative rule to invariant output
+metrics as well: raw classifier NLL and raw-hour regression MAE. This matters
+when a reweighted auxiliary/composite objective improves while the deployed
+error measure degrades. Both the objective and invariant flags remain in the
+analysis output.
+
 The analyzer additionally screens for large auxiliary losses that stay nearly
 constant, selectors whose effective support remains indistinguishable from
 uniform retrieval, classifier overconfidence, frequent gradient clipping, and
