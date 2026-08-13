@@ -78,6 +78,15 @@ fmv3_head:
   regression_embedding_adapter_enabled: false
   regression_embedding_adapter_hidden_dim: 64
   regression_embedding_adapter_dropout: 0.0
+  # Optional task-specific support selectors. Each learns a bounded residual
+  # log-weight over already-retrieved examples and starts at exact identity.
+  example_selector_hidden_dim: 16
+  classification_example_selector_enabled: false
+  classification_example_selector_hidden_dim: 16
+  classification_example_selector_max_log_weight: 2.0
+  regression_example_selector_enabled: false
+  regression_example_selector_hidden_dim: 16
+  regression_example_selector_max_log_weight: 2.0
   regression_mae_weight: 0.5
   regression_rmse_weight: 0.5
   # Promoted multi-metric primary objective (renormalized with MAE/RMSE).

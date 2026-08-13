@@ -1,0 +1,12 @@
+# Classification-only diagnostic for the neural head without structured-memory
+# fusion. It is paired with example_selector_knn_screen_eval.yaml.
+extends: loss_refinement_screen_eval.yaml
+experiment_name: example_selector_head_only_reference
+fmv3_evaluation:
+  tasks: [classification]
+  evaluation_profiles:
+    - name: neural_head_only
+      retrieval_modes: [configured]
+      prior_modes: [balanced]
+      prior_strengths: [1.0]
+      retrieval_k: [20]

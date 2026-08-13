@@ -1,0 +1,13 @@
+# Classification-only reference screen for the unweighted foundation-kNN
+# decision rule. It uses the same cases, budgets, queries, and k=20 as the
+# learned-head selector screen.
+extends: loss_refinement_screen_eval.yaml
+experiment_name: example_selector_knn_reference
+fmv3_evaluation:
+  tasks: [classification]
+  evaluation_profiles:
+    - name: foundation_knn_reference
+      retrieval_modes: [foundation_knn]
+      prior_modes: [balanced]
+      prior_strengths: [1.0]
+      retrieval_k: [20]

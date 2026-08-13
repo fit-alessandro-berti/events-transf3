@@ -126,7 +126,12 @@ class FMV3ProtocolTests(unittest.TestCase):
             coverage_fallback_margin=0.7,
             fallback_inference_temperature=0.4,
             prior_mode="balanced",
+            classification_example_selector_enabled=True,
         )
+        with torch.no_grad():
+            head.classification_example_selector.network[-1].weight.normal_(
+                mean=0.0, std=0.2
+            )
         head.eval()
         pool = torch.tensor([
             [1.0, 0.0], [0.8, 0.2], [0.0, 1.0], [0.1, 0.9], [-1.0, 0.0]

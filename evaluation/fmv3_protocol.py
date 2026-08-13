@@ -589,12 +589,23 @@ def _batched_head_probabilities(
     query = F.normalize(query, p=2, dim=1)
     pool = F.normalize(pool, p=2, dim=1)
     local = pool[local_positions]
+    selector_local = local
+    selector_query = query
     if selected_mode == "legacy_soft_knn":
         center = local.mean(dim=1, keepdim=True)
         centered_local = F.normalize(local - center, p=2, dim=2)
         centered_query = F.normalize(query - center.squeeze(1), p=2, dim=1)
         similarities = torch.einsum("qd,qkd->qk", centered_query, centered_local)
-        attention = F.softmax(similarities * head.logit_scale.clamp(1.0, 20.0), dim=1)
+        selection_logits = head.classification_selection_logits(
+            selector_local,
+            local_labels,
+            selector_query,
+            base_similarities=similarities,
+        )
+        attention = F.softmax(
+            similarities * head.logit_scale.clamp(1.0, 20.0) + selection_logits,
+            dim=1,
+        )
         mass = attention.new_zeros((num_queries, num_classes))
         mass.scatter_add_(1, class_masks.long().argmax(dim=2), attention)
         logits = torch.log(mass.clamp_min(1e-8)) + head.count_prior * torch.log(local_counts.clamp_min(1.0))
@@ -606,7 +617,14 @@ def _batched_head_probabilities(
         local_center = local.mean(dim=1, keepdim=True)
         local = F.normalize(local - local_center, p=2, dim=2)
         local_query = F.normalize(query - local_center.squeeze(1), p=2, dim=1)
-    local_similarities = torch.einsum("qd,qkd->qk", local_query, local) * head.local_scale
+    raw_local_similarities = torch.einsum("qd,qkd->qk", local_query, local)
+    selection_logits = head.classification_selection_logits(
+        selector_local,
+        local_labels,
+        selector_query,
+        base_similarities=raw_local_similarities,
+    )
+    local_similarities = raw_local_similarities * head.local_scale + selection_logits
     local_evidence = query.new_full((num_queries, num_classes), -torch.inf)
     gamma = head.evidence_gamma
     for column in range(num_classes):

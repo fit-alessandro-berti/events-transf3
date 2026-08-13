@@ -26,6 +26,32 @@ def _as_bool(value) -> bool:
     return bool(value)
 
 
+class LearnedExampleSelector(nn.Module):
+    """Bounded, zero-initialized log-weights for support-example trust.
+
+    The selector consumes only interpretable scalar features computed from the
+    query/support geometry and observed support labels. Its output is added to
+    the head's existing similarity logits, so positive values retain an
+    example and negative values suppress it. Zero initialization makes an
+    enabled selector exactly reproduce the historical head before training.
+    """
+
+    def __init__(self, feature_dim, hidden_dim=16, max_log_weight=2.0):
+        super().__init__()
+        self.max_log_weight = max(float(max_log_weight), 0.0)
+        self.network = nn.Sequential(
+            nn.Linear(int(feature_dim), max(int(hidden_dim), 1)),
+            nn.GELU(),
+            nn.Linear(max(int(hidden_dim), 1), 1),
+        )
+        nn.init.zeros_(self.network[-1].weight)
+        nn.init.zeros_(self.network[-1].bias)
+
+    def forward(self, features):
+        raw = self.network(features).squeeze(-1)
+        return self.max_log_weight * torch.tanh(raw)
+
+
 class LearnedTimeTransformBank(nn.Module):
     """Learned monotone target transforms for scale-robust time regression.
 
@@ -176,7 +202,13 @@ class LearnedTimeTransformBank(nn.Module):
         base = (1.0 + powers * values).clamp_min(1e-8)
         return scales * torch.expm1(torch.log(base) / powers)
 
-    def predict(self, similarities, support_hours, augmentation_factor=None):
+    def predict(
+        self,
+        similarities,
+        support_hours,
+        augmentation_factor=None,
+        selection_logits=None,
+    ):
         """Predict raw hours from similarities and query-specific support labels.
 
         ``similarities`` is ``[query, support]``. ``support_hours`` may be a
@@ -191,9 +223,10 @@ class LearnedTimeTransformBank(nn.Module):
         augmented_hours = support_hours * factor
         transformed = self.transform(augmented_hours)  # [branch, query, support]
         branch_scales = self.branch_logit_scales.clamp(0.1, 100.0)
-        attention = F.softmax(
-            similarities.unsqueeze(0) * branch_scales[:, None, None], dim=-1
-        )
+        attention_logits = similarities.unsqueeze(0) * branch_scales[:, None, None]
+        if selection_logits is not None:
+            attention_logits = attention_logits + selection_logits.unsqueeze(0)
+        attention = F.softmax(attention_logits, dim=-1)
         transformed_predictions = (attention * transformed).sum(dim=-1)
         branch_predictions = self.inverse(transformed_predictions) / factor
         raw_mean = (attention * support_hours.unsqueeze(0)).sum(dim=-1)
@@ -283,6 +316,35 @@ class PrototypicalHead(nn.Module):
         self.logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
         self.logit_scale.requires_grad_(self.learn_temperature)
         self.reg_logit_scale = nn.Parameter(torch.tensor(float(init_logit_scale)))
+        selector_hidden = max(int(config.get("example_selector_hidden_dim", 16)), 1)
+        self.classification_example_selector_enabled = _as_bool(
+            config.get("classification_example_selector_enabled", False)
+        )
+        self.regression_example_selector_enabled = _as_bool(
+            config.get("regression_example_selector_enabled", False)
+        )
+        self.classification_example_selector = None
+        self.regression_example_selector = None
+        if self.classification_example_selector_enabled:
+            self.classification_example_selector = LearnedExampleSelector(
+                feature_dim=6,
+                hidden_dim=int(
+                    config.get("classification_example_selector_hidden_dim", selector_hidden)
+                ),
+                max_log_weight=float(
+                    config.get("classification_example_selector_max_log_weight", 2.0)
+                ),
+            )
+        if self.regression_example_selector_enabled:
+            self.regression_example_selector = LearnedExampleSelector(
+                feature_dim=7,
+                hidden_dim=int(
+                    config.get("regression_example_selector_hidden_dim", selector_hidden)
+                ),
+                max_log_weight=float(
+                    config.get("regression_example_selector_max_log_weight", 2.0)
+                ),
+            )
         self.regression_mode = str(config.get("regression_mode", "sqrt_knn")).lower()
         self.regression_mode = {
             "raw_knn": "raw_hours_knn",
@@ -410,23 +472,183 @@ class PrototypicalHead(nn.Module):
     def _class_counts(labels: torch.Tensor, classes: torch.Tensor) -> torch.Tensor:
         return torch.stack([(labels == cls).sum() for cls in classes]).float()
 
+    @staticmethod
+    def _expand_local_support(support, labels, query):
+        """Normalize local inputs to query-specific ``[query, support, ...]``."""
+        if support.ndim == 2:
+            support = support.unsqueeze(0).expand(query.size(0), -1, -1)
+        if labels.ndim == 1:
+            labels = labels.unsqueeze(0).expand(query.size(0), -1)
+        if support.ndim != 3 or labels.ndim != 2:
+            raise ValueError("Local support must be [support, dim] or [query, support, dim]")
+        if support.shape[:2] != labels.shape or support.size(0) != query.size(0):
+            raise ValueError("Support features, labels, and queries must have matching shapes")
+        return support, labels
+
+    def classification_selection_logits(
+        self, support, labels, query, base_similarities=None, return_features=False
+    ):
+        """Score retrieved classification examples without using query labels.
+
+        Features, in order, are raw cosine similarity, the head's centered
+        cosine similarity, its within-neighborhood z-score, support centrality,
+        leave-one-out same-class coherence, and normalized class support.
+        """
+        support, labels = self._expand_local_support(support, labels, query)
+        if self.classification_example_selector is None:
+            zeros = support.new_zeros(support.shape[:2])
+            return (zeros, None) if return_features else zeros
+        support = _l2_normalize(support)
+        query = _l2_normalize(query)
+        raw_similarities = torch.einsum("qd,qkd->qk", query, support)
+        if base_similarities is None:
+            base_similarities = raw_similarities
+        relative_similarity = torch.tanh(
+            (base_similarities - base_similarities.mean(dim=1, keepdim=True))
+            / base_similarities.std(dim=1, keepdim=True, correction=0).clamp_min(1e-4)
+        )
+        neighborhood_center = _l2_normalize(support.mean(dim=1))
+        centrality = torch.einsum("qkd,qd->qk", support, neighborhood_center)
+
+        same_class = labels.unsqueeze(2).eq(labels.unsqueeze(1))
+        eye = torch.eye(labels.size(1), device=labels.device, dtype=torch.bool)
+        same_class = same_class & ~eye.unsqueeze(0)
+        same_counts = same_class.sum(dim=2)
+        same_sum = torch.einsum("qkj,qjd->qkd", same_class.float(), support)
+        same_prototype = _l2_normalize(
+            same_sum / same_counts.clamp_min(1).unsqueeze(2)
+        )
+        same_class_coherence = torch.einsum("qkd,qkd->qk", support, same_prototype)
+        same_class_coherence = torch.where(
+            same_counts > 0, same_class_coherence, torch.zeros_like(same_class_coherence)
+        )
+        class_counts = same_counts + 1
+        normalized_class_support = torch.log1p(class_counts.float()) / math.log1p(
+            max(labels.size(1), 1)
+        )
+        features = torch.stack(
+            [
+                raw_similarities,
+                base_similarities,
+                relative_similarity,
+                centrality,
+                same_class_coherence,
+                normalized_class_support,
+            ],
+            dim=-1,
+        )
+        logits = self.classification_example_selector(features)
+        return (logits, features) if return_features else logits
+
+    def regression_selection_logits(
+        self, support, labels, query, base_similarities=None, return_features=False
+    ):
+        """Score retrieved regression examples from geometry and target agreement.
+
+        The selector uses no query target. Its last three features describe how
+        far each observed support target lies from the neighborhood median,
+        whether its nearest support neighbor agrees, and on which side of the
+        median it lies. Log targets and a robust MAD scale make these features
+        comparable across logs measured in very different time units.
+        """
+        support, labels = self._expand_local_support(support, labels, query)
+        if self.regression_example_selector is None:
+            zeros = support.new_zeros(support.shape[:2])
+            return (zeros, None) if return_features else zeros
+        support = _l2_normalize(support)
+        query = _l2_normalize(query)
+        raw_similarities = torch.einsum("qd,qkd->qk", query, support)
+        if base_similarities is None:
+            base_similarities = raw_similarities
+        relative_similarity = torch.tanh(
+            (base_similarities - base_similarities.mean(dim=1, keepdim=True))
+            / base_similarities.std(dim=1, keepdim=True, correction=0).clamp_min(1e-4)
+        )
+        neighborhood_center = _l2_normalize(support.mean(dim=1))
+        centrality = torch.einsum("qkd,qd->qk", support, neighborhood_center)
+
+        target_values = self.regression_labels_to_output(labels).clamp_min(0.0)
+        log_targets = torch.log1p(target_values)
+        target_median = log_targets.median(dim=1, keepdim=True).values
+        mad = (log_targets - target_median).abs().median(dim=1, keepdim=True).values
+        robust_scale = (1.4826 * mad).clamp_min(0.10)
+        signed_target_position = torch.tanh(
+            (log_targets - target_median) / robust_scale
+        )
+        target_deviation = signed_target_position.abs()
+
+        if support.size(1) > 1:
+            pair_similarity = torch.einsum("qkd,qjd->qkj", support, support)
+            eye = torch.eye(
+                support.size(1), device=support.device, dtype=torch.bool
+            )
+            pair_similarity = pair_similarity.masked_fill(eye.unsqueeze(0), -torch.inf)
+            nearest = pair_similarity.argmax(dim=2)
+            nearest_targets = torch.gather(log_targets, 1, nearest)
+            nearest_target_disagreement = torch.tanh(
+                (log_targets - nearest_targets).abs() / robust_scale
+            )
+        else:
+            nearest_target_disagreement = torch.zeros_like(log_targets)
+        features = torch.stack(
+            [
+                raw_similarities,
+                base_similarities,
+                relative_similarity,
+                centrality,
+                target_deviation,
+                nearest_target_disagreement,
+                signed_target_position,
+            ],
+            dim=-1,
+        )
+        logits = self.regression_example_selector(features)
+        return (logits, features) if return_features else logits
+
+    @staticmethod
+    def _selection_diagnostics(selection_logits, attention):
+        trust = F.softmax(selection_logits, dim=-1)
+        effective_count = trust.square().sum(dim=-1).clamp_min(1e-8).reciprocal()
+        return {
+            "selection_logits": selection_logits,
+            "selection_trust": trust,
+            "selection_effective_count": effective_count,
+            "selection_attention": attention,
+        }
+
     def _legacy_soft_knn(self, support, labels, query):
         unique_classes, inv = torch.unique(labels, sorted=True, return_inverse=True)
-        sims = (query @ support.t()) * self.logit_scale.clamp(1.0, 20.0)
+        raw_sims = query @ support.t()
+        selection_logits = self.classification_selection_logits(
+            support, labels, query, base_similarities=raw_sims
+        )
+        sims = raw_sims * self.logit_scale.clamp(1.0, 20.0) + selection_logits
         attn = F.softmax(sims, dim=1)
         mass = torch.zeros(query.size(0), unique_classes.size(0), device=query.device)
         mass.scatter_add_(1, inv.unsqueeze(0).expand(query.size(0), -1), attn)
         logits = torch.log(mass.clamp_min(1e-8))
         counts = torch.bincount(inv, minlength=unique_classes.numel()).float().clamp_min(1.0)
         logits = logits + self.count_prior * torch.log(counts).unsqueeze(0)
-        return logits, unique_classes, F.softmax(logits, dim=-1), {
-            "local_counts": counts, "pool_counts": counts, "mode": "legacy_soft_knn"
+        diagnostics = {
+            "local_counts": counts,
+            "pool_counts": counts,
+            "mode": "legacy_soft_knn",
+            **self._selection_diagnostics(selection_logits, attn),
         }
+        return logits, unique_classes, F.softmax(logits, dim=-1), diagnostics
 
     def _local_evidence(self, support, labels, query, classes):
+        selector_support, selector_query = support, query
         if self.local_centering:
             support, query = self._center_and_renorm(support, query)
-        sims = (query @ support.t()) * self.local_scale
+        raw_sims = query @ support.t()
+        selection_logits = self.classification_selection_logits(
+            selector_support,
+            labels,
+            selector_query,
+            base_similarities=raw_sims,
+        )
+        sims = raw_sims * self.local_scale + selection_logits
         evidence = torch.full((query.size(0), classes.numel()), -1e4, device=query.device)
         counts = self._class_counts(labels, classes).to(query.device)
         gamma = self.evidence_gamma
@@ -434,7 +656,7 @@ class PrototypicalHead(nn.Module):
             mask = labels == cls
             if mask.any():
                 evidence[:, idx] = torch.logsumexp(sims[:, mask], dim=1) - gamma * torch.log(counts[idx])
-        return evidence, counts, sims
+        return evidence, counts, sims, selection_logits
 
     def _global_evidence(self, support, labels, query, classes):
         counts = self._class_counts(labels, classes).to(query.device)
@@ -564,7 +786,9 @@ class PrototypicalHead(nn.Module):
         if classes.numel() == 0:
             return (None, None, None, {}) if return_diagnostics else (None, None, None)
 
-        local, local_counts, local_sims = self._local_evidence(local_support, support_labels, query, classes)
+        local, local_counts, local_sims, selection_logits = self._local_evidence(
+            local_support, support_labels, query, classes
+        )
         global_evidence, pool_counts, prototypes, prototype_variances = self._global_evidence(
             pool_features, pool_labels, query, classes
         )
@@ -621,6 +845,9 @@ class PrototypicalHead(nn.Module):
             "gate": gate,
             "prototypes": prototypes,
             "prototype_variances": prototype_variances,
+            **self._selection_diagnostics(
+                selection_logits, F.softmax(local_sims, dim=1)
+            ),
         }
         result = (output_logits, classes, confidence, diagnostics)
         return result if return_diagnostics else result[:3]
@@ -937,15 +1164,25 @@ class PrototypicalHead(nn.Module):
         centered_support = _l2_normalize(support - center)
         centered_query = _l2_normalize(query - center.squeeze(1))
         similarities = torch.einsum("qd,qkd->qk", centered_query, centered_support)
+        selection_logits = self.regression_selection_logits(
+            support,
+            support_labels,
+            query,
+            base_similarities=similarities,
+        )
         if self.regression_uses_time_transform_bank:
             support_hours = self.regression_labels_to_output(support_labels)
             prediction, diagnostics = self.time_transform_bank.predict(
-                similarities, support_hours, augmentation_factor=augmentation_factor
+                similarities,
+                support_hours,
+                augmentation_factor=augmentation_factor,
+                selection_logits=selection_logits,
             )
             std = diagnostics["std_hours"]
+            selection_attention = diagnostics["branch_attention"].mean(dim=0)
         elif self.regression_outputs_hours:
             scale = self.reg_logit_scale.clamp(1.0, 100.0)
-            weights = F.softmax(similarities * scale, dim=1)
+            weights = F.softmax(similarities * scale + selection_logits, dim=1)
             targets = self.regression_labels_to_output(support_labels)
             if targets.ndim == 1:
                 targets = targets.unsqueeze(0).expand(query.size(0), -1)
@@ -953,9 +1190,10 @@ class PrototypicalHead(nn.Module):
             variance = (weights * (targets - prediction.unsqueeze(1)).square()).sum(dim=1)
             std = torch.sqrt(variance + 1e-8)
             diagnostics = {"attention": weights, "std_hours": std}
+            selection_attention = weights
         else:
             scale = self.reg_logit_scale.clamp(1.0, 100.0)
-            weights = F.softmax(similarities * scale, dim=1)
+            weights = F.softmax(similarities * scale + selection_logits, dim=1)
             targets = support_labels.float()
             if targets.ndim == 1:
                 targets = targets.unsqueeze(0).expand(query.size(0), -1)
@@ -963,10 +1201,14 @@ class PrototypicalHead(nn.Module):
             variance = (weights * (targets - prediction.unsqueeze(1)).square()).sum(dim=1)
             std = torch.sqrt(variance + 1e-8)
             diagnostics = {"attention": weights, "std": std}
+            selection_attention = weights
         confidence = (1.0 / (1.0 + std)) * (
             (similarities.max(dim=1).values + 1.0) / 2.0
         ).clamp(0.0, 1.0)
         diagnostics["similarities"] = similarities
+        diagnostics.update(
+            self._selection_diagnostics(selection_logits, selection_attention)
+        )
         return prediction, confidence.clamp(0.0, 1.0), diagnostics
 
     def forward_regression(

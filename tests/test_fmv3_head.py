@@ -108,6 +108,113 @@ class FMV3HeadTests(unittest.TestCase):
             evaluation["regression_calibration_mix_by_budget"], {2: 0.0, 4: 0.6}
         )
 
+    def test_example_selectors_start_as_exact_identity_and_are_task_scoped(self):
+        classification_plain = PrototypicalHead(
+            classification_mode="local",
+            local_centering=True,
+            count_normalization_gamma=0.0,
+        )
+        classification_selected = PrototypicalHead(
+            classification_mode="local",
+            local_centering=True,
+            count_normalization_gamma=0.0,
+            classification_example_selector_enabled=True,
+        )
+        support = torch.randn(7, 8)
+        labels = torch.tensor([0, 0, 0, 1, 1, 2, 2])
+        query = torch.randn(3, 8)
+        plain_logits, plain_classes, _ = classification_plain.forward_classification(
+            support, labels, query
+        )
+        selected_logits, selected_classes, _, diagnostics = (
+            classification_selected.forward_classification(
+                support, labels, query, return_diagnostics=True
+            )
+        )
+        torch.testing.assert_close(selected_logits, plain_logits, atol=0.0, rtol=0.0)
+        torch.testing.assert_close(selected_classes, plain_classes, atol=0.0, rtol=0.0)
+        torch.testing.assert_close(
+            diagnostics["selection_logits"], torch.zeros(3, 7), atol=0.0, rtol=0.0
+        )
+
+        regression_plain = PrototypicalHead(regression_mode="raw_hours_knn")
+        regression_selected = PrototypicalHead(
+            regression_mode="raw_hours_knn",
+            regression_example_selector_enabled=True,
+        )
+        regression_labels = torch.sqrt(torch.rand(3, 7) * 100.0 + 0.1)
+        local = support.unsqueeze(0).expand(3, -1, -1)
+        plain_prediction, _ = regression_plain.forward_regression_batched(
+            local, regression_labels, query
+        )
+        selected_prediction, _, regression_diagnostics = (
+            regression_selected.forward_regression_batched(
+                local, regression_labels, query, return_diagnostics=True
+            )
+        )
+        torch.testing.assert_close(
+            selected_prediction, plain_prediction, atol=0.0, rtol=0.0
+        )
+        torch.testing.assert_close(
+            regression_diagnostics["selection_effective_count"],
+            torch.full((3,), 7.0),
+            atol=1e-5,
+            rtol=1e-5,
+        )
+
+        model = nn.ModuleDict({"proto_head": PrototypicalHead(
+            classification_example_selector_enabled=True,
+            regression_example_selector_enabled=True,
+        )})
+        classification_trainable = configure_trainable_scope(
+            model, "classification_example_selector"
+        )
+        self.assertTrue(classification_trainable)
+        self.assertTrue(all(
+            "classification_example_selector." in name
+            for name in classification_trainable
+        ))
+        regression_trainable = configure_trainable_scope(
+            model, "regression_example_selector"
+        )
+        self.assertTrue(regression_trainable)
+        self.assertTrue(all(
+            "regression_example_selector." in name for name in regression_trainable
+        ))
+
+    def test_regression_selector_can_suppress_a_target_outlier(self):
+        plain = PrototypicalHead(regression_mode="raw_hours_knn")
+        selected = PrototypicalHead(
+            regression_mode="raw_hours_knn",
+            regression_example_selector_enabled=True,
+            regression_example_selector_hidden_dim=1,
+            regression_example_selector_max_log_weight=6.0,
+        )
+        first = selected.regression_example_selector.network[0]
+        last = selected.regression_example_selector.network[-1]
+        with torch.no_grad():
+            first.weight.zero_()
+            first.bias.zero_()
+            first.weight[0, 4] = 5.0  # robust target-deviation feature
+            last.weight.fill_(-3.0)
+            last.bias.zero_()
+        support = torch.tensor([[1.0, 0.0]] * 3)
+        labels = torch.sqrt(torch.tensor([1.0, 1.0, 100.0]))
+        query = torch.tensor([[1.0, 0.0]])
+        plain_prediction, _ = plain.forward_regression(support, labels, query)
+        selected_prediction, _, diagnostics = selected.forward_regression(
+            support, labels, query, return_diagnostics=True
+        )
+        self.assertLess(
+            float(selected_prediction.detach()), float(plain_prediction.detach())
+        )
+        self.assertLess(
+            float(diagnostics["selection_logits"][0, 2].detach()),
+            float(diagnostics["selection_logits"][0, 0].detach()),
+        )
+        self.assertGreater(float(selected_prediction.detach()), 0.9)
+        self.assertLess(float(selected_prediction.detach()), 2.0)
+
     def test_count_neutral_local_evidence_removes_duplicate_bias(self):
         head = PrototypicalHead(
             classification_mode="local",

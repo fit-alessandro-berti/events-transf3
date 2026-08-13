@@ -2,10 +2,10 @@
 """Audit and merge independently trained classification/regression adapters.
 
 The classification run is allowed to differ from the base only in its
-classification embedding adapter. The regression run is allowed to differ
-only in its regression embedding adapter, time-transform bank, and regression
-expert-confidence head. The script refuses the merge if either run changed a
-shared, routing, or out-of-scope tensor.
+classification embedding adapter and example selector. The regression run is
+allowed to differ only in its regression embedding adapter, example selector,
+time-transform bank, and regression expert-confidence head. The script refuses
+the merge if either run changed a shared, routing, or out-of-scope tensor.
 """
 
 from __future__ import annotations
@@ -19,11 +19,15 @@ import torch
 from config_utils import load_yaml_config, save_yaml_config
 
 
-CLASSIFICATION_KEYS = (".classification_embedding_adapter.",)
+CLASSIFICATION_KEYS = (
+    ".classification_embedding_adapter.",
+    ".proto_head.classification_example_selector.",
+)
 REGRESSION_KEYS = (
     ".regression_embedding_adapter.",
     ".proto_head.time_transform_bank.",
     ".proto_head.regression_expert_confidence.",
+    ".proto_head.regression_example_selector.",
 )
 
 

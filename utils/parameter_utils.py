@@ -16,6 +16,9 @@ def configure_trainable_scope(model, scope):
         "temporal_prefix_joint",
         "classification_adapter",
         "regression_refinement",
+        "classification_example_selector",
+        "regression_example_selector",
+        "example_selectors",
     }:
         for name, parameter in model.named_parameters():
             allowed = False
@@ -57,6 +60,14 @@ def configure_trainable_scope(model, scope):
                     or "regression_embedding_adapter." in name
                     or "proto_head.regression_expert_confidence." in name
                 )
+            elif selected == "classification_example_selector":
+                allowed = "proto_head.classification_example_selector." in name
+            elif selected == "regression_example_selector":
+                allowed = "proto_head.regression_example_selector." in name
+            elif selected == "example_selectors":
+                allowed = "proto_head.classification_example_selector." in name or (
+                    "proto_head.regression_example_selector." in name
+                )
             parameter.requires_grad_(allowed)
     else:
         raise ValueError(f"Unknown trainable_scope: {selected}")
@@ -72,6 +83,9 @@ def configure_trainable_scope(model, scope):
         "temporal_prefix_joint",
         "classification_adapter",
         "regression_refinement",
+        "classification_example_selector",
+        "regression_example_selector",
+        "example_selectors",
     }
     if selected in constrained and not trainable:
         raise RuntimeError(
