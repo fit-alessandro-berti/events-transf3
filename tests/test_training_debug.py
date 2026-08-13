@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from training import optimizer_parameter_groups
 from training_debug import (
     MetricAccumulator,
     TrainingDiagnostics,
@@ -16,6 +17,41 @@ from training_debug import (
 
 
 class TrainingDebugTests(unittest.TestCase):
+    def test_component_lr_groups_are_disjoint_and_scaled(self):
+        class Expert(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proto_head = torch.nn.Module()
+                self.proto_head.classification_example_selector = torch.nn.Linear(
+                    2, 2
+                )
+                self.proto_head.other = torch.nn.Linear(2, 2)
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = torch.nn.Linear(2, 2)
+                self.experts = torch.nn.ModuleList([Expert()])
+
+        model = ToyModel()
+        groups, proto_index, special_indices, multipliers = (
+            optimizer_parameter_groups(
+                model, 1e-4, {"head/classification_selector": 20.0}
+            )
+        )
+        self.assertIsNotNone(proto_index)
+        selector_index = special_indices["head/classification_selector"]
+        self.assertEqual(groups[selector_index]["lr"], 0.002)
+        self.assertEqual(multipliers["head/classification_selector"], 20.0)
+        parameter_ids = [
+            id(parameter) for group in groups for parameter in group["params"]
+        ]
+        self.assertEqual(len(parameter_ids), len(set(parameter_ids)))
+        self.assertEqual(
+            set(parameter_ids),
+            {id(parameter) for parameter in model.parameters()},
+        )
+
     def test_loss_gradient_attribution_separates_parameter_groups(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):

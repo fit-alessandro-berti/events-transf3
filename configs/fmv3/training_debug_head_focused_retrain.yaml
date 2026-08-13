@@ -1,0 +1,17 @@
+# Evidence-based curriculum substitute for joint from-scratch optimization.
+# Preserve the conservative backbone clip/LR, reduce classification
+# overconfidence, and give historically staged small modules their former
+# relative learning-rate scale. The selectors used lr=0.002 versus base 0.0001.
+extends: training_debug_full_retrain.yaml
+experiment_name: training_debug_head_focused_retrain
+classification_label_smoothing: 0.10
+training_lr_multipliers:
+  "adapter/classification": 5.0
+  "adapter/prefix_attention": 5.0
+  "adapter/regression": 5.0
+  "adapter/temporal_input": 5.0
+  "head/classification_selector": 20.0
+  "head/regression_confidence": 5.0
+  "head/regression_selector": 20.0
+  "head/time_transform": 5.0
+  "routing": 5.0

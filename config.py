@@ -85,6 +85,7 @@ CONFIG ={
 'seed':42,
 'training_enabled':True,
 'gradient_clip_norm':1.0,
+'training_lr_multipliers':{},
 'training_diagnostics':{
 'enabled':False,
 'step_interval':25,

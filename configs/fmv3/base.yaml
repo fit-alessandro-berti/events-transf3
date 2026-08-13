@@ -27,6 +27,9 @@ classification_separation_weight: 0.0
 classification_separation_temperature: 0.10
 classification_separation_margin: 0.15
 gradient_clip_norm: 1.0
+# Optional multipliers keyed by the diagnostic parameter-group names. Empty
+# preserves the historical two-group optimizer exactly.
+training_lr_multipliers: {}
 # Opt-in structured telemetry. Disabled defaults preserve the historical
 # training data and runtime path exactly.
 training_diagnostics:

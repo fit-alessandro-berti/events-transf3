@@ -14,6 +14,7 @@ from training_debug import (
     gradient_metrics,
     loss_gradient_metrics,
     model_state_metrics,
+    parameter_group,
     parameter_update_metrics,
     snapshot_trainable_parameters,
 )
@@ -30,6 +31,52 @@ def split_params_for_proto(model):
             continue
         (proto_params if ".proto_head." in name else base_params).append(parameter)
     return base_params, proto_params
+
+
+def optimizer_parameter_groups(model, base_lr, lr_multipliers=None):
+    """Build legacy base/proto groups plus opt-in component LR groups."""
+    multipliers = {
+        str(group): float(multiplier)
+        for group, multiplier in (lr_multipliers or {}).items()
+        if float(multiplier) > 0.0 and abs(float(multiplier) - 1.0) > 1e-12
+    }
+    special_parameters = {group: [] for group in multipliers}
+    base_params = []
+    proto_params = []
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        group = parameter_group(name)
+        if group in special_parameters:
+            special_parameters[group].append(parameter)
+        elif ".proto_head." in name:
+            proto_params.append(parameter)
+        else:
+            base_params.append(parameter)
+
+    groups = []
+    proto_group_index = None
+    if base_params:
+        groups.append({"params": base_params, "lr": base_lr})
+    elif proto_params:
+        groups.append({"params": proto_params, "lr": base_lr})
+        proto_params = []
+    if proto_params:
+        groups.append({"params": proto_params, "lr": base_lr})
+        proto_group_index = len(groups) - 1
+    special_group_indices = {}
+    for group in sorted(special_parameters):
+        parameters = special_parameters[group]
+        if not parameters:
+            continue
+        groups.append(
+            {
+                "params": parameters,
+                "lr": base_lr * multipliers[group],
+            }
+        )
+        special_group_indices[group] = len(groups) - 1
+    return groups, proto_group_index, special_group_indices, multipliers
 
 
 def _strategy_step(
@@ -152,21 +199,28 @@ def train(
     print("🚀 Starting meta-training...")
     if resume_epoch > 0:
         print(f"--- Resuming from epoch {resume_epoch + 1} ---")
-    base_params, proto_params = split_params_for_proto(model)
-    optimizer_groups = []
-    proto_group_index = None
-    if base_params:
-        optimizer_groups.append({"params": base_params, "lr": config["lr"]})
-    elif proto_params:
-        optimizer_groups.append({"params": proto_params, "lr": config["lr"]})
-        proto_params = []
-    if proto_params:
-        optimizer_groups.append({"params": proto_params, "lr": config["lr"]})
-        proto_group_index = len(optimizer_groups) - 1
+    (
+        optimizer_groups,
+        proto_group_index,
+        special_group_indices,
+        lr_multipliers,
+    ) = optimizer_parameter_groups(
+        model,
+        config["lr"],
+        config.get("training_lr_multipliers", {}),
+    )
     optimizer = optim.AdamW(
         optimizer_groups,
         lr=config["lr"],
         weight_decay=float(config.get("weight_decay", 0.01)),
+    )
+    base_reference_multiplier = next(
+        (
+            lr_multipliers[group]
+            for group, index in special_group_indices.items()
+            if index == 0
+        ),
+        1.0,
     )
     scheduler = CosineAnnealingLR(
         optimizer, T_max=config["epochs"], eta_min=1e-6
@@ -263,13 +317,19 @@ def train(
         nonfinite_steps = 0
         task_counts = {"classification": 0, "regression": 0}
         expert_counts = {index: 0 for index in range(model.num_experts)}
-        base_lr = optimizer.param_groups[0]["lr"]
+        base_lr = (
+            optimizer.param_groups[0]["lr"] / base_reference_multiplier
+        )
         if proto_group_index is not None:
             proto_multiplier = (
                 1.0 if epoch < proto_warmup_epochs else proto_lr_multiplier_after
             )
             optimizer.param_groups[proto_group_index]["lr"] = (
                 base_lr * proto_multiplier
+            )
+        for group, group_index in special_group_indices.items():
+            optimizer.param_groups[group_index]["lr"] = (
+                base_lr * lr_multipliers[group]
             )
         if training_strategy in {"retrieval", "mixed"}:
             ramp = min(
@@ -438,6 +498,12 @@ def train(
             )
         else:
             message += f" | Current LR: {current_lr:.6f}"
+        if special_group_indices:
+            special_lrs = ", ".join(
+                f"{group}={optimizer.param_groups[index]['lr']:.6f}"
+                for group, index in special_group_indices.items()
+            )
+            message += f" | Component LRs: {special_lrs}"
         print(message)
 
         validation = _validation_accumulator(model, validation_tasks, config)
@@ -481,6 +547,10 @@ def train(
             ),
             "variance_weight": config.get("retrieval_var_weight", 0.0),
             "covariance_weight": config.get("retrieval_cov_weight", 0.0),
+            **{
+                f"component_lr/{group}": optimizer.param_groups[index]["lr"]
+                for group, index in special_group_indices.items()
+            },
         }
         diagnostics.finish_epoch(
             epoch + 1,

@@ -175,6 +175,7 @@ read directly from the baseline telemetry:
 | `training_debug_clip5_retrain.yaml` | Global clip cap 1 → 5 | Near-100% clipping throttles otherwise finite gradients and front-loads effective learning |
 | `training_debug_smoothing010_retrain.yaml` | Classification label smoothing 0.05 → 0.10 | Held-out confidence grows faster than accuracy |
 | `training_debug_regression_balanced_retrain.yaml` | Median/relative weights 0.40/0.05 → 0.20/0.025 | These two terms contribute disproportionate regression gradient energy |
+| `training_debug_head_focused_retrain.yaml` | Smoothing 0.10 plus staged-module LR multipliers 5×/20× | Shared backbone overfits while selectors remain uniform under a joint LR 20× below their historical stage |
 
 The seed, case split, architecture, task mixture, optimizer, and 20×300 schedule
 remain matched. Reweighted total losses are not compared across the regression
@@ -188,6 +189,15 @@ raw-hour regression MAE after normalizing both by baseline epoch 1. The two
 constituent metrics, accuracy, RMSE, confidence gap, and clipping remain visible
 and are the evidence used for a decision; the joint score is not a new training
 objective.
+
+The head-focused run uses `training_lr_multipliers`, keyed by the same stable
+parameter-group names as the gradient/update diagnostics. An empty mapping is
+the default and preserves the historical optimizer groups. Its selectors use
+20× because their promoted task-isolated stages used LR 0.002 versus this
+audit's base 0.0001; adapters, transform/confidence heads, and the task router
+use the more conservative 5× ratio seen in earlier staged continuations. The
+backbone LR and clip cap remain unchanged so this intervention moves capacity
+toward small task heads rather than accelerating memorization in the encoder.
 
 ```bash
 python compare_training_debug.py \
