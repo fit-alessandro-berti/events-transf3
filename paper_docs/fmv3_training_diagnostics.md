@@ -333,17 +333,27 @@ from-scratch baseline also remains below selected e44. The deployed checkpoint
 therefore stays unchanged; relaxing clipping remains a useful optimization
 finding, not a validated replacement model.
 
-The clip-10 dose-response run reached its best source regression MAE/RMSE at
-epoch 6 (834.176/1,113.16 hours), so that checkpoint was selected before
-looking at target results and screened with the same 96 rows. The apparent
-source gain does not transfer. Relative to baseline e16, clip-10 e6 worsens
-MAE/RMSE by 10.800/4.794 hours and loses 0.003948 balanced accuracy, 0.008948
-accuracy, and 0.007033 macro-F1. The regression change is process-dependent:
-billing improves by 16.076 MAE hours, but road traffic worsens by 67.922 and
-sepsis by 9.824 hours. Relative to selected e44 it is worse on every aggregate
-classification metric and by 65.643/69.223 MAE/RMSE hours. A larger clip cap
-is therefore rejected as a generalization strategy; source-only aggregate
-improvement was not sufficient evidence for promotion.
+The clip-10 dose-response run also completed all 20 epochs. It cuts mean clip
+incidence to 7.17%, improves best source NLL to 1.86053 at epoch 20, and sets
+its best source MAE/RMSE at epoch 6 (834.176/1,113.16 hours). Accuracy instead
+peaks at epoch 16 (0.30443), the joint score at epoch 15 (0.805314), and the
+final confidence gap grows to 0.1749. No strict overfitting rule fires. The
+late loss decomposition exposes objective/output divergence: composite
+regression loss is best at epoch 19, while final raw-hour MAE is 3.54% above
+its epoch-6 best and sampled training MAE also fails to improve consistently.
+This is a plateau and checkpoint-selection problem, not evidence that the
+epoch-19 composite optimum is the best deployed regressor.
+
+Because epoch 6 was selected before looking at target results, it was screened
+with the same 96 rows. The apparent source gain does not transfer. Relative to
+baseline e16, clip-10 e6 worsens MAE/RMSE by 10.800/4.794 hours and loses
+0.003948 balanced accuracy, 0.008948 accuracy, and 0.007033 macro-F1. The
+regression change is process-dependent: billing improves by 16.076 MAE hours,
+but road traffic worsens by 67.922 and sepsis by 9.824 hours. Relative to
+selected e44 it is worse on every aggregate classification metric and by
+65.643/69.223 MAE/RMSE hours. A larger clip cap is therefore rejected as a
+generalization strategy; source-only aggregate improvement was not sufficient
+evidence for promotion.
 
 ### Interpretation and training policy
 
