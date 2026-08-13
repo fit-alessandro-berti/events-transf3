@@ -267,6 +267,12 @@ the established five-log, 96-row selector screen unchanged; target results do
 not feed back into epoch selection. Dominated smoothing/loss-weight controls
 are not screened merely because they completed training.
 
+`compare_fmv3_results.py` then requires exact pairing on task, profile, log,
+repetition, support scenario/budget, retrieval/prior mode and strength, and
+retrieval k. It reports candidate-minus-reference means and row-level
+wins/ties/losses separately for classification and regression; a missing or
+extra target row is an error rather than an implicit unpaired comparison.
+
 ```bash
 python compare_training_debug.py \
   --baseline baseline \
