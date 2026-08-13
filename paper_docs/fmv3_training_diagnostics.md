@@ -285,6 +285,19 @@ use the more conservative 5× ratio seen in earlier staged continuations. The
 backbone LR and clip cap remain unchanged so this intervention moves capacity
 toward small task heads rather than accelerating memorization in the encoder.
 
+The head-focused run completed all 20 epochs. It removes both utilization
+warnings: the classification/regression selectors become meaningfully
+non-uniform and the regression transform mixture specializes, so the original
+near-uniform behavior was a real optimization bottleneck. Its source metrics
+also show that this is not automatically a generalization win. Best
+classification NLL continues to epoch 20 (1.76830), accuracy peaks at epoch 17
+(0.32860), regression MAE at epoch 13 (837.706 hours), and the joint score at
+epoch 17 (0.786409). The last confidence gap rises to 0.1846, and regression
+RMSE remains a tradeoff. No objective-, invariant-, or decision-level
+overfitting rule fires. The source-selected epoch 17 is therefore sent to the
+fixed target screen; the result does not justify using the last checkpoint or
+the same larger LR for all task heads.
+
 Candidates are selected exclusively from the source-case holdout, then run
 once through `training_debug_target_screen_eval.yaml`. That overlay inherits
 the established five-log, 96-row selector screen unchanged; target results do
