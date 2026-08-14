@@ -18,6 +18,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from metric_objectives import (
+    resolve_classification_objective,
+    resolve_regression_metric_weights,
+)
+
 
 SCHEMA_VERSION = 1
 
@@ -560,6 +565,22 @@ def split_training_tasks_by_case(training_tasks, fraction, seed, log_names=None)
 class TrainingDiagnostics:
     def __init__(self, checkpoint_dir, config):
         self.config = config.get("training_diagnostics", {}) or {}
+        classification_profile, classification_weights = (
+            resolve_classification_objective(config)
+        )
+        regression_profile, regression_weights = resolve_regression_metric_weights(
+            config.get("fmv3_head", {}) or {}
+        )
+        self.objective_configuration = {
+            "classification": {
+                "profile": classification_profile,
+                "weights": classification_weights,
+            },
+            "regression": {
+                "profile": regression_profile,
+                "weights": regression_weights,
+            },
+        }
         self.enabled = bool(self.config.get("enabled", False))
         self.checkpoint_dir = Path(checkpoint_dir)
         self.step_interval = max(1, int(self.config.get("step_interval", 25)))
@@ -697,6 +718,7 @@ class TrainingDiagnostics:
         summary = {
             "schema_version": SCHEMA_VERSION,
             "configuration": self.config,
+            "objective_configuration": self.objective_configuration,
             "epochs": self.epoch_records,
             "generalization": self._overfitting_summary(self.epoch_records),
         }

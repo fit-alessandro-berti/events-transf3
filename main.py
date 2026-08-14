@@ -12,6 +12,7 @@ from utils .model_utils import init_loader ,create_model ,load_state_dict_compat
 from utils .parameter_utils import configure_trainable_scope
 from training import train
 from training_debug import save_validation_manifest, split_training_tasks_by_case
+from metric_objectives import resolve_classification_objective, resolve_regression_metric_weights
 def main ():
     pre_parser =argparse .ArgumentParser (add_help =False )
     pre_parser .add_argument ('--config',type =str ,default =None )
@@ -68,6 +69,10 @@ def main ():
     if args .stop_after_epoch :
         print (f"  - Stop After Epoch: {args .stop_after_epoch }")
     print (f"  - Cleanup Checkpoints: {args .cleanup_checkpoints }")
+    classification_profile ,classification_weights =resolve_classification_objective (CONFIG )
+    regression_profile ,regression_weights =resolve_regression_metric_weights (CONFIG .get ('fmv3_head',{})or {})
+    print (f"  - Classification Objective: {classification_profile} {classification_weights}")
+    print (f"  - Regression Objective: {regression_profile} {regression_weights}")
     seed =int (CONFIG .get ('seed',42 ))
     torch .manual_seed (seed )
     np .random .seed (seed )

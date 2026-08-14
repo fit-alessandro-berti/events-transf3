@@ -17,6 +17,30 @@ from training_debug import (
 
 
 class TrainingDebugTests(unittest.TestCase):
+    def test_summary_persists_resolved_objective_profiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostics = TrainingDiagnostics(
+                directory,
+                {
+                    "classification_objective": {"profile": "accuracy"},
+                    "fmv3_head": {"regression_objective_profile": "r2"},
+                    "training_diagnostics": {"enabled": True},
+                },
+            )
+            diagnostics.start_epoch()
+            diagnostics.epoch_accumulator.add(
+                {"loss/total": 1.0}, prefixes=("task/classification",)
+            )
+            diagnostics.finish_epoch(1, None, {}, {}, {}, {})
+            summary = json.loads(
+                (Path(directory) / "training_debug_summary.json").read_text()
+            )
+            objectives = summary["objective_configuration"]
+            self.assertEqual(objectives["classification"]["profile"], "accuracy")
+            self.assertEqual(objectives["classification"]["weights"]["accuracy"], 1.0)
+            self.assertEqual(objectives["regression"]["profile"], "r2")
+            self.assertEqual(objectives["regression"]["weights"]["r2"], 1.0)
+
     def test_component_lr_groups_are_disjoint_and_scaled(self):
         class Expert(torch.nn.Module):
             def __init__(self):
