@@ -1,0 +1,23 @@
+# Matched from-scratch baseline for adaptable metric-target objectives.
+# The architecture, source-case split, task mix, schedule, and head-focused LR
+# multipliers are fixed across every metric-target experiment below.
+extends: training_debug_full_retrain.yaml
+experiment_name: training_metric_equilibrated_retrain
+classification_label_smoothing: 0.05
+classification_objective:
+  profile: equilibrated
+  weights: {}
+training_lr_multipliers:
+  "adapter/classification": 5.0
+  "adapter/prefix_attention": 5.0
+  "adapter/regression": 5.0
+  "adapter/temporal_input": 5.0
+  "head/classification_selector": 20.0
+  "head/regression_confidence": 5.0
+  "head/regression_selector": 20.0
+  "head/time_transform": 5.0
+  "routing": 5.0
+fmv3_head:
+  regression_objective_profile: equilibrated
+  regression_metric_weights: {}
+

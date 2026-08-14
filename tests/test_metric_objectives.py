@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 
 from components.prototypical_head import PrototypicalHead
+from config_utils import load_yaml_config
 from metric_objectives import (
     classification_metric_objective,
     resolve_classification_objective,
@@ -13,6 +14,37 @@ from metric_objectives import (
 
 
 class MetricObjectiveTests(unittest.TestCase):
+    def test_matched_experiment_configs_change_only_requested_profile(self):
+        expected = {
+            "training_metric_equilibrated_retrain.yaml": (
+                "equilibrated", "equilibrated"
+            ),
+            "training_metric_accuracy_retrain.yaml": (
+                "accuracy", "equilibrated"
+            ),
+            "training_metric_balanced_accuracy_retrain.yaml": (
+                "balanced_accuracy", "equilibrated"
+            ),
+            "training_metric_mae_retrain.yaml": ("equilibrated", "mae"),
+            "training_metric_r2_retrain.yaml": ("equilibrated", "r2"),
+        }
+        reference = load_yaml_config(
+            "configs/fmv3/training_metric_equilibrated_retrain.yaml"
+        )
+        for filename, profiles in expected.items():
+            config = load_yaml_config(f"configs/fmv3/{filename}")
+            self.assertEqual(
+                config["classification_objective"]["profile"], profiles[0]
+            )
+            self.assertEqual(
+                config["fmv3_head"]["regression_objective_profile"], profiles[1]
+            )
+            for invariant in (
+                "seed", "epochs", "episodes_per_epoch", "lr", "weight_decay",
+                "classification_task_probability", "training_lr_multipliers",
+            ):
+                self.assertEqual(config[invariant], reference[invariant])
+
     def test_legacy_classification_is_exact_smoothed_cross_entropy(self):
         logits = torch.tensor([[2.0, -1.0], [-0.5, 1.5]], requires_grad=True)
         labels = torch.tensor([0, 1])

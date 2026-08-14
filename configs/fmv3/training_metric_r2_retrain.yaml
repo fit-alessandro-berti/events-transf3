@@ -1,0 +1,8 @@
+# Extreme regression control: optimize only stabilized log1p(SSE/SST), which
+# is monotonic in 1-R2 and remains finite for near-constant target batches.
+# Classification remains equilibrated.
+extends: training_metric_equilibrated_retrain.yaml
+experiment_name: training_metric_r2_retrain
+fmv3_head:
+  regression_objective_profile: r2
+

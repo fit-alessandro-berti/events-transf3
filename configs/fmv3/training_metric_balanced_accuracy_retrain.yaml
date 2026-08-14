@@ -1,0 +1,7 @@
+# Extreme classification control: average soft recall equally across classes,
+# independent of the query frequency of each class in the episode.
+extends: training_metric_equilibrated_retrain.yaml
+experiment_name: training_metric_balanced_accuracy_retrain
+classification_objective:
+  profile: balanced_accuracy
+

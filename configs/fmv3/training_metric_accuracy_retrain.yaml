@@ -1,0 +1,7 @@
+# Extreme classification control: optimize only the bounded soft-accuracy
+# surrogate. Regression remains equilibrated.
+extends: training_metric_equilibrated_retrain.yaml
+experiment_name: training_metric_accuracy_retrain
+classification_objective:
+  profile: accuracy
+

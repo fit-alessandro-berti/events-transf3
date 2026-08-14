@@ -1,0 +1,7 @@
+# Extreme regression control: optimize only scale-normalized raw-hour MAE.
+# Classification remains equilibrated.
+extends: training_metric_equilibrated_retrain.yaml
+experiment_name: training_metric_mae_retrain
+fmv3_head:
+  regression_objective_profile: mae
+
