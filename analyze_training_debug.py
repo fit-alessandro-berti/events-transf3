@@ -677,7 +677,7 @@ def analyze(summary, pool_names=None):
     if amp_overflow.get("max", 0.0) > 0.0:
         persistent_amp_overflow = (
             amp_overflow.get("mean", 0.0) >= 0.01
-            or amp_overflow.get("last", 0.0) > 0.0
+            or amp_overflow.get("last", 0.0) >= 0.01
         )
         findings.append(
             {

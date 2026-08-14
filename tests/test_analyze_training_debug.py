@@ -51,6 +51,25 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         findings = {finding["kind"]: finding for finding in result["findings"]}
         self.assertEqual(findings["amp_overflow"]["severity"], "high")
 
+    def test_analysis_treats_one_late_amp_overflow_as_rare(self):
+        records = []
+        for epoch, overflow in enumerate([0.0, 0.0, 1.0 / 300.0], start=1):
+            records.append(
+                {
+                    "epoch": epoch,
+                    "train": {
+                        "optimization/amp_overflow": _metric(overflow),
+                    },
+                    "validation": {},
+                    "epoch_metrics": {"step_success_fraction": 1.0 - overflow},
+                    "updates": {},
+                }
+            )
+        result = analyze({"epochs": records, "configuration": {}})
+        findings = {finding["kind"]: finding for finding in result["findings"]}
+        self.assertNotIn("amp_overflow", findings)
+        self.assertEqual(findings["transient_amp_overflow"]["severity"], "low")
+
     def test_analysis_flags_metric_gradient_imbalance(self):
         records = []
         for epoch in range(1, 4):
