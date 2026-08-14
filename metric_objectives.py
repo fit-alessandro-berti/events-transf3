@@ -69,6 +69,7 @@ CLASSIFICATION_PROFILES = {
 }
 REGRESSION_PROFILES = {
     "equilibrated": REGRESSION_EQUILIBRATED_WEIGHTS,
+    "legacy": {"huber": 1.0},
     "mae": {"mae": 1.0},
     "rmse": {"rmse": 1.0},
     "r2": {"r2": 1.0},

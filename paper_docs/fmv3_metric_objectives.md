@@ -68,6 +68,7 @@ configuration errors.
 | `rmse` | Scale-normalized raw-hour RMSE only |
 | `r2` | Stabilized R2 surrogate only |
 | `custom` | Existing flat weights plus optional `regression_metric_weights` overrides |
+| `legacy` | Historical Huber loss in the head's native output space |
 
 The R2 loss is `log1p(SSE/SST)`, equivalently a monotonic stabilization of
 `1 - R2`. SSE and target variance use the same batch scale normalization; a
@@ -75,6 +76,12 @@ small normalized variance floor keeps constant-target batches finite. Scaling
 or shifting both predictions and targets leaves the non-degenerate surrogate
 unchanged. R2 is episode-relative, so the target screen still reports global
 R2 alongside MAE/RMSE rather than treating training loss as evaluation R2.
+
+Metric profiles also apply to the base `sqrt_knn` head. Its prediction and
+label tensors are differentiably squared back to raw hours before MAE, RMSE,
+R2, and the other metric terms are computed. Historical sqrt-space experiments
+use the explicit `legacy` profile; learned-transform experiment roots switch
+back to `custom`, preserving their published multi-metric objectives.
 
 The equilibrated MAE/RMSE/Huber/log-RMSE/relative-MAE/bias/median-AE/quantile/R2
 weights are `1.0/1.0/1.3/0.8/0.15/0.75/0.08/2.0/1.4`. These values compensate

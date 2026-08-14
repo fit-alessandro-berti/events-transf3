@@ -12,6 +12,7 @@ retrieval_knn_aux_weight: 0.0
 retrieval_var_weight: 0.0
 retrieval_cov_weight: 0.0
 fmv3_head:
+  regression_objective_profile: custom
   regression_mode: learned_transform_ensemble
   regression_num_transforms: 8
   regression_transform_aggregation: learned

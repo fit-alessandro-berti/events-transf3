@@ -896,6 +896,13 @@ class PrototypicalHead(nn.Module):
             return labels.clamp_min(0.0).square()
         return labels
 
+    def regression_output_to_hours(self, values):
+        """Convert a head-output tensor to non-negative raw hours."""
+        values = values.float()
+        if self.regression_outputs_hours:
+            return values.clamp_min(0.0)
+        return values.clamp_min(0.0).square()
+
     def _regression_primary_weight_sum(self) -> float:
         return sum(
             getattr(self, f"regression_{name}_weight")
@@ -920,8 +927,8 @@ class PrototypicalHead(nn.Module):
             if labels_in_output_space
             else self.regression_labels_to_output(labels)
         )
-        predictions_f = predictions.float().reshape(-1)
-        targets_f = targets.float().reshape(-1)
+        predictions_f = self.regression_output_to_hours(predictions).reshape(-1)
+        targets_f = self.regression_output_to_hours(targets).reshape(-1)
         errors = predictions_f - targets_f
         batch_scale = targets_f.detach().median().clamp_min(1.0)
         power = self.regression_loss_scale_power
@@ -1118,7 +1125,7 @@ class PrototypicalHead(nn.Module):
         primary metric is computed in float32 for stable RMSE/median scaling.
         """
         targets = labels.float() if labels_in_output_space else self.regression_labels_to_output(labels)
-        if not self.regression_outputs_hours:
+        if self.regression_objective_profile == "legacy":
             return F.huber_loss(predictions.squeeze(), targets.squeeze())
         components = self.regression_loss_components(
             predictions, labels, labels_in_output_space=labels_in_output_space

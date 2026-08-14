@@ -597,9 +597,11 @@ def run_retrieval_step(
                 if return_diagnostics:
                     regression_head_rows.append(
                         regression_head_metrics(
-                            prediction,
-                            model.proto_head.regression_labels_to_output(
-                                labels_float[query_idx]
+                            model.proto_head.regression_output_to_hours(prediction),
+                            model.proto_head.regression_output_to_hours(
+                                model.proto_head.regression_labels_to_output(
+                                    labels_float[query_idx]
+                                )
                             ),
                             confidence,
                             diagnostics,
@@ -622,7 +624,7 @@ def run_retrieval_step(
                 model.proto_head.regression_loss_components(
                     joined_predictions, joined_targets
                 )
-                if model.proto_head.regression_outputs_hours
+                if model.proto_head.regression_objective_profile != "legacy"
                 else None
             )
             primary_loss_value = model.proto_head.regression_loss(

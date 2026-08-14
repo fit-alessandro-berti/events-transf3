@@ -7,7 +7,7 @@ proto_head_lr_mult_after_warmup: 5.0
 classification_objective:
   profile: legacy
 fmv3_head:
-  regression_objective_profile: custom
+  regression_objective_profile: legacy
   classification_mode: coverage_fallback
   local_temperature: 0.2
   global_temperature: 0.2

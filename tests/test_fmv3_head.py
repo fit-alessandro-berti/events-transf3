@@ -61,7 +61,7 @@ class FMV3HeadTests(unittest.TestCase):
         self.assertEqual(
             base_config["classification_objective"]["profile"], "equilibrated"
         )
-        self.assertEqual(historical["regression_objective_profile"], "custom")
+        self.assertEqual(historical["regression_objective_profile"], "legacy")
         self.assertEqual(historical["regression_r2_weight"], 0.0)
         self.assertEqual(
             historical_config["classification_objective"]["profile"], "legacy"
@@ -655,6 +655,48 @@ class FMV3HeadTests(unittest.TestCase):
         )
         self.assertAlmostEqual(
             float(fixed_reference.regression_loss(predictions, labels)), 0.1, places=5
+        )
+
+    def test_sqrt_head_metric_profiles_optimize_in_raw_hours(self):
+        predictions = torch.tensor([2.0, 4.0], requires_grad=True)
+        targets_in_output_space = torch.tensor([1.0, 3.0])
+        mae_head = PrototypicalHead(
+            regression_mode="sqrt_knn",
+            regression_objective_profile="mae",
+        )
+        components = mae_head.regression_loss_components(
+            predictions,
+            targets_in_output_space,
+            labels_in_output_space=True,
+        )
+        loss = mae_head.regression_loss(
+            predictions,
+            targets_in_output_space,
+            labels_in_output_space=True,
+        )
+        torch.testing.assert_close(loss, components["mae"])
+        torch.testing.assert_close(
+            components["predictions"], torch.tensor([4.0, 16.0])
+        )
+        torch.testing.assert_close(
+            components["targets"], torch.tensor([1.0, 9.0])
+        )
+        loss.backward()
+        self.assertTrue(torch.isfinite(predictions.grad).all())
+
+        legacy = PrototypicalHead(
+            regression_mode="sqrt_knn",
+            regression_objective_profile="legacy",
+        )
+        torch.testing.assert_close(
+            legacy.regression_loss(
+                predictions.detach(),
+                targets_in_output_space,
+                labels_in_output_space=True,
+            ),
+            torch.nn.functional.huber_loss(
+                predictions.detach(), targets_in_output_space
+            ),
         )
 
     def test_regression_loss_rejects_zero_metric_weights(self):

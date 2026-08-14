@@ -207,6 +207,16 @@ class MetricObjectiveTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(components["r2"]))
         self.assertGreater(float(components["r2"]), 0.0)
 
+    def test_selected_config_restores_custom_raw_hour_objective(self):
+        selected = load_yaml_config("configs/fmv3/selected.yaml")
+        self.assertEqual(
+            selected["fmv3_head"]["regression_objective_profile"], "custom"
+        )
+        self.assertEqual(
+            selected["fmv3_head"]["regression_mode"],
+            "learned_transform_ensemble",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -152,7 +152,7 @@ def run_episodic_step(
             head.regression_loss_components(
                 predictions.squeeze(), true_labels, labels_in_output_space=True
             )
-            if head.regression_outputs_hours
+            if head.regression_objective_profile != "legacy"
             else None
         )
         primary_loss = head.regression_loss(
@@ -201,8 +201,8 @@ def run_episodic_step(
             diagnostics_out["routing/target_reliability"] = reliability
         diagnostics_out.update(
             regression_head_metrics(
-                predictions,
-                true_labels,
+                head.regression_output_to_hours(predictions),
+                head.regression_output_to_hours(true_labels),
                 getattr(model, "last_regression_base_confidence", confidence),
                 head_diagnostics,
             )

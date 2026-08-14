@@ -3,7 +3,7 @@ experiment_name: 02_count_neutral
 classification_objective:
   profile: legacy
 fmv3_head:
-  regression_objective_profile: custom
+  regression_objective_profile: legacy
   classification_mode: local
   count_normalization: fixed
   count_normalization_gamma: 1.0

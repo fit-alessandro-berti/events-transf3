@@ -14,7 +14,7 @@ fmv3_training:
   long_tail_power_range: [0.75, 2.50]
   cases_per_episode_range: [4, 64]
 fmv3_head:
-  regression_objective_profile: custom
+  regression_objective_profile: legacy
   classification_mode: global_local
   local_temperature: 0.2
   global_temperature: 0.2
