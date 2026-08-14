@@ -39,6 +39,8 @@ METRICS = {
         ("normalized_mae", "min"),
         ("mae_skill_vs_median", "max"),
         ("rmse_skill_vs_median", "max"),
+        ("d2_absolute_error", "max"),
+        ("r2", "max"),
     ),
 }
 
@@ -162,7 +164,7 @@ def _markdown(result, reference_label, candidate_label):
         primary_metrics = (
             ("balanced_accuracy", "accuracy", "macro_f1")
             if task == "classification"
-            else ("mae_hours", "rmse_hours")
+            else ("mae_hours", "rmse_hours", "r2")
         )
         lines.extend(
             [

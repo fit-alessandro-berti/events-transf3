@@ -8,7 +8,7 @@ from compare_fmv3_results import PAIR_FIELDS, compare
 
 class CompareFMV3ResultsTests(unittest.TestCase):
     def _write(self, path, rows):
-        fields = [*PAIR_FIELDS, "balanced_accuracy", "mae_hours"]
+        fields = [*PAIR_FIELDS, "balanced_accuracy", "mae_hours", "r2"]
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields)
             writer.writeheader()
@@ -28,7 +28,7 @@ class CompareFMV3ResultsTests(unittest.TestCase):
                 [
                     self._row("classification", 0, balanced_accuracy="0.4"),
                     self._row("classification", 1, balanced_accuracy="0.5"),
-                    self._row("regression", 0, mae_hours="10"),
+                    self._row("regression", 0, mae_hours="10", r2="0.1"),
                 ],
             )
             self._write(
@@ -36,7 +36,7 @@ class CompareFMV3ResultsTests(unittest.TestCase):
                 [
                     self._row("classification", 0, balanced_accuracy="0.5"),
                     self._row("classification", 1, balanced_accuracy="0.5"),
-                    self._row("regression", 0, mae_hours="8"),
+                    self._row("regression", 0, mae_hours="8", r2="0.3"),
                 ],
             )
             result = compare(left, right)
@@ -57,6 +57,9 @@ class CompareFMV3ResultsTests(unittest.TestCase):
             regression = result["tasks"]["regression"]["metrics"]["mae_hours"]
             self.assertEqual(regression["candidate_wins"], 1)
             self.assertEqual(regression["candidate_minus_reference"], -2.0)
+            r2 = result["tasks"]["regression"]["metrics"]["r2"]
+            self.assertEqual(r2["candidate_wins"], 1)
+            self.assertAlmostEqual(r2["candidate_minus_reference"], 0.2)
 
     def test_compare_rejects_unpaired_results(self):
         with tempfile.TemporaryDirectory() as directory:
