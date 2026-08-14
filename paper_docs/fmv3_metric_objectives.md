@@ -151,6 +151,15 @@ The experiment compares each targeted metric, all non-target metrics, gradient
 balance, clipping, confidence, and per-source behavior. A profile is not
 promoted merely because its own training surrogate falls fastest.
 
+All five runs and the fixed target confirmations are complete. Full-accuracy
+improves target accuracy over equilibrated; full-MAE improves target MAE by
+35.2 hours; pure R2 improves target R2 by 0.0255 and RMSE by 9.6 hours.
+Balanced-accuracy improves on the source holdout but does not transfer its
+named metric. Every candidate remains behind the promoted epoch-44 endpoint,
+which is retained. See
+[`fmv3_metric_objective_report.md`](fmv3_metric_objective_report.md) for the
+source/target tables, analyzer conclusions, paired wins, and artifact hashes.
+
 `compare_metric_objectives.py` reads each completed checkpoint directory,
 reports best epochs for every metric, and selects a source-only profile-aligned
 epoch. For an extreme task it uses the named metric while retaining the

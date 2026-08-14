@@ -316,6 +316,14 @@ configuration examples, diagnostics, and the matched extreme-objective
 experiment matrix are in
 [`paper_docs/fmv3_metric_objectives.md`](paper_docs/fmv3_metric_objectives.md).
 
+The completed matched experiments confirm real specialization on the fixed
+target screen: full-accuracy adds 0.00335 accuracy versus equilibrated,
+full-MAE removes 35.2 hours of MAE, and pure R2 adds 0.0255 R2 while removing
+9.6 hours of RMSE. Balanced-accuracy's source gain does not transfer, and all
+from-scratch candidates remain behind promoted epoch 44. The full decision and
+reproducibility record is in
+[`paper_docs/fmv3_metric_objective_report.md`](paper_docs/fmv3_metric_objective_report.md).
+
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.
 The second observable prefix clock is `time_from_previous`.
