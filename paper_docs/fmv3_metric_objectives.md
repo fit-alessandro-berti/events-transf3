@@ -141,3 +141,20 @@ LR multipliers:
 The experiment compares each targeted metric, all non-target metrics, gradient
 balance, clipping, confidence, and per-source behavior. A profile is not
 promoted merely because its own training surrogate falls fastest.
+
+`compare_metric_objectives.py` reads each completed checkpoint directory,
+reports best epochs for every metric, and selects a source-only profile-aligned
+epoch. For an extreme task it uses the named metric while retaining the
+equilibrated score for the other task; it also reports a fully equilibrated
+epoch for comparison.
+
+```bash
+python compare_metric_objectives.py \
+  --baseline equilibrated \
+  --run equilibrated=checkpoints/fmv3/training_metric_equilibrated_retrain \
+  --run accuracy=checkpoints/fmv3/training_metric_accuracy_retrain \
+  --run balanced_accuracy=checkpoints/fmv3/training_metric_balanced_accuracy_retrain \
+  --run mae=checkpoints/fmv3/training_metric_mae_retrain \
+  --run r2=checkpoints/fmv3/training_metric_r2_retrain \
+  --output_dir evaluation_results/training_metric_objectives/matched_comparison
+```
