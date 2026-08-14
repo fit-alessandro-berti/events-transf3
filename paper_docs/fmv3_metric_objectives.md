@@ -10,8 +10,10 @@ episodic training, preserve historical configurations, and expose every active
 component and its gradient in the structured diagnostics.
 
 The base/default FM-v3 configuration is `equilibrated`. Published experiment
-roots are explicitly pinned to `legacy` classification and `custom` regression
-so an old YAML file does not silently acquire a new objective when reproduced.
+roots are explicitly pinned to `legacy` classification; native-space sqrt-head
+roots use `legacy` regression while learned-transform roots restore their
+published `custom` mixture. Thus an old YAML file does not silently acquire a
+new objective when reproduced.
 
 ## Classification profiles
 
