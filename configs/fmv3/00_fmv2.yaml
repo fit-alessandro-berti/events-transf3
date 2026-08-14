@@ -1,7 +1,10 @@
 extends: base.yaml
 experiment_name: 00_fmv2
 proto_head_lr_mult_after_warmup: 0.1
+classification_objective:
+  profile: legacy
 fmv3_head:
+  regression_objective_profile: custom
   classification_mode: legacy_soft_knn
   count_normalization: fixed
   count_normalization_gamma: 0.0

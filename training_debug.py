@@ -176,6 +176,12 @@ def regression_head_metrics(predictions, targets, confidence=None, diagnostics=N
         return metrics
     errors = predictions - targets
     absolute = errors.abs()
+    target_variance = (targets - targets.mean()).square().mean()
+    prediction_mse = errors.square().mean()
+    if float(target_variance.cpu()) <= 1e-12:
+        r2 = 1.0 if float(prediction_mse.cpu()) <= 1e-12 else 0.0
+    else:
+        r2 = float((1.0 - prediction_mse / target_variance).cpu())
     metrics.update(
         {
             "head/regression/query_count": float(predictions.numel()),
@@ -188,6 +194,7 @@ def regression_head_metrics(predictions, targets, confidence=None, diagnostics=N
             "head/regression/relative_mae": float(
                 (absolute / targets.abs().clamp_min(1.0)).mean().cpu()
             ),
+            "head/regression/r2": r2,
             "head/regression/prediction_mean_hours": float(predictions.mean().cpu()),
             "head/regression/target_mean_hours": float(targets.mean().cpu()),
             "head/regression/error_p90_hours": float(
@@ -378,6 +385,12 @@ def loss_gradient_metrics(model, step_metrics):
         "loss/regression/bias_weighted",
         "loss/regression/median_ae_weighted",
         "loss/regression/quantile_weighted",
+        "loss/regression/r2_weighted",
+        "loss/classification/accuracy_surrogate_weighted",
+        "loss/classification/balanced_accuracy_surrogate_weighted",
+        "loss/classification/macro_f1_surrogate_weighted",
+        "loss/classification/nll_surrogate_weighted",
+        "loss/classification/brier_surrogate_weighted",
     )
     named_parameters = [
         (name, parameter)

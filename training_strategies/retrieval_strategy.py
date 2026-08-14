@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from metric_objectives import classification_metric_objective
 from training_debug import (
     average_metric_dicts,
     classification_head_metrics,
@@ -667,7 +668,9 @@ def run_retrieval_step(
                 )
     else:
         routing_correctness = []
-        classification_primary_losses = []
+        classification_logits_rows = []
+        classification_target_indices = []
+        classification_class_id_rows = []
         classification_confidence_losses = []
         for i in range(retrieval_batch_size):
             query_label = batch_labels[i]
@@ -768,11 +771,9 @@ def run_retrieval_step(
                 max(float(config.get("classification_label_smoothing", 0.05)), 0.0),
                 1.0,
             )
-            primary_query_loss = F.cross_entropy(
-                logits, mapped_label, label_smoothing=smoothing
-            )
-            classification_primary_losses.append(primary_query_loss)
-            loss = primary_query_loss
+            classification_logits_rows.append(logits.reshape(-1))
+            classification_target_indices.append(mapped_label.reshape(-1)[0])
+            classification_class_id_rows.append(proto_classes)
             if cls_confidence_w > 0:
                 confidence_query_loss = (
                     model.proto_head.classification_expert_confidence_loss(
@@ -780,7 +781,6 @@ def run_retrieval_step(
                     )
                 )
                 classification_confidence_losses.append(confidence_query_loss)
-                loss = loss + cls_confidence_w * confidence_query_loss
 
             if return_diagnostics:
                 classification_head_rows.append(
@@ -789,17 +789,28 @@ def run_retrieval_step(
                     )
                 )
 
-            if loss is not None and not torch.isnan(loss):
-                total_loss_for_batch = total_loss_for_batch + loss
-                queries_processed += 1
+        if classification_logits_rows:
+            metric_objective = classification_metric_objective(
+                classification_logits_rows,
+                classification_target_indices,
+                config,
+                class_id_rows=classification_class_id_rows,
+                label_smoothing=smoothing,
+            )
+            primary_loss_value = metric_objective.loss
+            total_loss_for_batch = primary_loss_value
+            diagnostics_out.update(metric_objective.diagnostics)
+            if classification_confidence_losses:
+                confidence_loss_value = torch.stack(
+                    classification_confidence_losses
+                ).mean()
+                total_loss_for_batch = total_loss_for_batch + (
+                    cls_confidence_w * confidence_loss_value
+                )
+            # The objective and confidence auxiliary are already episode means.
+            queries_processed = 1
         if routing_correctness:
             routing_reliability = torch.stack(routing_correctness).mean()
-        if classification_primary_losses:
-            primary_loss_value = torch.stack(classification_primary_losses).mean()
-        if classification_confidence_losses:
-            confidence_loss_value = torch.stack(
-                classification_confidence_losses
-            ).mean()
 
     loss_out = None
     if queries_processed > 0:
@@ -877,6 +888,7 @@ def run_retrieval_step(
                 "bias": model.proto_head.regression_bias_weight,
                 "median_ae": model.proto_head.regression_median_ae_weight,
                 "quantile": model.proto_head.regression_quantile_weight,
+                "r2": model.proto_head.regression_r2_weight,
             }
             denominator = model.proto_head._regression_primary_weight_sum()
             for name, weight in regression_weights.items():

@@ -3,6 +3,7 @@ import random
 import torch
 import torch.nn.functional as F
 
+from metric_objectives import classification_metric_objective
 from training_debug import classification_head_metrics, regression_head_metrics
 from utils.data_utils import create_episode
 
@@ -24,6 +25,7 @@ def _regression_component_metrics(head, components):
         "bias": head.regression_bias_weight,
         "median_ae": head.regression_median_ae_weight,
         "quantile": head.regression_quantile_weight,
+        "r2": head.regression_r2_weight,
     }
     denominator = head._regression_primary_weight_sum()
     for name, weight in weights.items():
@@ -96,12 +98,13 @@ def run_episodic_step(
             max(float(config.get("classification_label_smoothing", 0.05)), 0.0),
             1.0,
         )
-        primary_loss = F.cross_entropy(
+        metric_objective = classification_metric_objective(
             predictions,
             true_labels,
-            ignore_index=-100,
+            config,
             label_smoothing=smoothing,
         )
+        primary_loss = metric_objective.loss
         loss = primary_loss
         confidence_weight = float(
             head_cfg.get("classification_expert_confidence_loss_weight", 0.0)
@@ -131,6 +134,7 @@ def run_episodic_step(
                 getattr(model, "last_classification_diagnostics", None),
             )
         )
+        diagnostics_out.update(metric_objective.diagnostics)
     else:
         head = model.proto_head
         head_diagnostics = getattr(model, "last_regression_diagnostics", None)

@@ -13,6 +13,13 @@ from pathlib import Path
 
 
 TASKS = ("classification", "regression")
+CLASSIFICATION_COMPONENTS = (
+    "accuracy",
+    "balanced_accuracy",
+    "macro_f1",
+    "nll",
+    "brier",
+)
 REGRESSION_COMPONENTS = (
     "mae",
     "rmse",
@@ -22,6 +29,7 @@ REGRESSION_COMPONENTS = (
     "bias",
     "median_ae",
     "quantile",
+    "r2",
 )
 LOSS_METRICS = (
     "loss/total",
@@ -38,6 +46,9 @@ LOSS_METRICS = (
 HEAD_METRICS = {
     "classification": (
         "head/classification/accuracy",
+        "head/classification/episode_accuracy",
+        "head/classification/episode_balanced_accuracy",
+        "head/classification/episode_macro_f1",
         "head/classification/nll",
         "head/classification/true_probability_mean",
         "head/classification/max_probability_mean",
@@ -56,6 +67,7 @@ HEAD_METRICS = {
         "head/regression/median_ae_hours",
         "head/regression/bias_hours",
         "head/regression/relative_mae",
+        "head/regression/r2",
         "head/regression/branch_weight_entropy_mean",
         "head/regression/branch_0/mae_hours",
         "head/regression/branch_0/weight_mean",
@@ -439,7 +451,18 @@ def _loss_contributions(records):
             value = _mean(last_train, f"task/{task}/{metric}")
             if value is not None:
                 task_result[metric] = value
-        if task == "regression":
+        if task == "classification":
+            for component in CLASSIFICATION_COMPONENTS:
+                value = _mean(
+                    last_train,
+                    f"task/classification/loss/classification/"
+                    f"{component}_surrogate_weighted",
+                )
+                if value is not None:
+                    task_result[
+                        f"loss/classification/{component}_surrogate_weighted"
+                    ] = value
+        else:
             for component in REGRESSION_COMPONENTS:
                 value = _mean(
                     last_train,
@@ -753,10 +776,13 @@ def _curve_rows(summary):
         "classification_validation_loss": ("validation", "task/classification/loss/total", True),
         "classification_train_accuracy": ("train", "task/classification/head/classification/accuracy", True),
         "classification_validation_accuracy": ("validation", "task/classification/head/classification/accuracy", True),
+        "classification_validation_balanced_accuracy": ("validation", "task/classification/head/classification/episode_balanced_accuracy", True),
+        "classification_validation_macro_f1": ("validation", "task/classification/head/classification/episode_macro_f1", True),
         "regression_train_loss": ("train", "task/regression/loss/total", True),
         "regression_validation_loss": ("validation", "task/regression/loss/total", True),
         "regression_train_mae_hours": ("train", "task/regression/head/regression/mae_hours", True),
         "regression_validation_mae_hours": ("validation", "task/regression/head/regression/mae_hours", True),
+        "regression_validation_r2": ("validation", "task/regression/head/regression/r2", True),
         "gradient_clip_fraction": ("train", "optimization/gradient_clip_fraction", True),
         "gradient_preclip_norm": ("train", "optimization/gradient_total_preclip", True),
         "step_success_fraction": ("epoch_metrics", "step_success_fraction", False),
@@ -782,7 +808,12 @@ def _long_metric_rows(summary, metric_kind):
             for task in TASKS:
                 if metric_kind == "loss":
                     metrics = list(LOSS_METRICS)
-                    if task == "regression":
+                    if task == "classification":
+                        metrics.extend(
+                            f"loss/classification/{component}_surrogate_weighted"
+                            for component in CLASSIFICATION_COMPONENTS
+                        )
+                    else:
                         metrics.extend(
                             f"loss/regression/{component}_weighted"
                             for component in REGRESSION_COMPONENTS
@@ -814,7 +845,10 @@ def _pool_curve_rows(summary, pool_names=None):
         "loss/total",
         "head/classification/accuracy",
         "head/classification/nll",
+        "head/classification/episode_balanced_accuracy",
+        "head/classification/episode_macro_f1",
         "head/regression/mae_hours",
+        "head/regression/r2",
         "head/regression/relative_mae",
         "head/regression/error_p90_hours",
     }

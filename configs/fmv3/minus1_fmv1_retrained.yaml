@@ -3,7 +3,10 @@ experiment_name: minus1_fmv1_retrained
 proto_head_lr_mult_after_warmup: 0.1
 training_strategy: episodic
 episodic_label_shuffle: "yes"
+classification_objective:
+  profile: legacy
 fmv3_head:
+  regression_objective_profile: custom
   classification_mode: legacy_soft_knn
   count_normalization: fixed
   count_normalization_gamma: 0.0

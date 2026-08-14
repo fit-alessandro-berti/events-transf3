@@ -4,7 +4,10 @@ epochs: 25
 episodes_per_epoch: 200
 classification_task_probability: 0.80
 proto_head_lr_mult_after_warmup: 5.0
+classification_objective:
+  profile: legacy
 fmv3_head:
+  regression_objective_profile: custom
   classification_mode: coverage_fallback
   local_temperature: 0.2
   global_temperature: 0.2

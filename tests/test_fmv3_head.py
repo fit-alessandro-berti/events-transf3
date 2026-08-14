@@ -21,15 +21,19 @@ class FMV3HeadTests(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(7)
 
-    def test_promoted_multimetric_defaults_and_historical_pin(self):
+    def test_equilibrated_defaults_and_historical_pin(self):
         head = PrototypicalHead(regression_mode="learned_transform_ensemble")
-        self.assertEqual(head.regression_huber_weight, 0.15)
-        self.assertEqual(head.regression_log_rmse_weight, 0.15)
-        self.assertEqual(head.regression_relative_mae_weight, 0.05)
-        self.assertEqual(head.regression_bias_weight, 0.05)
+        self.assertEqual(head.regression_objective_profile, "equilibrated")
+        for metric in (
+            "mae", "rmse", "huber", "log_rmse", "relative_mae", "bias",
+            "median_ae", "quantile", "r2",
+        ):
+            self.assertEqual(getattr(head, f"regression_{metric}_weight"), 1.0)
 
-        base = load_yaml_config("configs/fmv3/base.yaml")["fmv3_head"]
-        historical = load_yaml_config("configs/fmv3/00_fmv2.yaml")["fmv3_head"]
+        base_config = load_yaml_config("configs/fmv3/base.yaml")
+        historical_config = load_yaml_config("configs/fmv3/00_fmv2.yaml")
+        base = base_config["fmv3_head"]
+        historical = historical_config["fmv3_head"]
         selected = load_yaml_config(
             "configs/fmv3/loss_multimetric_gate_aux_005.yaml"
         )
@@ -44,6 +48,15 @@ class FMV3HeadTests(unittest.TestCase):
             self.assertEqual(historical[key], 0.0)
             self.assertEqual(selected["fmv3_head"][key], expected)
             self.assertEqual(selected_alias["fmv3_head"][key], expected)
+        self.assertEqual(base["regression_objective_profile"], "equilibrated")
+        self.assertEqual(
+            base_config["classification_objective"]["profile"], "equilibrated"
+        )
+        self.assertEqual(historical["regression_objective_profile"], "custom")
+        self.assertEqual(historical["regression_r2_weight"], 0.0)
+        self.assertEqual(
+            historical_config["classification_objective"]["profile"], "legacy"
+        )
         self.assertEqual(selected["selected_checkpoint_epoch"], 38)
         self.assertEqual(selected_alias["selected_checkpoint_epoch"], 38)
 
@@ -692,7 +705,7 @@ class FMV3HeadTests(unittest.TestCase):
         components = head.regression_loss_components(predictions, labels)
         for key in (
             "mae", "rmse", "huber", "log_rmse", "relative_mae", "bias",
-            "median_ae", "quantile"
+            "median_ae", "quantile", "r2"
         ):
             self.assertIn(key, components)
             self.assertTrue(torch.isfinite(components[key]))

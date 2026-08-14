@@ -1,5 +1,7 @@
 extends: base.yaml
 experiment_name: 06_full_fmv3
+classification_objective:
+  profile: legacy
 fmv3_training:
   episode_mix:
     balanced: 0.15
@@ -12,6 +14,7 @@ fmv3_training:
   long_tail_power_range: [0.75, 2.50]
   cases_per_episode_range: [4, 64]
 fmv3_head:
+  regression_objective_profile: custom
   classification_mode: global_local
   local_temperature: 0.2
   global_temperature: 0.2

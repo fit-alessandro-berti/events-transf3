@@ -46,6 +46,10 @@ CONFIG ={
 'episodic_label_shuffle':'yes', #no, yes, mixed
 'training_strategy':'retrieval', #episodic, retrieval, mixed
 'classification_label_smoothing':0.05,
+'classification_objective':{
+'profile':'equilibrated',
+'weights':{},
+},
 'classification_separation_weight':0.0,
 'classification_separation_temperature':0.10,
 'classification_separation_margin':0.15,
@@ -170,6 +174,10 @@ CONFIG ={
 'regression_example_selector_strength':1.0,
 'regression_mae_weight':0.5,
 'regression_rmse_weight':0.5,
+'regression_r2_weight':0.0,
+'regression_objective_profile':'equilibrated',
+'regression_metric_weights':{},
+'regression_r2_variance_floor':1e-4,
 'regression_huber_weight':0.15,
 'regression_huber_delta':1.0,
 'regression_log_rmse_weight':0.15,

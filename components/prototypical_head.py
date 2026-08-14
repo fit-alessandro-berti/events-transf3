@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from metric_objectives import REGRESSION_METRICS, resolve_regression_metric_weights
+
 
 def _l2_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     return x / x.norm(p=2, dim=-1, keepdim=True).clamp_min(eps)
@@ -363,45 +365,24 @@ class PrototypicalHead(nn.Module):
                 init_logit_scale=init_logit_scale,
                 **config,
             )
-        self.regression_mae_weight = max(
-            float(config.get("regression_mae_weight", 0.5)), 0.0
-        )
-        self.regression_rmse_weight = max(
-            float(config.get("regression_rmse_weight", 0.5)), 0.0
-        )
+        (
+            self.regression_objective_profile,
+            regression_metric_weights,
+        ) = resolve_regression_metric_weights(config)
+        for metric_name, metric_weight in regression_metric_weights.items():
+            setattr(self, f"regression_{metric_name}_weight", metric_weight)
         # Selected complementary metrics in raw hours after unit conversion.
         # Historical two-term behavior remains available by setting these
         # four weights to zero explicitly.
-        self.regression_huber_weight = max(
-            float(config.get("regression_huber_weight", 0.15)), 0.0
-        )
         self.regression_huber_delta = max(
             float(config.get("regression_huber_delta", 1.0)), 1e-4
-        )
-        self.regression_log_rmse_weight = max(
-            float(config.get("regression_log_rmse_weight", 0.15)), 0.0
-        )
-        self.regression_relative_mae_weight = max(
-            float(config.get("regression_relative_mae_weight", 0.05)), 0.0
-        )
-        self.regression_bias_weight = max(
-            float(config.get("regression_bias_weight", 0.05)), 0.0
-        )
-        self.regression_median_ae_weight = max(
-            float(config.get("regression_median_ae_weight", 0.0)), 0.0
-        )
-        self.regression_quantile_weight = max(
-            float(config.get("regression_quantile_weight", 0.0)), 0.0
         )
         self.regression_quantile_level = min(
             max(float(config.get("regression_quantile_level", 0.5)), 1e-3), 1.0 - 1e-3
         )
-        if self._regression_primary_weight_sum() <= 0:
-            raise ValueError(
-                "At least one regression primary metric weight must be positive "
-                "(mae, rmse, huber, log_rmse, relative_mae, bias, "
-                "median_ae, quantile)"
-            )
+        self.regression_r2_variance_floor = max(
+            float(config.get("regression_r2_variance_floor", 1e-4)), 1e-12
+        )
         self.regression_loss_scale_power = min(
             max(float(config.get("regression_loss_scale_power", 1.0)), 0.0), 1.0
         )
@@ -916,15 +897,9 @@ class PrototypicalHead(nn.Module):
         return labels
 
     def _regression_primary_weight_sum(self) -> float:
-        return (
-            self.regression_mae_weight
-            + self.regression_rmse_weight
-            + self.regression_huber_weight
-            + self.regression_log_rmse_weight
-            + self.regression_relative_mae_weight
-            + self.regression_bias_weight
-            + self.regression_median_ae_weight
-            + self.regression_quantile_weight
+        return sum(
+            getattr(self, f"regression_{name}_weight")
+            for name in REGRESSION_METRICS
         )
 
     def regression_loss_components(
@@ -982,6 +957,17 @@ class PrototypicalHead(nn.Module):
             level * errors,
             (level - 1.0) * errors,
         ).mean() / normalizer
+        # R2 maximization is equivalent to minimizing SSE/SST. log1p preserves
+        # that optimum while preventing a low-variance batch from dominating
+        # every other metric in the equilibrated profile. The variance floor is
+        # expressed after the same scale normalization as MAE/RMSE.
+        target_variance = (
+            (targets_f - targets_f.mean()) / normalizer
+        ).square().mean()
+        r2_error_ratio = normalized.square().mean() / target_variance.detach().clamp_min(
+            self.regression_r2_variance_floor
+        )
+        r2 = torch.log1p(r2_error_ratio)
         return {
             "mae": mae,
             "rmse": rmse,
@@ -991,6 +977,8 @@ class PrototypicalHead(nn.Module):
             "bias": bias,
             "median_ae": median_ae,
             "quantile": quantile,
+            "r2": r2,
+            "r2_error_ratio": r2_error_ratio,
             "normalizer": normalizer,
             "errors": errors,
             "targets": targets_f,
@@ -1117,6 +1105,7 @@ class PrototypicalHead(nn.Module):
         * ``bias`` — absolute mean residual (systematic shift control)
         * ``median_ae`` — direct typical-case absolute-error pressure
         * ``quantile`` — pinball residual (optional; level defaults to 0.5)
+        * ``r2`` — stabilized ``log1p(SSE/SST)`` pressure, monotonic in 1-R2
 
         Label units:
         - ``labels_in_output_space=False`` (default): ``labels`` are the stored
@@ -1143,6 +1132,7 @@ class PrototypicalHead(nn.Module):
             + self.regression_bias_weight * components["bias"]
             + self.regression_median_ae_weight * components["median_ae"]
             + self.regression_quantile_weight * components["quantile"]
+            + self.regression_r2_weight * components["r2"]
         )
         denominator = self._regression_primary_weight_sum()
         loss = weighted / denominator
