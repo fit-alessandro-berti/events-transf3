@@ -223,11 +223,7 @@ def classification_metric_objective(
 
     nll_rows = []
     normalized_nll_rows = []
-    true_probabilities = []
-    brier_rows = []
     probabilities_rows = []
-    target_class_ids = []
-    predicted_class_ids = []
     for logits, target_index, ids in valid_rows:
         target = torch.tensor([target_index], device=logits.device, dtype=torch.long)
         nll = F.cross_entropy(
@@ -236,61 +232,53 @@ def classification_metric_objective(
             label_smoothing=label_smoothing,
         )
         probabilities = F.softmax(logits, dim=0)
-        one_hot = F.one_hot(target, num_classes=logits.numel()).float().squeeze(0)
         nll_rows.append(nll)
         normalized_nll_rows.append(nll / math.log(max(logits.numel(), 2)))
-        true_probabilities.append(probabilities[target_index])
-        brier_rows.append(0.5 * (probabilities - one_hot).square().sum())
         probabilities_rows.append(probabilities)
-        target_class_ids.append(int(ids[target_index].detach().cpu()))
-        predicted_class_ids.append(int(ids[probabilities.argmax()].detach().cpu()))
 
-    true_probability = torch.stack(true_probabilities)
+    # Align query-specific class spaces into one differentiable probability
+    # matrix. One torch.unique and one scatter per query avoid thousands of
+    # scalar GPU synchronizations in a 128-query retrieval episode.
+    class_universe = torch.unique(
+        torch.cat([ids for _, _, ids in valid_rows]), sorted=True
+    )
+    aligned_probabilities = []
+    target_class_tensors = []
+    for probabilities, (_, target_index, ids) in zip(
+        probabilities_rows, valid_rows
+    ):
+        columns = torch.searchsorted(class_universe, ids)
+        aligned_probabilities.append(
+            probabilities.new_zeros(class_universe.numel()).scatter(
+                0, columns, probabilities
+            )
+        )
+        target_class_tensors.append(ids[target_index])
+    probability_matrix = torch.stack(aligned_probabilities)
+    target_classes = torch.stack(target_class_tensors)
+    truth = target_classes[:, None].eq(class_universe[None, :]).float()
+    support = truth.sum(dim=0)
+    supported = support > 0
+    true_positive = (truth * probability_matrix).sum(dim=0)
+    false_positive = ((1.0 - truth) * probability_matrix).sum(dim=0)
+    false_negative = (truth * (1.0 - probability_matrix)).sum(dim=0)
+    true_probability = (truth * probability_matrix).sum(dim=1)
+
     accuracy_loss = 1.0 - true_probability.mean()
-    unique_targets = sorted(set(target_class_ids))
-    class_universe = sorted({
-        int(class_id.detach().cpu())
-        for _, _, ids in valid_rows
-        for class_id in ids
-    })
-    per_class_soft_recall = []
-    per_class_soft_f1 = []
-    for class_id in class_universe:
-        truth = torch.tensor(
-            [value == class_id for value in target_class_ids],
-            device=true_probability.device,
-            dtype=true_probability.dtype,
-        )
-        class_probabilities = []
-        for probabilities, (_, _, ids) in zip(probabilities_rows, valid_rows):
-            matches = (ids == class_id).nonzero(as_tuple=False).reshape(-1)
-            class_probabilities.append(
-                probabilities[matches[0]]
-                if matches.numel()
-                else probabilities.new_tensor(0.0)
-            )
-        predicted = torch.stack(class_probabilities)
-        true_positive = (truth * predicted).sum()
-        false_positive = ((1.0 - truth) * predicted).sum()
-        false_negative = (truth * (1.0 - predicted)).sum()
-        if class_id in unique_targets:
-            per_class_soft_recall.append(
-                true_positive / truth.sum().clamp_min(1.0)
-            )
-        per_class_soft_f1.append(
-            (2.0 * true_positive)
-            / (2.0 * true_positive + false_positive + false_negative).clamp_min(1e-8)
-        )
-
-    balanced_accuracy_loss = 1.0 - torch.stack(per_class_soft_recall).mean()
-    macro_f1_loss = 1.0 - torch.stack(per_class_soft_f1).mean()
+    balanced_accuracy_loss = 1.0 - (
+        true_positive[supported] / support[supported]
+    ).mean()
+    macro_f1_loss = 1.0 - (
+        2.0 * true_positive
+        / (2.0 * true_positive + false_positive + false_negative).clamp_min(1e-8)
+    ).mean()
     nll_raw = torch.stack(nll_rows).mean()
     components = {
         "accuracy": accuracy_loss,
         "balanced_accuracy": balanced_accuracy_loss,
         "macro_f1": macro_f1_loss,
         "nll": torch.stack(normalized_nll_rows).mean(),
-        "brier": torch.stack(brier_rows).mean(),
+        "brier": 0.5 * (probability_matrix - truth).square().sum(dim=1).mean(),
     }
     if profile == "legacy":
         loss = nll_raw
@@ -298,37 +286,31 @@ def classification_metric_objective(
         denominator = sum(weights.values())
         loss = sum(weights[name] * components[name] for name in weights) / denominator
 
-    hard_accuracy = sum(
-        prediction == target
-        for prediction, target in zip(predicted_class_ids, target_class_ids)
-    ) / len(target_class_ids)
-    recalls = []
-    f1s = []
-    for class_id in class_universe:
-        tp = sum(
-            prediction == class_id and target == class_id
-            for prediction, target in zip(predicted_class_ids, target_class_ids)
-        )
-        fp = sum(
-            prediction == class_id and target != class_id
-            for prediction, target in zip(predicted_class_ids, target_class_ids)
-        )
-        fn = sum(
-            prediction != class_id and target == class_id
-            for prediction, target in zip(predicted_class_ids, target_class_ids)
-        )
-        if class_id in unique_targets:
-            recalls.append(tp / max(tp + fn, 1))
-        f1s.append(2 * tp / max(2 * tp + fp + fn, 1))
+    hard_columns = probability_matrix.argmax(dim=1)
+    predicted_classes = class_universe[hard_columns]
+    hard_prediction = F.one_hot(
+        hard_columns, num_classes=class_universe.numel()
+    ).float()
+    hard_true_positive = (truth * hard_prediction).sum(dim=0)
+    hard_false_positive = ((1.0 - truth) * hard_prediction).sum(dim=0)
+    hard_false_negative = (truth * (1.0 - hard_prediction)).sum(dim=0)
+    hard_accuracy = predicted_classes.eq(target_classes).float().mean()
+    hard_balanced_accuracy = (
+        hard_true_positive[supported] / support[supported]
+    ).mean()
+    hard_macro_f1 = (
+        2.0 * hard_true_positive
+        / (
+            2.0 * hard_true_positive
+            + hard_false_positive
+            + hard_false_negative
+        ).clamp_min(1.0)
+    ).mean()
 
     diagnostics = {
-        "head/classification/episode_accuracy": loss.new_tensor(hard_accuracy),
-        "head/classification/episode_balanced_accuracy": loss.new_tensor(
-            sum(recalls) / len(recalls)
-        ),
-        "head/classification/episode_macro_f1": loss.new_tensor(
-            sum(f1s) / len(f1s)
-        ),
+        "head/classification/episode_accuracy": hard_accuracy,
+        "head/classification/episode_balanced_accuracy": hard_balanced_accuracy,
+        "head/classification/episode_macro_f1": hard_macro_f1,
         "loss/classification/nll_raw": nll_raw,
     }
     for name, component in components.items():
