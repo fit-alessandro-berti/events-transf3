@@ -51,7 +51,7 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         findings = {finding["kind"]: finding for finding in result["findings"]}
         self.assertEqual(findings["amp_overflow"]["severity"], "high")
 
-    def test_analysis_flags_auxiliary_gradient_near_primary_magnitude(self):
+    def test_analysis_flags_metric_gradient_imbalance(self):
         records = []
         for epoch in range(1, 4):
             records.append(
@@ -61,6 +61,7 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
                         "task/regression/loss/total": _metric(1.0),
                         "task/regression/optimization/loss_gradient/primary/all/l2_norm": _metric(4.0),
                         "task/regression/optimization/loss_gradient/regression/median_ae_weighted/all/l2_norm": _metric(3.0),
+                        "task/regression/optimization/loss_gradient/regression/mae_weighted/all/l2_norm": _metric(0.4),
                     },
                     "validation": {
                         "task/regression/loss/total": _metric(1.0),
@@ -73,14 +74,14 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         findings = [
             finding
             for finding in result["findings"]
-            if finding["kind"] == "large_auxiliary_gradient"
+            if finding["kind"] == "metric_gradient_imbalance"
         ]
         self.assertEqual(len(findings), 1)
         self.assertEqual(
             findings[0]["metric"], "regression/median_ae_weighted"
         )
         self.assertAlmostEqual(
-            findings[0]["evidence"]["mean_gradient_ratio_to_primary"], 0.75
+            findings[0]["evidence"]["largest_to_smallest_ratio"], 7.5
         )
 
     def test_analysis_flags_uniform_branch_gate_despite_mae_spread(self):

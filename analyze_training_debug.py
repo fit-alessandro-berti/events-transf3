@@ -708,11 +708,16 @@ def analyze(summary, pool_names=None):
         primary_mean = components.get("primary", {}).get("mean")
         if primary_mean is None or primary_mean <= 0.0:
             continue
+        metric_gradients = {}
         for component, values in components.items():
             if component == "primary":
                 continue
             component_mean = values.get("mean")
             if component_mean is None:
+                continue
+            if component.startswith(("classification/", "regression/")):
+                if component_mean > 0:
+                    metric_gradients[component] = component_mean
                 continue
             ratio = component_mean / primary_mean
             if ratio >= 0.5:
@@ -726,6 +731,25 @@ def analyze(summary, pool_names=None):
                             "mean_gradient_norm": component_mean,
                             "primary_mean_gradient_norm": primary_mean,
                             "mean_gradient_ratio_to_primary": ratio,
+                        },
+                    }
+                )
+        if len(metric_gradients) >= 2:
+            smallest = min(metric_gradients.values())
+            largest_name, largest = max(
+                metric_gradients.items(), key=lambda item: item[1]
+            )
+            imbalance = largest / max(smallest, 1e-12)
+            if imbalance >= 5.0:
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "kind": "metric_gradient_imbalance",
+                        "task": task,
+                        "metric": largest_name,
+                        "evidence": {
+                            "component_mean_gradient_norms": metric_gradients,
+                            "largest_to_smallest_ratio": imbalance,
                         },
                     }
                 )

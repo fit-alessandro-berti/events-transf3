@@ -304,6 +304,18 @@ from-scratch run; the fixed target screen still leaves selected epoch 44 as
 the promoted checkpoint. Stronger smoothing, reweighted regression losses,
 and clip caps of 5 or 10 were not transferable replacements.
 
+### Adaptable metric objectives
+
+Training intent is configurable independently for both tasks. Classification
+profiles target accuracy, balanced accuracy, macro-F1, NLL, Brier, a custom
+blend, or the historical cross-entropy path. Regression profiles target an
+equilibrated metric blend, MAE, RMSE, R2, or custom weights. The base default is
+initial-gradient-calibrated `equilibrated`; historical experiment roots remain
+explicitly pinned for reproducibility. Definitions, stability behavior,
+configuration examples, diagnostics, and the matched extreme-objective
+experiment matrix are in
+[`paper_docs/fmv3_metric_objectives.md`](paper_docs/fmv3_metric_objectives.md).
+
 “Time from the end” is not an input feature: the true time until case end is
 the remaining-time label, so passing it to either task would leak the answer.
 The second observable prefix clock is `time_from_previous`.

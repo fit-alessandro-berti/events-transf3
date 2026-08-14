@@ -1,6 +1,7 @@
 # Matched from-scratch baseline for adaptable metric-target objectives.
 # The architecture, source-case split, task mix, schedule, and head-focused LR
-# multipliers are fixed across every metric-target experiment below.
+# multipliers are fixed across every metric-target experiment below. The
+# equilibrated profile uses initial-gradient-calibrated metric weights.
 extends: training_debug_full_retrain.yaml
 experiment_name: training_metric_equilibrated_retrain
 classification_label_smoothing: 0.05
@@ -20,4 +21,3 @@ training_lr_multipliers:
 fmv3_head:
   regression_objective_profile: equilibrated
   regression_metric_weights: {}
-

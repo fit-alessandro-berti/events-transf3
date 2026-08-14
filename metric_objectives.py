@@ -35,8 +35,32 @@ REGRESSION_METRICS = (
     "r2",
 )
 
+# Equilibrated weights are calibrated against initial per-component gradient
+# norms on the fixed source-case smoke protocol. This avoids "equal scalar
+# weight" silently meaning 6x NLL pressure or 24x median-AE pressure. Named
+# single-metric profiles still reduce exactly to their selected surrogate
+# because every blend is divided by its active weight sum.
+CLASSIFICATION_EQUILIBRATED_WEIGHTS = {
+    "accuracy": 1.0,
+    "balanced_accuracy": 1.0,
+    "macro_f1": 1.0,
+    "nll": 0.18,
+    "brier": 1.0,
+}
+REGRESSION_EQUILIBRATED_WEIGHTS = {
+    "mae": 1.0,
+    "rmse": 1.0,
+    "huber": 1.3,
+    "log_rmse": 0.8,
+    "relative_mae": 0.15,
+    "bias": 0.75,
+    "median_ae": 0.08,
+    "quantile": 2.0,
+    "r2": 1.4,
+}
+
 CLASSIFICATION_PROFILES = {
-    "equilibrated": {name: 1.0 for name in CLASSIFICATION_METRICS},
+    "equilibrated": CLASSIFICATION_EQUILIBRATED_WEIGHTS,
     "accuracy": {"accuracy": 1.0},
     "balanced_accuracy": {"balanced_accuracy": 1.0},
     "macro_f1": {"macro_f1": 1.0},
@@ -44,7 +68,7 @@ CLASSIFICATION_PROFILES = {
     "brier": {"brier": 1.0},
 }
 REGRESSION_PROFILES = {
-    "equilibrated": {name: 1.0 for name in REGRESSION_METRICS},
+    "equilibrated": REGRESSION_EQUILIBRATED_WEIGHTS,
     "mae": {"mae": 1.0},
     "rmse": {"rmse": 1.0},
     "r2": {"r2": 1.0},

@@ -21,9 +21,9 @@ retrieval_knn_aux_weight: 0.1
 proto_head_lr_mult_after_warmup: 1.0
 classification_task_probability: 0.50
 classification_label_smoothing: 0.05
-# Metric-aligned default. Each bounded/normalized surrogate receives equal
-# weight; use profile accuracy, balanced_accuracy, macro_f1, nll, or brier for
-# a single-metric classification objective.
+# Metric-aligned default. Bounded/normalized surrogates use initial-gradient-
+# calibrated weights; use profile accuracy, balanced_accuracy, macro_f1, nll,
+# or brier for a single-metric classification objective.
 classification_objective:
   profile: equilibrated
   weights: {}
@@ -113,7 +113,7 @@ fmv3_head:
   regression_example_selector_strength: 1.0
   regression_mae_weight: 0.5
   regression_rmse_weight: 0.5
-  # The default profile gives every normalized regression metric equal weight.
+  # The default profile balances initial gradient pressure across metrics.
   # Flat weights remain below for profile=custom and historical experiments.
   regression_objective_profile: equilibrated
   regression_metric_weights: {}

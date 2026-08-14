@@ -24,11 +24,20 @@ class FMV3HeadTests(unittest.TestCase):
     def test_equilibrated_defaults_and_historical_pin(self):
         head = PrototypicalHead(regression_mode="learned_transform_ensemble")
         self.assertEqual(head.regression_objective_profile, "equilibrated")
-        for metric in (
-            "mae", "rmse", "huber", "log_rmse", "relative_mae", "bias",
-            "median_ae", "quantile", "r2",
-        ):
-            self.assertEqual(getattr(head, f"regression_{metric}_weight"), 1.0)
+        for metric, expected in {
+            "mae": 1.0,
+            "rmse": 1.0,
+            "huber": 1.3,
+            "log_rmse": 0.8,
+            "relative_mae": 0.15,
+            "bias": 0.75,
+            "median_ae": 0.08,
+            "quantile": 2.0,
+            "r2": 1.4,
+        }.items():
+            self.assertEqual(
+                getattr(head, f"regression_{metric}_weight"), expected
+            )
 
         base_config = load_yaml_config("configs/fmv3/base.yaml")
         historical_config = load_yaml_config("configs/fmv3/00_fmv2.yaml")

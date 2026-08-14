@@ -32,6 +32,7 @@ def _regression_component_metrics(head, components):
         value = components[name]
         metrics[f"loss/regression/{name}_raw"] = value
         metrics[f"loss/regression/{name}_weighted"] = weight * value / denominator
+        metrics[f"objective/regression/{name}_weight"] = value.new_tensor(weight)
     metrics["loss/regression/normalizer_hours"] = components["normalizer"]
     return metrics
 

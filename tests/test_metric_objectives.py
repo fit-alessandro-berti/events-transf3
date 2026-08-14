@@ -72,7 +72,11 @@ class MetricObjectiveTests(unittest.TestCase):
         self.assertEqual(set(result.weights), {
             "accuracy", "balanced_accuracy", "macro_f1", "nll", "brier"
         })
-        expected = torch.stack(list(result.components.values())).mean()
+        denominator = sum(result.weights.values())
+        expected = sum(
+            result.weights[name] * result.components[name]
+            for name in result.weights
+        ) / denominator
         torch.testing.assert_close(result.loss, expected)
         self.assertIn(
             "head/classification/episode_balanced_accuracy", result.diagnostics

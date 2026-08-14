@@ -898,6 +898,9 @@ def run_retrieval_step(
                 diagnostics_out[f"loss/regression/{name}_weighted"] = (
                     weight * regression_components[name] / denominator
                 )
+                diagnostics_out[f"objective/regression/{name}_weight"] = (
+                    regression_components[name].new_tensor(weight)
+                )
             diagnostics_out["loss/regression/normalizer_hours"] = (
                 regression_components["normalizer"]
             )
