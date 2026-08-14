@@ -262,6 +262,51 @@ class AnalyzeTrainingDebugTests(unittest.TestCase):
         self.assertEqual(finding["evidence"]["worst_log"], "large")
         self.assertGreater(finding["evidence"]["ratio_to_median_pool"], 18.0)
 
+    def test_analysis_detects_balanced_accuracy_overfitting(self):
+        records = []
+        validation_values = [0.50, 0.60, 0.59, 0.57, 0.55]
+        for epoch, validation_value in enumerate(validation_values, start=1):
+            records.append(
+                {
+                    "epoch": epoch,
+                    "train": {
+                        "task/classification/loss/total": _metric(1.0),
+                        "task/classification/head/classification/episode_balanced_accuracy": _metric(
+                            0.40 + 0.10 * epoch
+                        ),
+                    },
+                    "validation": {
+                        "task/classification/loss/total": _metric(1.0),
+                        "task/classification/head/classification/episode_balanced_accuracy": _metric(
+                            validation_value
+                        ),
+                    },
+                    "epoch_metrics": {},
+                    "updates": {},
+                }
+            )
+        result = analyze(
+            {
+                "epochs": records,
+                "configuration": {
+                    "overfitting_patience": 3,
+                    "overfitting_relative_tolerance": 0.02,
+                },
+            }
+        )
+        metric = result["tasks"]["classification"]["adaptable_metrics"][
+            "balanced_accuracy"
+        ]
+        self.assertEqual(metric["best_validation_epoch"], 2)
+        self.assertTrue(metric["overfitting_signal"])
+        self.assertTrue(
+            any(
+                finding["kind"] == "overfitting"
+                and finding["task"] == "classification"
+                for finding in result["findings"]
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

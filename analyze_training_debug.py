@@ -278,6 +278,99 @@ def _classification_accuracy_overfitting(records, configuration):
     }
 
 
+def _metric_overfitting_summary(
+    records, task, metric, configuration, *, maximize
+):
+    """Screen any adaptable metric with the same declared patience/tolerance."""
+
+    key = f"task/{task}/{metric}"
+    train = dict(_series(records, "train", key))
+    validation = _series(records, "validation", key)
+    curve = [
+        (epoch, train[epoch], value)
+        for epoch, value in validation
+        if epoch in train
+    ]
+    if not curve:
+        return {}
+    patience = max(1, int((configuration or {}).get("overfitting_patience", 3)))
+    tolerance = max(
+        0.0,
+        float((configuration or {}).get("overfitting_relative_tolerance", 0.02)),
+    )
+    chooser = max if maximize else min
+    best_index = chooser(
+        range(len(curve)), key=lambda index: curve[index][2]
+    )
+    best_epoch, best_train, best_validation = curve[best_index]
+    last_epoch, last_train, last_validation = curve[-1]
+    degradation_absolute = (
+        best_validation - last_validation
+        if maximize
+        else last_validation - best_validation
+    )
+    train_improvement_absolute = (
+        last_train - best_train if maximize else best_train - last_train
+    )
+    validation_scale = max(
+        abs(best_validation),
+        abs(curve[0][2]),
+        1e-8,
+    )
+    train_scale = max(abs(best_train), abs(curve[0][1]), 1e-8)
+    degradation = degradation_absolute / validation_scale
+    train_improvement = train_improvement_absolute / train_scale
+    enough_epochs = len(curve) - 1 - best_index >= patience
+    return {
+        "metric": metric,
+        "direction": "max" if maximize else "min",
+        "best_validation_epoch": best_epoch,
+        "best_validation_value": best_validation,
+        "last_epoch": last_epoch,
+        "last_validation_value": last_validation,
+        "relative_validation_degradation": degradation,
+        "relative_train_improvement_since_best": train_improvement,
+        "overfitting_signal": bool(
+            enough_epochs and degradation > tolerance and train_improvement > 0.0
+        ),
+        "patience_epochs": patience,
+        "relative_tolerance": tolerance,
+        "epoch_three": _improvement_by_epoch(
+            [(epoch, value) for epoch, _, value in curve],
+            3,
+            maximize=maximize,
+        ),
+    }
+
+
+def _adaptable_metric_summaries(records, task, configuration):
+    specifications = (
+        {
+            "accuracy": ("head/classification/episode_accuracy", True),
+            "balanced_accuracy": (
+                "head/classification/episode_balanced_accuracy", True
+            ),
+            "macro_f1": ("head/classification/episode_macro_f1", True),
+            "nll": ("head/classification/nll", False),
+            "brier": (
+                "loss/classification/brier_surrogate_raw", False
+            ),
+        }
+        if task == "classification"
+        else {
+            "mae_hours": ("head/regression/mae_hours", False),
+            "rmse_hours": ("head/regression/rmse_hours", False),
+            "r2": ("head/regression/r2", True),
+        }
+    )
+    return {
+        name: _metric_overfitting_summary(
+            records, task, metric, configuration, maximize=maximize
+        )
+        for name, (metric, maximize) in specifications.items()
+    }
+
+
 def _optimization_summary(records):
     result = {}
     for name, section, key, aggregate in (
@@ -499,6 +592,9 @@ def analyze(summary, pool_names=None):
                 if task == "classification"
                 else {}
             ),
+            "adaptable_metrics": _adaptable_metric_summaries(
+                records, task, diagnostics_configuration
+            ),
         }
     optimization = _optimization_summary(records)
     heads = _head_summary(records)
@@ -516,7 +612,17 @@ def analyze(summary, pool_names=None):
         decision_overfit = task_result["decision_overfitting"].get(
             "overfitting_signal"
         )
-        overfit = invariant_overfit or objective_overfit or decision_overfit
+        adaptable_overfit = {
+            name: metric
+            for name, metric in task_result["adaptable_metrics"].items()
+            if metric.get("overfitting_signal")
+        }
+        overfit = (
+            invariant_overfit
+            or objective_overfit
+            or decision_overfit
+            or bool(adaptable_overfit)
+        )
         if overfit:
             findings.append(
                 {
@@ -526,6 +632,7 @@ def analyze(summary, pool_names=None):
                     "evidence": {
                         "invariant": task_result["invariant_overfitting"],
                         "decision": task_result["decision_overfitting"],
+                        "adaptable_metrics": adaptable_overfit,
                         "objective": task_result["automatic_overfitting"],
                     },
                 }
@@ -965,9 +1072,16 @@ def _markdown(analysis):
                 f"{result['invariant_overfitting'].get('generalization_gap_signal')}",
                 "- Decision-metric overfitting signal: "
                 f"{result['decision_overfitting'].get('overfitting_signal')}",
-                "",
             ]
         )
+        for name, metric in result["adaptable_metrics"].items():
+            if metric:
+                lines.append(
+                    f"- Best `{name}`: {metric.get('best_validation_value')} "
+                    f"(epoch {metric.get('best_validation_epoch')}); "
+                    f"overfitting: {metric.get('overfitting_signal')}"
+                )
+        lines.append("")
     lines.extend(["## Detected bottlenecks", ""])
     if not analysis["findings"]:
         lines.append("No automatic bottleneck threshold fired.")
