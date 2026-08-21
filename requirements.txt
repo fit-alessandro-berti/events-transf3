@@ -1,4 +1,9 @@
 torch
+# PyTorch 2.13+cu130 pins nvidia-cudnn-cu13==9.20.0.48. That wheel has no
+# libcudnn_engines_tensor_ir, so cuDNN loads the system 9.25 copy and training
+# dies with CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH. Install 9.24 after torch:
+#   pip install --no-deps nvidia-cudnn-cu13==9.24.0.43
+nvidia-cudnn-cu13==9.24.0.43
 numpy
 pandas
 pm4py
