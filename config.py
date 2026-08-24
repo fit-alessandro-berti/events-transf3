@@ -2,50 +2,28 @@ import os
 
 LOG_DIR = './logs'
 
-# Training log sets are active for an inclusive epoch range. At the beginning
-# of each epoch, training.py uniformly selects one of the active sets.
-#
-# A set may use an explicit ``log_paths`` mapping (as below), or discover all
-# XES files in a folder with ``directory`` and optional ``patterns``. Add as
-# many entries as needed; set ``enabled`` to False to temporarily disable one.
-DEFAULT_TRAINING_LOGS = {
-    'o2c': os.path.join(LOG_DIR, '00001_o2c.xes.gz'),
-    'hire2retire': os.path.join(LOG_DIR, '00002_hire2retire.xes.gz'),
-    'di2re': os.path.join(LOG_DIR, '00003_di2re.xes.gz'),
-    'mak2stock': os.path.join(LOG_DIR, '00004_mak2stock.xes.gz'),
-    'offer2accept': os.path.join(LOG_DIR, '00005_offer2accept.xes.gz'),
-    'quote2order': os.path.join(LOG_DIR, '00006_quote2order.xes.gz'),
-    'opp2quote': os.path.join(LOG_DIR, '00007_opp2quote.xes.gz'),
-    'lead2opp': os.path.join(LOG_DIR, '00008_lead2opp.xes.gz'),
-    'p2p': os.path.join(LOG_DIR, '00009_p2p.xes.gz'),
-    'rid2mit': os.path.join(LOG_DIR, '00010_rid2mit.xes.gz'),
-    'req2receipt': os.path.join(LOG_DIR, '00011_req2receipt.xes.gz'),
-}
+# Each directory is scanned non-recursively for *.xes and *.xes.gz files.
+# Epoch ranges are inclusive. Add another dictionary to add another log set.
 TRAINING_LOG_SETS = [
     {
-        'name': 'default',
-        'enabled': True,
+        'name': 'logs',
+        'directory': LOG_DIR,
         'epochs': (1, 100),
-        'log_paths': DEFAULT_TRAINING_LOGS,
     },
-    # Example: this set overlaps the default set from epochs 10 through 100.
-    # During those epochs, one of the two active sets is selected uniformly.
-    # {
-    #     'name': 'generated',
-    #     'enabled': True,
-    #     'epochs': (10, 100),
-    #     'directory': os.path.join(LOG_DIR, 'out'),
-    #     'patterns': ('*.xes', '*.xes.gz'),
-    # },
+    {
+        'name': 'logs_out',
+        'directory': os.path.join(LOG_DIR, 'out'),
+        'epochs': (10, 100),
+    },
 ]
-CONFIG ={
-'log_paths':{
-'training':DEFAULT_TRAINING_LOGS,
-'testing':{
-'D_unseen':os .path .join (LOG_DIR ,'00013_clos2rep.xes.gz')
-}
-},
-'training_log_sets':TRAINING_LOG_SETS,
+
+CONFIG = {
+    'training_log_sets': TRAINING_LOG_SETS,
+    'log_paths': {
+        'testing': {
+            'D_unseen': os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),
+        },
+    },
 'moe_settings':{
 'num_experts':4
 },

@@ -48,24 +48,21 @@ sets near the top of `config.py`:
 ```python
 TRAINING_LOG_SETS = [
     {
-        "name": "default",
-        "enabled": True,
+        "name": "logs",
+        "directory": LOG_DIR,
         "epochs": (1, 100),
-        "log_paths": DEFAULT_TRAINING_LOGS,
     },
     {
-        "name": "generated",
-        "enabled": True,
-        "epochs": (10, 100),
+        "name": "logs_out",
         "directory": os.path.join(LOG_DIR, "out"),
-        "patterns": ("*.xes", "*.xes.gz"),
+        "epochs": (10, 100),
     },
 ]
 ```
 
-A set may use `log_paths`, `directory`, or both. Add more entries as needed, or
-temporarily exclude one with `enabled: False`. Every configured training epoch
-must be covered by at least one enabled set.
+Directories are scanned non-recursively for `.xes` and `.xes.gz` files. Add
+more entries as needed. Every configured training epoch must be covered by at
+least one enabled set.
 
 ## Training
 

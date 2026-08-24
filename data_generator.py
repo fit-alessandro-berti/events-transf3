@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn .metrics .pairwise import cosine_similarity
 from scipy .optimize import linear_sum_assignment
 from config import CONFIG
+from training_log_sets import combined_training_log_paths, resolve_training_log_sets
 class XESLogLoader :
     def __init__ (self ,strategy :str ,sbert_model_name :str ='all-MiniLM-L6-v2'):
         self .strategy =strategy
@@ -242,7 +243,7 @@ if __name__ =="__main__":
         print (f"Note: CONFIG['test_mode'] is '{test_mode }', not 'retrieval_augmented'.")
     print ("\n--- Data Generator Debug: Retrieval-Augmented Test Logs ---")
     print (f"Embedding strategy: {CONFIG .get ('embedding_strategy')}")
-    train_logs =CONFIG .get ('log_paths',{}).get ('training',{})
+    train_logs =combined_training_log_paths (resolve_training_log_sets (CONFIG ))
     test_logs =CONFIG .get ('log_paths',{}).get ('testing',{})
     print (f"Training logs: {list (train_logs .keys ())}")
     print (f"Testing logs: {list (test_logs .keys ())}")
