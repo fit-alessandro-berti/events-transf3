@@ -1,0 +1,13 @@
+checkpoint,checkpoint_epoch,log,fraction_percent,task,retrieval_k,effective_k,support_prefixes,n_queries,accuracy,mae_hours,fmv2_proto_reference,candidate_minus_reference,beats_fmv2
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,0.5,classification,20,20,71,2610,0.5390804409980774,,0.4458,0.09328044099807742,True
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,0.5,classification,50,50,71,2610,0.5199233889579773,,0.4458,0.07412338895797732,True
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,0.5,classification,100,71,71,2610,0.5275862216949463,,0.4458,0.08178622169494631,True
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,0.5,regression,20,20,71,2610,,1045.540283203125,703.1954,342.34488320312505,False
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,0.5,regression,50,50,71,2610,,1037.9130859375,703.1954,334.71768593750005,False
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,0.5,regression,100,71,71,2610,,1015.2127685546875,703.1954,312.01736855468755,False
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,1.0,classification,20,20,225,2610,0.5429118871688843,,0.4663,0.07661188716888429,True
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,1.0,classification,50,50,225,2610,0.5563218593597412,,0.4663,0.09002185935974122,True
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,1.0,classification,100,100,225,2610,0.5318007469177246,,0.4663,0.06550074691772462,True
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,1.0,regression,20,20,225,2610,,1405.0517578125,936.7253,468.32645781250005,False
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,1.0,regression,50,50,225,2610,,1340.3885498046875,936.7253,403.66324980468755,False
+/home/berti/events-transf3/checkpoints/parameter_ablation/e4_d256/model_epoch_20.pth,20,sepsis,1.0,regression,100,100,225,2610,,1305.548095703125,936.7253,368.82279570312505,False

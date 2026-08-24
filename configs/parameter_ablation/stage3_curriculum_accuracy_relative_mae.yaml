@@ -1,0 +1,35 @@
+experiment_name: parameter_ablation_curriculum_accuracy_relative_mae
+seed: 42
+training_log_sets:
+  - name: logs
+    directory: ./logs
+    epochs: [1, 5]
+  - name: logs_out
+    directory: ./logs/out
+    epochs: [6, 100]
+moe_settings:
+  num_experts: 4
+d_model: 256
+n_heads: 8
+n_layers: 6
+dropout: 0.15
+lr: 0.0001
+weight_decay: 0.01
+epochs: 100
+episodes_per_epoch: 300
+gradient_clip_norm: 1.0
+classification_objective:
+  profile: accuracy
+  weights: {}
+fmv3_head:
+  regression_objective_profile: custom
+  regression_metric_weights:
+    mae: 0.0
+    rmse: 0.0
+    huber: 0.0
+    log_rmse: 0.0
+    relative_mae: 1.0
+    bias: 0.0
+    median_ae: 0.0
+    quantile: 0.0
+    r2: 0.0

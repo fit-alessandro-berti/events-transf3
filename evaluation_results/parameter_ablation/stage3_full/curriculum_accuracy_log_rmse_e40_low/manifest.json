@@ -1,0 +1,49 @@
+{
+  "checkpoint": "/home/berti/events-transf3/checkpoints/parameter_ablation/curriculum_accuracy_log_rmse/model_epoch_40.pth",
+  "checkpoint_epoch": 40,
+  "checkpoint_regression_mode": "sqrt_knn",
+  "checkpoint_sha256": "cb116347318b4a83738689880a2dcd3dc5c7148e22f0840002a8965a202a1b97",
+  "evaluated_regression_mode": "sqrt_knn",
+  "evaluator": "/home/berti/events-transf3/evaluate_fmv2_paper_protocol.py",
+  "evaluator_sha256": "e24ed9d6d4f7967594c5108ff14d0946b899e93e9313274820d73d647b471ba1",
+  "expert_head_representation": "per-expert L2-normalized embedding",
+  "fractions_percent": [
+    0.5,
+    1.0
+  ],
+  "logs": [
+    "billing",
+    "helpdesk",
+    "receipt",
+    "roadtraffic_10000",
+    "sepsis"
+  ],
+  "model": {
+    "d_model": 256,
+    "dropout": 0.15,
+    "n_heads": 8,
+    "n_layers": 6,
+    "num_experts": 4,
+    "parameters": 21371260
+  },
+  "neighborhood_sharing": "one model-level neighbor set shared by all experts",
+  "num_queries_per_task_log": 0,
+  "overview_selection": "best task metric across retrieval_k; smallest k on ties",
+  "paper_repository": "/tmp/experiments-fm",
+  "paper_repository_commit": "5f4da9d79ac51beb98dda4b6e1fd6f94e3a4abf3",
+  "query_selection": "all held-out prefixes",
+  "reference": "/home/berti/events-transf3/paper_docs/fmv2_new2_proto_reference.csv",
+  "reference_sha256": "9c881ccdbb6722c0ea3023d5049450b5c389f6d01e168abfa864905bd64c6a8e",
+  "regression_mode_override": null,
+  "retrieval_k": [
+    1,
+    5,
+    10,
+    20,
+    50,
+    100,
+    200
+  ],
+  "retrieval_representation": "L2(mean(raw expert embedding))",
+  "seed": 42
+}

@@ -1,0 +1,26 @@
+experiment_name: parameter_ablation_curriculum_metric_targets_seed43
+seed: 43
+training_log_sets:
+  - name: logs
+    directory: ./logs
+    epochs: [1, 5]
+  - name: logs_out
+    directory: ./logs/out
+    epochs: [6, 100]
+moe_settings:
+  num_experts: 4
+d_model: 256
+n_heads: 8
+n_layers: 6
+dropout: 0.15
+lr: 0.0001
+weight_decay: 0.01
+epochs: 100
+episodes_per_epoch: 300
+gradient_clip_norm: 1.0
+classification_objective:
+  profile: accuracy
+  weights: {}
+fmv3_head:
+  regression_objective_profile: mae
+  regression_metric_weights: {}

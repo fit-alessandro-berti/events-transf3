@@ -1,0 +1,35 @@
+{
+  "checkpoint": "/home/berti/events-transf3/checkpoints/parameter_ablation/e8_d256/model_epoch_5.pth",
+  "checkpoint_epoch": 5,
+  "checkpoint_sha256": "78b959d13f96393cedf843f03dab58e516f94e382a752d579cd09e6c514f579f",
+  "fractions_percent": [
+    0.5,
+    1.0
+  ],
+  "logs": [
+    "billing",
+    "helpdesk",
+    "receipt",
+    "roadtraffic_10000",
+    "sepsis"
+  ],
+  "model": {
+    "d_model": 256,
+    "dropout": 0.15,
+    "n_heads": 8,
+    "n_layers": 6,
+    "num_experts": 8,
+    "parameters": 42742520
+  },
+  "num_queries_per_task_log": 200,
+  "paper_repository": "/tmp/experiments-fm",
+  "paper_repository_commit": "5f4da9d79ac51beb98dda4b6e1fd6f94e3a4abf3",
+  "reference": "/home/berti/events-transf3/paper_docs/fmv2_new2_proto_reference.csv",
+  "retrieval_k": [
+    10,
+    20,
+    50,
+    100
+  ],
+  "seed": 42
+}

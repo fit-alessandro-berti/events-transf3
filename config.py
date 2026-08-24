@@ -8,12 +8,12 @@ TRAINING_LOG_SETS = [
     {
         'name': 'logs',
         'directory': LOG_DIR,
-        'epochs': (1, 100),
+        'epochs': (1, 5),
     },
     {
         'name': 'logs_out',
         'directory': os.path.join(LOG_DIR, 'out'),
-        'epochs': (6, 100),
+        'epochs': (6, 40),
     },
 ]
 
@@ -46,13 +46,13 @@ CONFIG = {
 'num_shots_test':[1 ,5 ,10 ,20 ],
 'lr':1e-4 ,
 'weight_decay':0.01 ,
-'epochs':60 ,
+'epochs':40 ,
 'episodes_per_epoch':300 ,
 'episodic_label_shuffle':'yes', #no, yes, mixed
 'training_strategy':'retrieval', #episodic, retrieval, mixed
 'classification_label_smoothing':0.05,
 'classification_objective':{
-'profile':'equilibrated',
+'profile':'accuracy',
 'weights':{},
 },
 'classification_separation_weight':0.0,
@@ -180,7 +180,7 @@ CONFIG = {
 'regression_mae_weight':0.5,
 'regression_rmse_weight':0.5,
 'regression_r2_weight':0.0,
-'regression_objective_profile':'equilibrated',
+'regression_objective_profile':'mae',
 'regression_metric_weights':{},
 'regression_r2_variance_floor':1e-4,
 'regression_huber_weight':0.15,
