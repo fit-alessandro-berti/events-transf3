@@ -38,7 +38,34 @@ The loader expects XES logs with these event attributes:
 - `org:resource` (resource name; missing values default to `Unknown`)
 - `amount` (cost; missing values default to 0.0)
 
-Default training/testing logs are configured in `config.py` under `CONFIG['log_paths']`. Sample logs are already in `logs/`.
+Default training/testing logs are configured in `config.py`. Sample logs are already in `logs/`.
+
+Training supports any number of named log sets with inclusive epoch ranges. At
+the start of an epoch, one of the sets active in that epoch is selected
+uniformly at random, and all episodes in that epoch use that set. Configure the
+sets near the top of `config.py`:
+
+```python
+TRAINING_LOG_SETS = [
+    {
+        "name": "default",
+        "enabled": True,
+        "epochs": (1, 100),
+        "log_paths": DEFAULT_TRAINING_LOGS,
+    },
+    {
+        "name": "generated",
+        "enabled": True,
+        "epochs": (10, 100),
+        "directory": os.path.join(LOG_DIR, "out"),
+        "patterns": ("*.xes", "*.xes.gz"),
+    },
+]
+```
+
+A set may use `log_paths`, `directory`, or both. Add more entries as needed, or
+temporarily exclude one with `enabled: False`. Every configured training epoch
+must be covered by at least one enabled set.
 
 ## Training
 

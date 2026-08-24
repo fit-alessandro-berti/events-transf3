@@ -695,12 +695,14 @@ class TrainingDiagnostics:
         state_metrics,
         update_metrics,
         schedule,
+        context=None,
     ):
         if not self.enabled:
             return
         record = {
             "schema_version": SCHEMA_VERSION,
             "epoch": int(epoch),
+            "context": context or {},
             "schedule": scalar_metrics(schedule),
             "train": self.epoch_accumulator.summary(),
             "validation": (

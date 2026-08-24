@@ -41,6 +41,32 @@ class TrainingDebugTests(unittest.TestCase):
             self.assertEqual(objectives["regression"]["profile"], "r2")
             self.assertEqual(objectives["regression"]["weights"]["r2"], 1.0)
 
+    def test_epoch_context_preserves_selected_training_log_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostics = TrainingDiagnostics(
+                directory, {"training_diagnostics": {"enabled": True}}
+            )
+            diagnostics.start_epoch()
+            diagnostics.finish_epoch(
+                1,
+                None,
+                {},
+                {},
+                {},
+                {},
+                context={
+                    "training_log_set": "generated",
+                    "active_training_log_sets": ["default", "generated"],
+                },
+            )
+            summary = json.loads(
+                (Path(directory) / "training_debug_summary.json").read_text()
+            )
+            self.assertEqual(
+                summary["epochs"][0]["context"]["training_log_set"],
+                "generated",
+            )
+
     def test_component_lr_groups_are_disjoint_and_scaled(self):
         class Expert(torch.nn.Module):
             def __init__(self):

@@ -21,6 +21,7 @@ from training_debug import (
 from training_strategies.episodic_strategy import run_episodic_step
 from training_strategies.retrieval_strategy import run_retrieval_step
 from training_strategies.train_utils import evaluate_embedding_quality
+from training_log_sets import active_training_log_sets, choose_training_log_set
 
 
 def split_params_for_proto(model):
@@ -185,6 +186,67 @@ def _validation_accumulator(model, validation_tasks, config):
     return accumulator
 
 
+def _normalize_training_task_sets(training_tasks, config):
+    """Accept both legacy flat tasks and the epoch-ranged task-set format."""
+    if isinstance(training_tasks, dict) and (
+        "classification" in training_tasks or "regression" in training_tasks
+    ):
+        return [
+            {
+                "name": "default",
+                "start_epoch": 1,
+                "end_epoch": int(config["epochs"]),
+                "tasks": training_tasks,
+            }
+        ]
+    if not isinstance(training_tasks, (list, tuple)) or not training_tasks:
+        raise ValueError("Training tasks must contain at least one log set.")
+
+    normalized = []
+    for index, task_set in enumerate(training_tasks):
+        if not isinstance(task_set, dict):
+            raise ValueError(f"Training task set {index + 1} must be a mapping.")
+        tasks = task_set.get("tasks", task_set)
+        if not isinstance(tasks, dict):
+            raise ValueError(
+                f"Training task set '{task_set.get('name', index + 1)}' "
+                "has invalid tasks."
+            )
+        normalized.append(
+            {
+                "name": str(task_set.get("name", f"set_{index + 1}")),
+                "start_epoch": int(task_set.get("start_epoch", 1)),
+                "end_epoch": int(task_set.get("end_epoch", config["epochs"])),
+                "tasks": tasks,
+            }
+        )
+    return normalized
+
+
+def _pools_for_task_set(task_set):
+    tasks = task_set["tasks"]
+    classification = [
+        (index, pool)
+        for index, pool in enumerate(tasks.get("classification", []))
+        if pool
+    ]
+    regression = [
+        (index, pool)
+        for index, pool in enumerate(tasks.get("regression", []))
+        if pool
+    ]
+    return classification, regression
+
+
+def _validation_for_task_set(validation_task_sets, selected_name):
+    if not validation_task_sets:
+        return None
+    for task_set in validation_task_sets:
+        if task_set["name"] == selected_name:
+            return task_set["tasks"]
+    return None
+
+
 def train(
     model,
     training_tasks,
@@ -231,19 +293,32 @@ def train(
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     print(f"✅ Automatic Mixed Precision (AMP) enabled: {use_amp}")
 
-    classification_pools = [
-        (index, pool)
-        for index, pool in enumerate(training_tasks["classification"])
-        if pool
+    training_task_sets = _normalize_training_task_sets(training_tasks, config)
+    validation_task_sets = (
+        _normalize_training_task_sets(validation_tasks, config)
+        if validation_tasks is not None
+        else []
+    )
+    empty_sets = [
+        task_set["name"]
+        for task_set in training_task_sets
+        if not any(_pools_for_task_set(task_set))
     ]
-    regression_pools = [
-        (index, pool)
-        for index, pool in enumerate(training_tasks["regression"])
-        if pool
-    ]
-    if not classification_pools and not regression_pools:
-        print("❌ Error: No valid training tasks available. Aborting training.")
-        return
+    if empty_sets:
+        raise ValueError(
+            "Training log sets produced no valid tasks: " + ", ".join(empty_sets)
+        )
+    print("✅ Training log sets:")
+    for task_set in training_task_sets:
+        print(
+            f"  - {task_set['name']}: epochs "
+            f"[{task_set['start_epoch']}, {task_set['end_epoch']}]"
+        )
+    log_set_rng = random.Random(int(config.get("seed", 42)) + 7919)
+    for completed_epoch in range(1, int(resume_epoch) + 1):
+        choose_training_log_set(
+            training_task_sets, completed_epoch, rng=log_set_rng
+        )
     training_strategy = config.get("training_strategy", "episodic")
     print(f"✅ Training Strategy: '{training_strategy}'")
     if training_strategy in {"retrieval", "mixed"}:
@@ -304,6 +379,24 @@ def train(
     gradient_clip_norm = max(float(config.get("gradient_clip_norm", 1.0)), 0.0)
     last_saved_epoch = 0
     for epoch in range(resume_epoch, config["epochs"]):
+        epoch_number = epoch + 1
+        active_task_sets = active_training_log_sets(
+            training_task_sets, epoch_number
+        )
+        selected_task_set = choose_training_log_set(
+            training_task_sets, epoch_number, rng=log_set_rng
+        )
+        classification_pools, regression_pools = _pools_for_task_set(
+            selected_task_set
+        )
+        selected_validation_tasks = _validation_for_task_set(
+            validation_task_sets, selected_task_set["name"]
+        )
+        active_names = ", ".join(task_set["name"] for task_set in active_task_sets)
+        print(
+            f"\n🗂️ Epoch {epoch_number}: selected training log set "
+            f"'{selected_task_set['name']}' from [{active_names}]"
+        )
         model.train()
         diagnostics.start_epoch()
         parameter_snapshot = (
@@ -368,7 +461,10 @@ def train(
             shuffle_strategy == "yes"
             or (shuffle_strategy == "mixed" and epoch % 2 == 0)
         )
-        description = f"Epoch {epoch + 1}/{config['epochs']}"
+        description = (
+            f"Epoch {epoch + 1}/{config['epochs']} "
+            f"[{selected_task_set['name']}]"
+        )
         if shuffle_strategy != "no":
             description += f" (Shuffle: {'ON' if should_shuffle_labels else 'OFF'})"
         progress_bar = tqdm(range(config["episodes_per_epoch"]), desc=description)
@@ -506,7 +602,9 @@ def train(
             message += f" | Component LRs: {special_lrs}"
         print(message)
 
-        validation = _validation_accumulator(model, validation_tasks, config)
+        validation = _validation_accumulator(
+            model, selected_validation_tasks, config
+        )
         update_metrics = (
             parameter_update_metrics(model, parameter_snapshot)
             if diagnostics.enabled
@@ -559,6 +657,12 @@ def train(
             state_metrics,
             update_metrics,
             schedule,
+            context={
+                "training_log_set": selected_task_set["name"],
+                "active_training_log_sets": [
+                    task_set["name"] for task_set in active_task_sets
+                ],
+            },
         )
         if diagnostics.enabled and validation is not None:
             validation_summary = validation.summary()

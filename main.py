@@ -13,6 +13,7 @@ from utils .parameter_utils import configure_trainable_scope
 from training import train
 from training_debug import save_validation_manifest, split_training_tasks_by_case
 from metric_objectives import resolve_classification_objective, resolve_regression_metric_weights
+from training_log_sets import combined_training_log_paths, resolve_training_log_sets
 def main ():
     pre_parser =argparse .ArgumentParser (add_help =False )
     pre_parser .add_argument ('--config',type =str ,default =None )
@@ -56,6 +57,7 @@ def main ():
     CONFIG ['retrieval_train_k']=args .retrieval_train_k
     CONFIG ['num_shots_range']=tuple (args .num_shots_range )
     CONFIG ['num_queries']=args .num_queries
+    training_log_sets =resolve_training_log_sets (CONFIG )
     print ("--- 🚀 Initializing Training Run with Configuration ---")
     print (f"  - Embedding Strategy: {CONFIG ['embedding_strategy']}")
     print (f"  - Num Experts (MoE): {CONFIG ['moe_settings']['num_experts']}")
@@ -64,6 +66,12 @@ def main ():
     print (f"  - Learning Rate: {CONFIG ['lr']}")
     print (f"  - d_model: {CONFIG ['d_model']}, n_heads: {CONFIG ['n_heads']}, n_layers: {CONFIG ['n_layers']}")
     print (f"  - Num Shots Range: {CONFIG ['num_shots_range']}")
+    print ("  - Training Log Sets:")
+    for log_set in training_log_sets :
+        print (
+        f"    - {log_set ['name']}: {len (log_set ['log_paths'])} logs, "
+        f"epochs [{log_set ['start_epoch']}, {log_set ['end_epoch']}]"
+        )
     print (f"  - Checkpoint Directory: {args .checkpoint_dir }")
     print (f"  - Resume Training: {args .resume }")
     if args .stop_after_epoch :
@@ -127,34 +135,58 @@ def main ():
     save_yaml_config (CONFIG ,os .path .join (checkpoint_dir ,'training_config.yaml'))
     print ("--- Phase 1: Preparing Training Data ---")
     loader =init_loader (CONFIG )
+    all_training_log_paths =combined_training_log_paths (training_log_sets )
     if args .resume and os .path .exists (artifacts_path ):
         print (f"Loading existing artifacts from {artifacts_path }...")
         loader .load_training_artifacts (artifacts_path )
     else :
         print ("Fitting new loader and saving artifacts...")
-        loader .fit (CONFIG ['log_paths']['training'])
+        loader .fit (all_training_log_paths )
         loader .save_training_artifacts (artifacts_path )
-    training_logs =loader .transform (CONFIG ['log_paths']['training'])
     print ("\n--- Phase 2: Creating Training Tasks ---")
-    training_tasks ={
-    'classification':[get_task_data (log ,'classification')for log in training_logs .values ()],
-    'regression':[get_task_data (log ,'regression')for log in training_logs .values ()]
-    }
-    validation_tasks =None
     diagnostics_config =CONFIG .get ('training_diagnostics',{})or {}
-    if diagnostics_config .get ('enabled',False ):
-        training_log_names =[os .path .basename (str (path ))for path in CONFIG ['log_paths']['training']]
-        training_tasks ,validation_tasks ,validation_manifest =split_training_tasks_by_case (
-        training_tasks ,
-        diagnostics_config .get ('validation_fraction',0.10 ),
-        seed ,
-        log_names =training_log_names ,
-        )
+    diagnostics_enabled =diagnostics_config .get ('enabled',False )
+    training_tasks =[]
+    validation_tasks =[]if diagnostics_enabled else None
+    validation_manifest =[]
+    for set_index ,log_set in enumerate (training_log_sets ):
+        print (f"Preparing training log set '{log_set ['name']}'...")
+        transformed_logs =loader .transform (log_set ['log_paths'])
+        set_tasks ={
+        'classification':[get_task_data (log ,'classification')for log in transformed_logs .values ()],
+        'regression':[get_task_data (log ,'regression')for log in transformed_logs .values ()]
+        }
+        set_validation_tasks =None
+        if diagnostics_enabled :
+            training_log_names =[
+            os .path .basename (str (path ))
+            for path in log_set ['log_paths'].values ()
+            ]
+            set_tasks ,set_validation_tasks ,set_manifest =split_training_tasks_by_case (
+            set_tasks ,
+            diagnostics_config .get ('validation_fraction',0.10 ),
+            seed +100000 *set_index ,
+            log_names =training_log_names ,
+            )
+            for row in set_manifest :
+                row ['log_set']=log_set ['name']
+            validation_manifest .extend (set_manifest )
+        task_set ={
+        'name':log_set ['name'],
+        'start_epoch':log_set ['start_epoch'],
+        'end_epoch':log_set ['end_epoch'],
+        'tasks':set_tasks ,
+        }
+        training_tasks .append (task_set )
+        if diagnostics_enabled :
+            validation_tasks .append ({**task_set ,'tasks':set_validation_tasks })
+    if diagnostics_enabled :
         save_validation_manifest (checkpoint_dir ,validation_manifest ,CONFIG )
         print ("🔬 Created deterministic case-disjoint training/validation split.")
         for row in validation_manifest :
             print (
-            f"  - {row ['log']}: {row ['validation_cases']}/{row ['total_cases']} "
+            f"  - {row ['log_set']}/{row ['log']}: "
+            f"{row ['validation_cases']}/{row ['total_cases']} "
             "cases held out"
             )
     print ("\n--- Phase 3: Initializing Model ---")
