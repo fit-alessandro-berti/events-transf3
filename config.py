@@ -13,7 +13,7 @@ TRAINING_LOG_SETS = [
     {
         'name': 'logs_out',
         'directory': os.path.join(LOG_DIR, 'out'),
-        'epochs': (10, 100),
+        'epochs': (6, 100),
     },
 ]
 
