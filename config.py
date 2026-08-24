@@ -46,7 +46,7 @@ CONFIG = {
 'num_shots_test':[1 ,5 ,10 ,20 ],
 'lr':1e-4 ,
 'weight_decay':0.01 ,
-'epochs':45 ,
+'epochs':60 ,
 'episodes_per_epoch':300 ,
 'episodic_label_shuffle':'yes', #no, yes, mixed
 'training_strategy':'retrieval', #episodic, retrieval, mixed
