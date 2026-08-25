@@ -2,6 +2,12 @@ extends: learned_time_independent_4_cls70.yaml
 experiment_name: prefix_state_attention_70
 run_mode: initialize
 initialize_from_checkpoint: checkpoints/fmv3/learned_time_independent_4_cls70/model_epoch_34.pth
+initialize_from_artifacts: checkpoints/fmv3/learned_time_independent_4_cls70/training_artifacts.pth
+source_epoch: 34
+additional_epochs: 4
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 38
 lr: 0.001
 weight_decay: 0.001

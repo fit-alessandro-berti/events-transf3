@@ -30,6 +30,48 @@ def _encode_case_ids_to_int(case_ids_np: np.ndarray) -> torch.Tensor:
     return torch.tensor([mapping[cid] for cid in case_ids_np.tolist()], dtype=torch.long)
 
 
+def select_mixed_negative_indices(
+    query_embedding,
+    candidate_embeddings,
+    eligible_mask,
+    k,
+    *,
+    pool_factor=4,
+    random_fraction=0.25,
+    generator=None,
+):
+    """Mix nearest and randomly sampled hard-pool negatives without duplicates."""
+    k =max (int (k ),0 )
+    if k ==0 :return torch .empty (0 ,dtype =torch .long ,device =candidate_embeddings .device )
+    eligible_mask =torch .as_tensor (
+    eligible_mask ,dtype =torch .bool ,device =candidate_embeddings .device ).reshape (-1 )
+    candidate_indices =torch .where (eligible_mask )[0 ]
+    if candidate_indices .numel ()==0 :return candidate_indices
+    similarities =(query_embedding @candidate_embeddings .t ()).reshape (-1 )
+    ranked =candidate_indices [
+    torch .argsort (similarities [candidate_indices ],descending =True )]
+    k =min (k ,int (ranked .numel ()))
+    pool_size =min (
+    int (ranked .numel ()),max (k ,k *max (1 ,int (pool_factor ))))
+    hard_pool =ranked [:pool_size ]
+    random_count =min (k ,max (0 ,int (round (k *float (random_fraction )))))
+    hard_count =k -random_count
+    selected =hard_pool [:hard_count ]
+    remaining =hard_pool [hard_count :]
+    if random_count >0 and remaining .numel ()>0 :
+        order =torch .randperm (
+        remaining .numel (),device =remaining .device ,generator =generator )
+        selected =torch .cat ([selected ,remaining [order [:random_count ]]])
+    if selected .numel ()<k :
+        selected_set =set (selected .detach ().cpu ().tolist ())
+        fill =[index for index in ranked .detach ().cpu ().tolist ()if index not in selected_set ]
+        if fill :
+            selected =torch .cat ([
+            selected ,torch .as_tensor (
+            fill [:k -selected .numel ()],dtype =torch .long ,device =selected .device )])
+    return selected [:k ]
+
+
 def _autocast_disabled_for(device: torch.device):
     if device.type == "cuda":
         return torch.amp.autocast(device_type="cuda", enabled=False)
@@ -748,11 +790,13 @@ def run_retrieval_step(
                     else:
                         positives = positives[torch.randperm(positives.numel(), device=device)[:pos_k]]
                     negative_mask = (~local_eligible) | (batch_labels == query_label)
-                    negatives = find_knn_indices(
+                    negatives = select_mixed_negative_indices(
                         query_embedding_norm,
                         all_embeddings_norm_detached,
+                        ~torch .as_tensor (negative_mask ,dtype =torch .bool ,device =device ),
                         k=max(1, retrieval_k_train - pos_k),
-                        indices_to_mask=torch.from_numpy(np.where(negative_mask)[0]).to(device),
+                        pool_factor=neg_pool_factor,
+                        random_fraction=neg_random_frac,
                     )
                     support_indices = torch.cat([positives, negatives])[:retrieval_k_train]
                 else:

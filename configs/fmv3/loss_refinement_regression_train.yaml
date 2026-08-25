@@ -4,6 +4,12 @@ experiment_name: loss_refinement_regression
 run_mode: initialize
 training_enabled: true
 initialize_from_checkpoint: checkpoints/fmv3/expert_routing_bias/model_epoch_42.pth
+initialize_from_artifacts: checkpoints/fmv3/expert_routing_bias/training_artifacts.pth
+source_epoch: 42
+additional_epochs: 1
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 43
 episodes_per_epoch: 300
 lr: 0.0001

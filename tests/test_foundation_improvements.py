@@ -4,12 +4,14 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
 import torch
 
 from components.learned_event_embedder import LearnedEventEmbedder
+from components.char_cnn_embedder import CharCNNEmbedder
 from components.moe_model import MoEModel
 from components.prototypical_head import PrototypicalHead
 from config import CONFIG
@@ -18,10 +20,14 @@ from config_utils import (
     validate_exact_resume_config,
     validate_run_configuration,
 )
+import data_generator
 from data_generator import XESLogLoader
 from evaluation.fmv3_metrics import regression_metrics
-from training import build_training_state
-from training_strategies.retrieval_strategy import run_retrieval_step
+from training import adaptive_clip_grad_, build_training_state
+from training_strategies.retrieval_strategy import (
+    run_retrieval_step,
+    select_mixed_negative_indices,
+)
 from training_log_sets import (
     resolve_training_log_sets,
     training_log_set_weight,
@@ -37,6 +43,47 @@ from utils.data_utils import (
 
 
 class FoundationImprovementTests(unittest.TestCase):
+    def test_retrain_and_clip_configs_resolve_to_real_global_clip_training(self):
+        root = Path(__file__).resolve().parents[1]
+        expected = {
+            "training_debug_full_retrain.yaml": 1.0,
+            "training_debug_clip5_retrain.yaml": 5.0,
+            "training_debug_clip10_retrain.yaml": 10.0,
+            "training_debug_head_focused_retrain.yaml": 1.0,
+        }
+        for filename, clip_norm in expected.items():
+            config = copy.deepcopy(CONFIG)
+            apply_experiment_config(config, str(root / "configs/fmv3" / filename))
+            self.assertEqual(validate_run_configuration(config), "train")
+            self.assertTrue(config["training_enabled"])
+            self.assertEqual(config["trainable_scope"], "all")
+            self.assertNotIn("assembly", config)
+            self.assertEqual(config["gradient_clip_mode"], "global")
+            self.assertEqual(config["gradient_clip_norm"], clip_norm)
+
+    def test_initialize_requires_explicit_artifacts_and_epoch_semantics(self):
+        base = {
+            "run_mode": "initialize",
+            "training_enabled": True,
+            "initialize_from_checkpoint": "model_epoch_4.pth",
+            "gradient_clip_mode": "global",
+            "gradient_clip_norm": 5.0,
+        }
+        with self.assertRaisesRegex(ValueError, "initialize_from_artifacts"):
+            validate_run_configuration(base)
+        valid = {
+            **base,
+            "initialize_from_artifacts": "training_artifacts.pth",
+            "source_epoch": 4,
+            "additional_epochs": 2,
+            "epochs": 6,
+            "reset_optimizer": True,
+            "reset_scheduler": True,
+        }
+        self.assertEqual(validate_run_configuration(valid), "initialize")
+        with self.assertRaisesRegex(ValueError, r"source_epoch \+ additional_epochs"):
+            validate_run_configuration({**valid, "epochs": 7})
+
     def test_default_split_excludes_unseen_and_replays_source(self):
         log_sets = resolve_training_log_sets(CONFIG)
         self.assertEqual([item["name"] for item in log_sets], ["source", "synthetic"])
@@ -122,6 +169,36 @@ class FoundationImprovementTests(unittest.TestCase):
         self.assertEqual([event["activity_id"] for event in prefix[1:]], [0, 1])
         self.assertEqual(prefix_task_length(classification, -1), 4)
 
+    def test_historical_memory_distinguishes_order_with_same_counts(self):
+        def final_prefix(activity_ids):
+            trace = [
+                {
+                    "case_id": "c",
+                    "activity_id": activity_id,
+                    "timestamp": float(index),
+                }
+                for index, activity_id in enumerate(activity_ids)
+            ]
+            classification, _ = get_classification_and_regression_tasks(
+                [trace],
+                config={
+                    "data": {
+                        "max_sequence_length": 2,
+                        "minimum_prefix_length": 1,
+                        "historical_memory_enabled": True,
+                    }
+                },
+            )
+            return classification[-1][0][0]
+
+        left = final_prefix([0, 1, 2, 1, 1, 3])
+        right = final_prefix([0, 2, 1, 1, 1, 3])
+        self.assertEqual(left["history_features"], right["history_features"])
+        self.assertNotEqual(
+            left["history_transition_features"],
+            right["history_transition_features"],
+        )
+
     def test_duration_scale_metrics_use_full_case_duration_when_supplied(self):
         metrics = regression_metrics(
             [0.5, 0.5], [0.25, 1.0], process_duration_hours=[0.75, 200.0]
@@ -160,6 +237,150 @@ class FoundationImprovementTests(unittest.TestCase):
         )
         trace = loader.transform_dataframes({"test": frame})["test"][0]
         self.assertEqual([event["activity_name"] for event in trace], ["B", "A", "C"])
+
+    def test_transform_is_log_local_before_attribute_truncation(self):
+        loader = XESLogLoader("learned", max_generic_attributes=1)
+        loader.training_activity_names = ["A"]
+        loader.char_to_id = {"<PAD>": 0, "<UNK>": 1, "A": 2, "R": 3}
+        common = {
+            "case:concept:name": ["c"],
+            "concept:name": ["A"],
+            "time:timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]),
+            "org:resource": ["R"],
+            "amount": [0.0],
+        }
+        primary = pd.DataFrame({**common, "z_valid": [7.0]})
+        unrelated = pd.DataFrame(
+            {**common, **{f"a{index:02d}": [index] for index in range(20)}}
+        )
+        alone = loader.transform_dataframes({"primary": primary})["primary"]
+        together = loader.transform_dataframes(
+            {"primary": primary, "unrelated": unrelated}
+        )["primary"]
+        self.assertEqual(
+            alone[0][0]["generic_attributes"],
+            together[0][0]["generic_attributes"],
+        )
+        # lifecycle plus the one valid generic attribute
+        self.assertEqual(len(together[0][0]["generic_attributes"]), 2)
+
+    def test_lifecycle_values_are_fitted_into_character_vocabulary(self):
+        loader = XESLogLoader("learned")
+        frame = pd.DataFrame(
+            {
+                "concept:name": ["A"],
+                "org:resource": ["R"],
+                "lifecycle:transition": ["ø-state"],
+            }
+        )
+        with mock.patch.object(data_generator.pm4py, "read_xes", return_value=frame), mock.patch.object(
+            data_generator.os.path, "exists", return_value=True
+        ):
+            loader.fit({"train": "unused.xes"})
+        self.assertIn("ø", loader.char_to_id)
+
+    def test_artifact_metadata_is_validated_instead_of_refitting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "artifacts.pth"
+            loader = XESLogLoader("learned")
+            loader.training_activity_names = ["A"]
+            loader.activity_to_id = {"A": 0}
+            loader.char_to_id = {"<PAD>": 0, "<UNK>": 1, "A": 2}
+            metadata = {
+                "training_log_manifest_sha256": "corpus",
+                "preprocessing_sha256": "preprocessing",
+                "model_architecture_sha256": "architecture",
+            }
+            loader.save_training_artifacts(path, metadata=metadata)
+            restored = XESLogLoader("learned")
+            restored.load_training_artifacts(path, expected_metadata=metadata)
+            self.assertEqual(restored.char_to_id, loader.char_to_id)
+            with self.assertRaisesRegex(ValueError, "preprocessing_sha256"):
+                restored.load_training_artifacts(
+                    path,
+                    expected_metadata={
+                        **metadata,
+                        "preprocessing_sha256": "different",
+                    },
+                )
+
+    def test_pretrained_artifacts_persist_maps_and_model_revision(self):
+        class DummySentenceTransformer:
+            def __init__(self, name, **kwargs):
+                self.name = name
+                self.revision = kwargs.get("revision")
+
+            def get_sentence_embedding_dimension(self):
+                return 2
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            data_generator, "SentenceTransformer", DummySentenceTransformer
+        ):
+            path = Path(directory) / "pretrained.pth"
+            loader = XESLogLoader(
+                "pretrained", sbert_model_name="model", sbert_model_revision="abc123"
+            )
+            loader.training_activity_names = ["A"]
+            loader.activity_to_id = {"A": 0}
+            loader.training_activity_embeddings = np.asarray([[1.0, 0.0]])
+            loader.activity_embedding_map = {"A": np.asarray([1.0, 0.0])}
+            loader.resource_embedding_map = {"R": np.asarray([0.0, 1.0])}
+            loader.save_training_artifacts(path, metadata={"corpus": "hash"})
+
+            restored = XESLogLoader(
+                "pretrained", sbert_model_name="model", sbert_model_revision="abc123"
+            )
+            restored.load_training_artifacts(
+                path, expected_metadata={"corpus": "hash"}
+            )
+            np.testing.assert_array_equal(
+                restored.activity_embedding_map["A"], np.asarray([1.0, 0.0])
+            )
+            np.testing.assert_array_equal(
+                restored.resource_embedding_map["R"], np.asarray([0.0, 1.0])
+            )
+
+    def test_character_pooling_masks_padding_and_empty_strings(self):
+        embedder = CharCNNEmbedder(4, 3, 6, max_word_len=8)
+        output = embedder(["", "A"], {"<PAD>": 0, "<UNK>": 1, "A": 2})
+        torch.testing.assert_close(output[0], torch.zeros_like(output[0]))
+        self.assertTrue(torch.isfinite(output[1]).all())
+
+    def test_optional_agc_does_not_suppress_zero_initialized_heads(self):
+        zero_head = torch.nn.Parameter(torch.zeros(2, 3))
+        zero_head.grad = torch.ones_like(zero_head)
+        adaptive_clip_grad_([zero_head], factor=0.02, epsilon=1e-3)
+        torch.testing.assert_close(zero_head.grad, torch.ones_like(zero_head))
+
+        mature = torch.nn.Parameter(torch.ones(2, 3))
+        mature.grad = torch.full_like(mature, 100.0)
+        adaptive_clip_grad_([mature], factor=0.1, epsilon=1e-3)
+        expected_ceiling = 0.1 * mature.detach().norm(dim=1)
+        self.assertTrue(
+            torch.all(mature.grad.detach().norm(dim=1) <= expected_ceiling + 1e-6)
+        )
+
+    def test_negative_curriculum_changes_selected_support(self):
+        angles = torch.linspace(0.0, 1.2, 10)
+        candidates = torch.stack((torch.cos(angles), torch.sin(angles)), dim=1)
+        query = torch.tensor([[1.0, 0.0]])
+        eligible = torch.ones(10, dtype=torch.bool)
+        nearest = select_mixed_negative_indices(
+            query, candidates, eligible, 4, pool_factor=2, random_fraction=0.0
+        )
+        generator = torch.Generator().manual_seed(11)
+        mixed = select_mixed_negative_indices(
+            query,
+            candidates,
+            eligible,
+            4,
+            pool_factor=2,
+            random_fraction=1.0,
+            generator=generator,
+        )
+        self.assertEqual(nearest.tolist(), [0, 1, 2, 3])
+        self.assertNotEqual(mixed.tolist(), nearest.tolist())
+        self.assertEqual(len(set(mixed.tolist())), 4)
 
     def test_pretrained_semantics_do_not_define_target_class_ids(self):
         class DummySentenceModel:

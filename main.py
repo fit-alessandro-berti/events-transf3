@@ -5,10 +5,14 @@ import argparse
 import shutil
 import re
 import random
+import json
+import hashlib
+from pathlib import Path
 from config import CONFIG
 from config_utils import (
 apply_experiment_config ,save_yaml_config ,validate_exact_resume_config ,
-validate_run_configuration ,
+validate_run_configuration ,stable_config_hash ,preprocessing_config_hash ,
+model_architecture_config_hash ,
 )
 from utils .data_utils import get_classification_and_regression_tasks
 from utils .model_utils import init_loader ,create_model ,load_state_dict_compatible, extract_model_state_dict
@@ -18,6 +22,7 @@ from training_debug import save_validation_manifest, split_training_tasks_by_cas
 from metric_objectives import resolve_classification_objective, resolve_regression_metric_weights
 from training_log_sets import (
 combined_training_log_paths ,resolve_training_log_sets ,
+save_training_log_manifest ,training_log_manifest ,
 validate_training_evaluation_disjointness ,
 )
 
@@ -37,6 +42,54 @@ def _clear_training_outputs(checkpoint_dir):
             )from error
 
 
+def _file_sha256(path):
+    digest =hashlib .sha256 ()
+    with open (path ,'rb')as handle :
+        for block in iter (lambda :handle .read (1024 *1024 ),b''):
+            digest .update (block )
+    return digest .hexdigest ()
+
+
+def _reproducibility_metadata(config, corpus_manifest):
+    return {
+    'training_log_manifest_sha256':corpus_manifest ['manifest_sha256'],
+    'preprocessing_sha256':preprocessing_config_hash (config ),
+    'model_architecture_sha256':model_architecture_config_hash (config ),
+    }
+
+
+def _save_run_manifest(checkpoint_dir, config, corpus_manifest, metadata):
+    manifest_path =Path (checkpoint_dir ,'training_run_manifest.json')
+    if str (config .get ('run_mode','train')).lower ()=='resume':
+        if not manifest_path .is_file ():
+            raise FileNotFoundError (
+            "Exact resume requires training_run_manifest.json with corpus and "
+            "architecture fingerprints.")
+        existing =json .loads (manifest_path .read_text (encoding ='utf-8'))
+        mismatches =sorted (
+        key for key ,value in metadata .items ()if existing .get (key )!=value )
+        if mismatches :
+            raise ValueError (
+            "Exact resume reproducibility metadata differs at: "+", ".join (mismatches ))
+        return
+    payload ={
+    'schema_version':1,
+    'resolved_config_sha256':stable_config_hash (config ),
+    **metadata ,
+    'source_checkpoint':None,
+    'source_artifacts':None,
+    }
+    if str (config .get ('run_mode','train')).lower ()=='initialize':
+        checkpoint =os .fspath (config ['initialize_from_checkpoint'])
+        artifacts =os .fspath (config ['initialize_from_artifacts'])
+        payload ['source_checkpoint']={
+        'path':checkpoint ,'sha256':_file_sha256 (checkpoint )}
+        payload ['source_artifacts']={
+        'path':artifacts ,'sha256':_file_sha256 (artifacts )}
+    manifest_path .write_text (
+    json .dumps (payload ,indent =2 ,sort_keys =True )+'\n',encoding ='utf-8')
+
+
 def main ():
     pre_parser =argparse .ArgumentParser (add_help =False )
     pre_parser .add_argument ('--config',type =str ,default =None )
@@ -50,6 +103,9 @@ def main ():
     parser .add_argument ('--set',dest ='config_overrides',action ='append',default =pre_args .config_overrides ,help ="Override a config value with dotted.path=value.")
     parser .add_argument ('--resume',action ='store_true',help ="Resume training from the latest checkpoint in --checkpoint_dir.")
     parser .add_argument ('--initialize_from',type =str ,default =None ,help ="Initialize model weights from a checkpoint while resetting optimizer/scheduler state.")
+    parser .add_argument ('--initialize_artifacts',type =str ,default =None ,help ="Loader artifacts associated with --initialize_from.")
+    parser .add_argument ('--source_epoch',type =int ,default =None ,help ="Epoch represented by --initialize_from.")
+    parser .add_argument ('--additional_epochs',type =int ,default =None ,help ="New epochs to execute after --source_epoch.")
     parser .add_argument ('--stop_after_epoch',type =int ,default =None ,help ="Stop training after this specific epoch number completes (e.g., 1).")
     parser .add_argument ('--cleanup_checkpoints',action ='store_true',help ="Remove all intermediate checkpoints after training, keeping only the last one.")
     parser .add_argument ('--embedding_strategy',type =str ,default =default_config ['embedding_strategy'],choices =['learned','pretrained'],help =f"Embedding strategy to use. (default: {default_config ['embedding_strategy']})")
@@ -88,6 +144,13 @@ def main ():
     elif args .initialize_from :
         CONFIG ['run_mode']='initialize'
         CONFIG ['initialize_from_checkpoint']=args .initialize_from
+        if args .initialize_artifacts is not None :
+            CONFIG ['initialize_from_artifacts']=args .initialize_artifacts
+        if args .source_epoch is not None :CONFIG ['source_epoch']=args .source_epoch
+        if args .additional_epochs is not None :
+            CONFIG ['additional_epochs']=args .additional_epochs
+            if args .source_epoch is not None :
+                CONFIG ['epochs']=args .source_epoch +args .additional_epochs
     run_mode =validate_run_configuration (CONFIG )
     if run_mode =='assemble':
         validate_run_configuration (CONFIG ,check_checkpoint_paths =True )
@@ -100,6 +163,8 @@ def main ():
         return
     training_log_sets =resolve_training_log_sets (CONFIG )
     validate_training_evaluation_disjointness (CONFIG ,training_log_sets )
+    corpus_manifest =training_log_manifest (training_log_sets )
+    artifact_metadata =_reproducibility_metadata (CONFIG ,corpus_manifest )
     print ("--- 🚀 Initializing Training Run with Configuration ---")
     print (f"  - Embedding Strategy: {CONFIG ['embedding_strategy']}")
     print (f"  - Num Experts (MoE): {CONFIG ['moe_settings']['num_experts']}")
@@ -160,31 +225,65 @@ def main ():
             )
     elif run_mode =='initialize':
         latest_checkpoint_path =os .fspath (CONFIG ['initialize_from_checkpoint'])
+        source_artifact_path =os .fspath (CONFIG ['initialize_from_artifacts'])
         if not os .path .isfile (latest_checkpoint_path ):
             raise FileNotFoundError (
             f"Initialization checkpoint not found: {latest_checkpoint_path }"
             )
+        if not os .path .isfile (source_artifact_path ):
+            raise FileNotFoundError (
+            f"Initialization artifacts not found: {source_artifact_path }")
+        output_root =Path (checkpoint_dir ).resolve ()
+        unsafe_sources =[
+        path for path in (latest_checkpoint_path ,source_artifact_path )
+        if Path (path ).resolve ().is_relative_to (output_root )]
+        if unsafe_sources :
+            raise ValueError (
+            "Initialization sources must be outside the output checkpoint "
+            "directory because a new trajectory clears that directory: "
+            +", ".join (unsafe_sources ))
         print (f"--- Initializing weights from {latest_checkpoint_path } ---")
+        checkpoint_match =re .search (r'model_epoch_(\d+)\.pth$',latest_checkpoint_path )
+        if checkpoint_match and int (checkpoint_match .group (1 ))!=int (CONFIG ['source_epoch']):
+            raise ValueError (
+            "initialize source_epoch does not match checkpoint filename: "
+            f"{CONFIG ['source_epoch']} != {checkpoint_match .group (1 )}")
         payload =torch .load (
         latest_checkpoint_path ,map_location ='cpu',weights_only =False )
         initialized_model_state =extract_model_state_dict (payload )
+        start_epoch =int (CONFIG ['source_epoch'])
         _clear_training_outputs (checkpoint_dir )
     else :
         print (f"--- 🗑️ Starting new training run. Clearing {checkpoint_dir } ---")
         _clear_training_outputs (checkpoint_dir )
     print ("Saving config...")
+    _save_run_manifest (
+    checkpoint_dir ,CONFIG ,corpus_manifest ,artifact_metadata )
     torch .save (CONFIG ,config_path )
     save_yaml_config (CONFIG ,os .path .join (checkpoint_dir ,'training_config.yaml'))
+    save_training_log_manifest (checkpoint_dir ,training_log_sets )
     print ("--- Phase 1: Preparing Training Data ---")
     loader =init_loader (CONFIG )
     all_training_log_paths =combined_training_log_paths (training_log_sets )
     if run_mode =='resume'and os .path .exists (artifacts_path ):
         print (f"Loading existing artifacts from {artifacts_path }...")
-        loader .load_training_artifacts (artifacts_path )
+        loader .load_training_artifacts (
+        artifacts_path ,expected_metadata =artifact_metadata )
+    elif run_mode =='initialize':
+        source_artifacts =os .fspath (CONFIG ['initialize_from_artifacts'])
+        print (f"Loading checkpoint-associated artifacts from {source_artifacts }...")
+        expected_source_metadata =dict (artifact_metadata )
+        if CONFIG .get ('allow_architecture_change',False ):
+            expected_source_metadata .pop ('model_architecture_sha256',None )
+        loader .load_training_artifacts (
+        source_artifacts ,expected_metadata =expected_source_metadata )
+        loader .save_training_artifacts (
+        artifacts_path ,metadata =artifact_metadata )
     else :
         print ("Fitting new loader and saving artifacts...")
         loader .fit (all_training_log_paths )
-        loader .save_training_artifacts (artifacts_path )
+        loader .save_training_artifacts (
+        artifacts_path ,metadata =artifact_metadata )
     print ("\n--- Phase 2: Creating Training Tasks ---")
     diagnostics_config =CONFIG .get ('training_diagnostics',{})or {}
     diagnostics_enabled =diagnostics_config .get ('enabled',False )

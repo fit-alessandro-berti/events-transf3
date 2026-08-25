@@ -3,11 +3,37 @@
 from __future__ import annotations
 
 import random
+import hashlib
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, Iterator, Sequence
 
 from time_transf import transform_time
+
+
+HISTORY_TRANSITION_BUCKETS = 16
+
+
+def _history_transition_sketch(history, buckets=HISTORY_TRANSITION_BUCKETS):
+    """Signed hash sketch retaining old activity identities and transition order."""
+    values =[
+        str(event.get("activity_name", event.get("activity_id", "<UNK>")))
+        for event in history
+    ]
+    features =[f"activity:{value}"for value in values ]
+    features .extend (
+    f"transition:{left}->{right}"for left ,right in zip (values ,values [1 :]))
+    sketch =[0.0 ]*int (buckets )
+    for feature in features :
+        digest =hashlib .blake2b (
+        feature .encode ('utf-8',errors ='replace'),digest_size =8 ).digest ()
+        raw =int .from_bytes (digest ,'little')
+        bucket =raw %len (sketch )
+        sign =1.0 if (raw >>8 )&1 else -1.0
+        sketch [bucket]+=sign
+    scale =math .sqrt (max (len (features ),1 ))
+    return tuple (value /scale for value in sketch )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +94,7 @@ class PrefixTask:
                     / max(event_count, 1),
                     history_age,
                 ),
+                "history_transition_features": _history_transition_sketch(history),
             }
         )
         return [summary, *retained]

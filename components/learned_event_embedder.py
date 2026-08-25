@@ -30,6 +30,8 @@ class LearnedEventEmbedder (nn .Module ):
         d_model ,hash_buckets =attribute_hash_buckets )
         self .history_projection =nn .Linear (4 ,d_model ,bias =False )
         nn .init .zeros_ (self .history_projection .weight )
+        self .history_transition_projection =nn .Linear (16 ,d_model ,bias =False )
+        nn .init .zeros_ (self .history_transition_projection .weight )
         self .history_token =nn .Parameter (torch .zeros (d_model ))
         input_config =dict (time_input_config or {})
         self .temporal_input_encoder =None
@@ -99,8 +101,13 @@ class LearnedEventEmbedder (nn .Module ):
         history_mask =torch .as_tensor ([
         event .get ('is_history_summary',0.0 )for event in events
         ],dtype =torch .float32 ,device =device ).unsqueeze (1 )
+        history_transitions =torch .as_tensor ([
+        event .get ('history_transition_features',(0.0 ,)*16 )for event in events
+        ],dtype =torch .float32 ,device =device )
         embedded =embedded +history_mask *(
-        self .history_projection (history )+self .history_token )
+        self .history_projection (history )+
+        self .history_transition_projection (history_transitions )+
+        self .history_token )
         if use_time_adapter and self .time_input_adapter is not None :
             embedded =embedded +self .time_input_adapter (
             temporal_tensor ,augmentation_factor =time_scale_factor )

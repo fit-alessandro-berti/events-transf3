@@ -45,7 +45,17 @@ class CharCNNEmbedder (nn .Module ):
         embedded_chars =self .char_embedding (char_ids )
         embedded_chars =embedded_chars .permute (0 ,2 ,1 )
         conv_outputs =[F .gelu (conv (embedded_chars ))for conv in self .convs ]
-        pooled_outputs =[F .max_pool1d (out ,out .shape [2 ]).squeeze (2 )for out in conv_outputs ]
+        lengths =(char_ids !=0 ).sum (dim =1 )
+        pooled_outputs =[]
+        for out in conv_outputs :
+            positions =torch .arange (out .shape [2 ],device =out .device )
+            valid =positions .unsqueeze (0 )<lengths .unsqueeze (1 )
+            masked =out .masked_fill (~valid .unsqueeze (1 ),float ('-inf'))
+            pooled =masked .amax (dim =2 )
+            pooled =torch .where (
+            (lengths >0 ).unsqueeze (1 ),pooled ,torch .zeros_like (pooled ))
+            pooled_outputs .append (pooled )
         concatenated =torch .cat (pooled_outputs ,dim =1 )
         final_embedding =self .projection (concatenated )
-        return final_embedding
+        return torch .where (
+        (lengths >0 ).unsqueeze (1 ),final_embedding ,torch .zeros_like (final_embedding ))

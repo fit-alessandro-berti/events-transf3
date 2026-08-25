@@ -32,7 +32,8 @@ classification_objective:
 classification_separation_weight: 0.0
 classification_separation_temperature: 0.10
 classification_separation_margin: 0.15
-gradient_clip_norm: 1.0
+gradient_clip_mode: global
+gradient_clip_norm: 5.0
 # Optional multipliers keyed by the diagnostic parameter-group names. Empty
 # preserves the historical two-group optimizer exactly.
 training_lr_multipliers: {}

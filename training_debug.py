@@ -270,26 +270,29 @@ def average_metric_dicts(rows):
 class RunningStats:
     def __init__(self):
         self.count = 0
+        self.weight = 0.0
         self.total = 0.0
         self.total_square = 0.0
         self.minimum = float("inf")
         self.maximum = float("-inf")
 
-    def add(self, value):
+    def add(self, value, weight=1.0):
         value = _finite_float(value)
-        if value is None:
+        weight = _finite_float(weight)
+        if value is None or weight is None or weight <= 0.0:
             return
         self.count += 1
-        self.total += value
-        self.total_square += value * value
+        self.weight += weight
+        self.total += weight * value
+        self.total_square += weight * value * value
         self.minimum = min(self.minimum, value)
         self.maximum = max(self.maximum, value)
 
     def summary(self):
         if not self.count:
             return None
-        mean = self.total / self.count
-        variance = max(0.0, self.total_square / self.count - mean * mean)
+        mean = self.total / self.weight
+        variance = max(0.0, self.total_square / self.weight - mean * mean)
         return {
             "count": self.count,
             "mean": mean,
@@ -303,11 +306,13 @@ class MetricAccumulator:
     def __init__(self):
         self.metrics = defaultdict(RunningStats)
 
-    def add(self, metrics, prefixes=()):
+    def add(self, metrics, prefixes=(), weighted_prefixes=()):
         for key, value in scalar_metrics(metrics).items():
             self.metrics[key].add(value)
             for prefix in prefixes:
                 self.metrics[f"{prefix}/{key}"].add(value)
+            for prefix, weight in weighted_prefixes:
+                self.metrics[f"{prefix}/{key}"].add(value, weight=weight)
 
     def summary(self):
         return {

@@ -17,6 +17,24 @@ from training_debug import (
 
 
 class TrainingDebugTests(unittest.TestCase):
+    def test_weighted_validation_aggregate_has_fixed_schedule_semantics(self):
+        accumulator = MetricAccumulator()
+        accumulator.add(
+            {"loss/total": 1.0},
+            prefixes=("log_set/source",),
+            weighted_prefixes=(("schedule_weighted", 0.25),),
+        )
+        accumulator.add(
+            {"loss/total": 5.0},
+            prefixes=("log_set/synthetic",),
+            weighted_prefixes=(("schedule_weighted", 0.75),),
+        )
+        summary = accumulator.summary()
+        self.assertEqual(summary["loss/total"]["mean"], 3.0)
+        self.assertEqual(summary["log_set/source/loss/total"]["mean"], 1.0)
+        self.assertEqual(summary["log_set/synthetic/loss/total"]["mean"], 5.0)
+        self.assertEqual(summary["schedule_weighted/loss/total"]["mean"], 4.0)
+
     def test_summary_persists_resolved_objective_profiles(self):
         with tempfile.TemporaryDirectory() as directory:
             diagnostics = TrainingDiagnostics(

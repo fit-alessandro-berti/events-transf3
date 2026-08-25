@@ -1,7 +1,14 @@
 extends: expert_confidence_heads.yaml
 experiment_name: expert_routing_linear
 run_mode: initialize
+training_enabled: true
 initialize_from_checkpoint: checkpoints/fmv3/expert_confidence_heads/model_epoch_40.pth
+initialize_from_artifacts: checkpoints/fmv3/expert_confidence_heads/training_artifacts.pth
+source_epoch: 40
+additional_epochs: 2
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 42
 episodes_per_epoch: 300
 lr: 0.0005

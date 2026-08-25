@@ -1,19 +1,30 @@
 import pandas as pd
 import random
-import pm4py
 import os
 import numpy as np
 import torch
 import hashlib
 import math
 from itertools import chain
-from sentence_transformers import SentenceTransformer
 from sklearn .metrics .pairwise import cosine_similarity
 from scipy .optimize import linear_sum_assignment
 from config import CONFIG
+from config_utils import stable_config_hash
 from training_log_sets import combined_training_log_paths, resolve_training_log_sets
+
+try:
+    import pm4py
+except ImportError:  # Model-only imports and tests do not require XES ingestion.
+    pm4py = None
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # Learned embeddings do not require SentenceTransformer.
+    SentenceTransformer = None
+
 class XESLogLoader :
     def __init__ (self ,strategy :str ,sbert_model_name :str ='all-MiniLM-L6-v2',
+    sbert_model_revision :str |None =None ,
     max_string_length :int =64 ,max_generic_attributes :int =16 ,
     attribute_hash_buckets :int =4096 ):
         self .strategy =strategy
@@ -32,16 +43,26 @@ class XESLogLoader :
         self .max_generic_attributes =max (0 ,int (max_generic_attributes ))
         self .attribute_hash_buckets =max (32 ,int (attribute_hash_buckets ))
         self .sbert_model =None
+        self .sbert_model_name =sbert_model_name
+        self .sbert_model_revision =sbert_model_revision
         if self .strategy =='pretrained':
+            if SentenceTransformer is None:
+                raise RuntimeError(
+                "Pretrained strategy requires the sentence-transformers package."
+                )
             try :
-                self .sbert_model =SentenceTransformer (sbert_model_name )
+                model_kwargs ={}
+                if sbert_model_revision :model_kwargs ['revision']=sbert_model_revision
+                self .sbert_model =SentenceTransformer (sbert_model_name ,**model_kwargs )
                 self .sbert_embedding_dim =self .sbert_model .get_sentence_embedding_dimension ()
             except Exception as e :
                 raise RuntimeError (f"Pretrained strategy requires SentenceTransformer: {e }")
             self .pad_embedding =np .zeros (self .sbert_embedding_dim ,dtype =np .float32 )
     def fit (self ,training_log_paths :dict ,activity_key ='concept:name',resource_key ='org:resource'):
         print (f"Fitting on training data (strategy: '{self .strategy }')...")
-        all_activities ,all_resources =set (),set ()
+        if pm4py is None:
+            raise RuntimeError("XES ingestion requires the pm4py package.")
+        all_activities ,all_resources ,all_lifecycles =set (),set (),set ()
         for _ ,path in training_log_paths .items ():
             if not os .path .exists (path ):continue
             try :
@@ -50,6 +71,10 @@ class XESLogLoader :
                     df [resource_key ]="Unknown"
                 all_activities .update (df [activity_key ].unique ())
                 all_resources .update (df [resource_key ].fillna ('Unknown').unique ())
+                lifecycle_key ='lifecycle:transition'
+                if lifecycle_key in df :
+                    all_lifecycles .update (
+                    df [lifecycle_key ].fillna ('Unknown').astype (str ).unique ())
             except Exception as e :
                 print (f"❌ Error reading file {path }: {e }")
         if not all_activities :raise ValueError ("No activities found in training logs.")
@@ -57,7 +82,7 @@ class XESLogLoader :
         all_resource_names =sorted (list (all_resources ))
         self .activity_to_id ={name :i for i ,name in enumerate (self .training_activity_names )}
         if self .strategy =='learned':
-            all_names =all_activities .union (all_resources )
+            all_names =all_activities .union (all_resources ,all_lifecycles )
             all_chars =set ("".join (all_names ))
             self .char_to_id ={char :i +2 for i ,char in enumerate (sorted (list (all_chars )))}
             self .char_to_id [self .PAD_TOKEN ]=self .pad_id
@@ -83,18 +108,26 @@ class XESLogLoader :
     def transform (self ,log_paths :dict ,case_id_key ='case:concept:name',activity_key ='concept:name',
     timestamp_key ='time:timestamp',resource_key ='org:resource',cost_key ='amount'):
         if not self .training_activity_names :raise RuntimeError ("Loader has not been fitted.")
+        if pm4py is None:
+            raise RuntimeError("XES ingestion requires the pm4py package.")
         print (f"\nTransforming logs: {list (log_paths .keys ())}")
-        frames ={name :pm4py .read_xes (path )for name ,path in log_paths .items ()if os .path .exists (path )}
-        return self .transform_dataframes (frames ,case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key )
+        processed_logs ={}
+        for name ,path in log_paths .items ():
+            if not os .path .exists (path ):continue
+            frame =pm4py .read_xes (path )
+            processed_logs .update (self .transform_dataframes (
+            {name :frame },case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key
+            ))
+        return processed_logs
     def transform_dataframes (self ,frames :dict ,case_id_key ='case:concept:name',activity_key ='concept:name',
     timestamp_key ='time:timestamp',resource_key ='org:resource',cost_key ='amount',activity_names_by_log =None ):
         if not self .training_activity_names :raise RuntimeError ("Loader has not been fitted.")
         if not frames :return {}
-        for frame in frames .values ():
-            if resource_key not in frame :frame [resource_key ]=None
-        combined_df =pd .concat (frames .values (),keys =frames .keys (),names =['log_name','orig_index']).reset_index ()
         processed_logs ={}
-        for name ,group_df in combined_df .groupby ('log_name'):
+        for name ,source_df in frames .items ():
+            group_df =source_df .copy ()
+            if resource_key not in group_df :group_df [resource_key ]=None
+            group_df ['orig_index']=np .arange (len (group_df ))
             raw_traces =self ._convert_df_to_raw_traces (group_df ,case_id_key ,activity_key ,timestamp_key ,
             resource_key ,cost_key )
             if self .strategy =='learned':
@@ -147,6 +180,7 @@ class XESLogLoader :
         attribute_columns =sorted (
         column for column in df .columns
         if column not in ignored and not str (column ).startswith ('_fmv3_')
+        and not df [column ].isna ().all ()
         )[:self .max_generic_attributes ]
         stable_key ='orig_index'if 'orig_index'in df else '_fmv3_original_order'
         if stable_key not in df :
@@ -276,16 +310,28 @@ class XESLogLoader :
         'calendar_features':event ['calendar_features'],
         'generic_attributes':event ['generic_attributes'],
         }
-    def save_training_artifacts (self ,path ):
-        artifacts ={'strategy':self .strategy ,'activity_to_id':self .activity_to_id ,
-        'training_activity_names':self .training_activity_names }
+    def save_training_artifacts (self ,path ,metadata =None ):
+        artifacts ={'format_version':2 ,'strategy':self .strategy ,
+        'activity_to_id':self .activity_to_id ,
+        'training_activity_names':self .training_activity_names ,
+        'metadata':dict (metadata or {})}
         if self .strategy =='pretrained':
             artifacts ['training_activity_embeddings']=self .training_activity_embeddings
+            artifacts ['activity_embedding_map']=self .activity_embedding_map
+            artifacts ['resource_embedding_map']=self .resource_embedding_map
+            artifacts ['pad_embedding']=self .pad_embedding
+            artifacts ['sbert_model_name']=self .sbert_model_name
+            artifacts ['sbert_model_revision']=self .sbert_model_revision
         elif self .strategy =='learned':
             artifacts ['char_to_id']=self .char_to_id
+        artifacts ['activity_vocabulary_sha256']=stable_config_hash (
+        sorted ((str (key ),int (value ))for key ,value in self .activity_to_id .items ()))
+        artifacts ['character_vocabulary_sha256']=(
+        stable_config_hash (sorted ((str (key ),int (value ))for key ,value in self .char_to_id .items ()))
+        if self .strategy =='learned'else None )
         torch .save (artifacts ,path )
         print (f"💾 Training artifacts for '{self .strategy }' strategy saved to {path }")
-    def load_training_artifacts (self ,path ):
+    def load_training_artifacts (self ,path ,expected_metadata =None ):
         if not os .path .exists (path ):raise FileNotFoundError (f"Artifacts file not found at {path }.")
         artifacts =torch .load (path ,weights_only =False )
         if artifacts ['strategy']!=self .strategy :
@@ -293,10 +339,52 @@ class XESLogLoader :
             f"Artifact strategy '{artifacts ['strategy']}' does not match loader strategy '{self .strategy }'.")
         self .activity_to_id =artifacts ['activity_to_id']
         self .training_activity_names =artifacts ['training_activity_names']
+        actual_activity_hash =stable_config_hash (
+        sorted ((str (key ),int (value ))for key ,value in self .activity_to_id .items ()))
+        saved_activity_hash =artifacts .get ('activity_vocabulary_sha256')
+        if saved_activity_hash and saved_activity_hash !=actual_activity_hash :
+            raise ValueError ("Training artifact activity vocabulary hash mismatch.")
         if self .strategy =='pretrained':
+            required ={
+            'training_activity_embeddings','activity_embedding_map',
+            'resource_embedding_map','pad_embedding','sbert_model_name',
+            'sbert_model_revision',
+            }
+            missing =sorted (required -set (artifacts ))
+            if missing :
+                raise ValueError (
+                "Pretrained artifacts are incomplete and would require silent "
+                "re-encoding: "+", ".join (missing ))
             self .training_activity_embeddings =artifacts ['training_activity_embeddings']
+            self .activity_embedding_map =artifacts ['activity_embedding_map']
+            self .resource_embedding_map =artifacts ['resource_embedding_map']
+            self .pad_embedding =artifacts ['pad_embedding']
+            if artifacts ['sbert_model_name']!=self .sbert_model_name or (
+            artifacts ['sbert_model_revision']!=self .sbert_model_revision ):
+                raise ValueError (
+                "Pretrained artifact model name/revision does not match the "
+                "configured SentenceTransformer."
+                )
         elif self .strategy =='learned':
             self .char_to_id =artifacts ['char_to_id']
+            actual_character_hash =stable_config_hash (
+            sorted ((str (key ),int (value ))for key ,value in self .char_to_id .items ()))
+            saved_character_hash =artifacts .get ('character_vocabulary_sha256')
+            if saved_character_hash and saved_character_hash !=actual_character_hash :
+                raise ValueError ("Training artifact character vocabulary hash mismatch.")
+        if expected_metadata is not None :
+            saved_metadata =artifacts .get ('metadata')
+            if not saved_metadata :
+                raise ValueError (
+                "Training artifacts lack reproducibility metadata; refusing "
+                "incompatible initialization."
+                )
+            mismatches =sorted (
+            key for key ,value in expected_metadata .items ()
+            if saved_metadata .get (key )!=value )
+            if mismatches :
+                raise ValueError (
+                "Training artifact metadata mismatch at: "+", ".join (mismatches ))
         print (f"✅ Training artifacts loaded successfully from {path }")
 def _summarize_processed_log (log_name ,log ,max_traces =2 ,max_events =5 ):
     total_events =sum (len (trace )for trace in log )

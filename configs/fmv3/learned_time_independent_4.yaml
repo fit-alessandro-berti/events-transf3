@@ -2,6 +2,12 @@ extends: learned_time_4_dynamic.yaml
 experiment_name: learned_time_independent_4
 run_mode: initialize
 initialize_from_checkpoint: checkpoints/fmv3/learned_time_4_temporal/model_epoch_33.pth
+initialize_from_artifacts: checkpoints/fmv3/learned_time_4_temporal/training_artifacts.pth
+source_epoch: 33
+additional_epochs: 12
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 45
 lr: 0.003
 weight_decay: 0.0

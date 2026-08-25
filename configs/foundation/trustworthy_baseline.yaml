@@ -1,0 +1,27 @@
+# Optimization-control baseline requested by the foundation-model audit.
+# It intentionally removes MoE head-update dilution before comparing richer
+# routing, clipping, regression, or context variants at matched compute.
+extends: ../fmv3/training_debug_full_retrain.yaml
+experiment_name: trustworthy_foundation_baseline
+moe_settings:
+  num_experts: 1
+  shared_backbone: true
+  expert_adapter_enabled: true
+  expert_adapter_hidden_dim: 64
+  expert_diversity_weight: 0.0
+gradient_clip_mode: global
+gradient_clip_norm: 5.0
+training_lr_multipliers:
+  "adapter/classification": 5.0
+  "adapter/prefix_attention": 5.0
+  "adapter/regression": 5.0
+  "adapter/temporal_input": 5.0
+  "head/classification_selector": 20.0
+  "head/regression_confidence": 5.0
+  "head/regression_selector": 20.0
+  "head/time_transform": 5.0
+  "routing": 5.0
+fmv3_head:
+  expert_routing_confidence_enabled: false
+  classification_expert_confidence_enabled: false
+  regression_expert_confidence_enabled: false

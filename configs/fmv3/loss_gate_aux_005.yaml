@@ -2,6 +2,12 @@ extends: prefix_state_attention_joint.yaml
 experiment_name: loss_gate_aux_005
 run_mode: initialize
 initialize_from_checkpoint: checkpoints/fmv3/prefix_state_attention_joint/model_epoch_36.pth
+initialize_from_artifacts: checkpoints/fmv3/prefix_state_attention_joint/training_artifacts.pth
+source_epoch: 36
+additional_epochs: 2
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 38
 fmv3_head:
   regression_gate_aux_weight: 0.05

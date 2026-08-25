@@ -25,7 +25,11 @@ from training_debug import (
 from training_strategies.episodic_strategy import run_episodic_step
 from training_strategies.retrieval_strategy import run_retrieval_step
 from training_strategies.train_utils import evaluate_embedding_quality
-from training_log_sets import active_training_log_sets, choose_training_log_set
+from training_log_sets import (
+    active_training_log_sets,
+    choose_training_log_set,
+    training_log_set_weight,
+)
 
 
 def split_params_for_proto(model):
@@ -67,7 +71,7 @@ def expert_adapter_diversity_loss(model):
 
 
 def adaptive_clip_grad_(parameters, factor=0.02, epsilon=1e-3):
-    """Adaptive gradient clipping relative to each parameter tensor's scale."""
+    """Unit-wise AGC, excluding biases/norm vectors and zero-init tensors."""
     parameters = [
         parameter
         for parameter in parameters
@@ -77,17 +81,29 @@ def adaptive_clip_grad_(parameters, factor=0.02, epsilon=1e-3):
         return 0.0, 0.0
     total_squared = 0.0
     clipped = 0
+    eligible_units =0
     factor = max(float(factor), 0.0)
     epsilon = max(float(epsilon), 1e-12)
     for parameter in parameters:
         grad_norm = parameter.grad.detach().float().norm()
-        parameter_norm = parameter.detach().float().norm().clamp_min(epsilon)
         total_squared += float(grad_norm.square().cpu())
-        maximum = factor * parameter_norm
-        if grad_norm > maximum:
-            parameter.grad.mul_((maximum / grad_norm.clamp_min(1e-12)).to(parameter.grad.dtype))
-            clipped += 1
-    return total_squared ** 0.5, clipped / len(parameters)
+        # Biases and normalization scales have no meaningful output-unit axis.
+        # Exactly zero-initialized heads must receive an unconstrained first
+        # update or an epsilon-scale ceiling erases their learning signal.
+        if parameter .ndim <=1 or torch .count_nonzero (parameter .detach ())==0 :
+            continue
+        unit_dims =tuple (range (1 ,parameter .ndim ))
+        parameter_units =parameter .detach ().float ().norm (
+        dim =unit_dims ,keepdim =True ).clamp_min (epsilon )
+        gradient_units =parameter .grad .detach ().float ().norm (
+        dim =unit_dims ,keepdim =True )
+        maximum =factor *parameter_units
+        should_clip =gradient_units >maximum
+        scale =(maximum /gradient_units .clamp_min (1e-12 )).clamp_max (1.0 )
+        parameter .grad .mul_ (scale .to (parameter .grad .dtype ))
+        clipped +=int (should_clip .sum ().item ())
+        eligible_units +=int (should_clip .numel ())
+    return total_squared **0.5 ,clipped /max (eligible_units ,1 )
 
 
 def build_training_state(
@@ -200,7 +216,15 @@ def _strategy_step(
     raise ValueError(f"Unknown concrete training strategy: {strategy}")
 
 
-def _validation_accumulator(model, validation_tasks, config):
+def _validation_accumulator(
+    model,
+    validation_tasks,
+    config,
+    *,
+    accumulator=None,
+    log_set_name=None,
+    schedule_weight=1.0,
+):
     diagnostics_cfg = config.get("training_diagnostics", {}) or {}
     if not diagnostics_cfg.get("enabled", False) or not validation_tasks:
         return None
@@ -230,11 +254,16 @@ def _validation_accumulator(model, validation_tasks, config):
         if expert.proto_head.time_transform_bank is not None:
             expert.proto_head.time_transform_bank.train(False)
 
-    accumulator = MetricAccumulator()
+    accumulator = accumulator or MetricAccumulator()
+    total_step_count =sum (
+    len ([pool for pool in validation_tasks .get (task_type,[])if pool ])
+    *steps_per_pool for task_type in ('classification','regression'))
     training_strategy = str(config.get("training_strategy", "episodic"))
     with torch.no_grad():
         for task_type in ("classification", "regression"):
             pools = validation_tasks.get(task_type, [])
+            task_step_count =max (
+            1 ,len ([pool for pool in pools if pool ])*steps_per_pool )
             for pool_index, pool in enumerate(pools):
                 if not pool:
                     continue
@@ -255,6 +284,29 @@ def _validation_accumulator(model, validation_tasks, config):
                     )
                     if loss is not None and torch.isfinite(loss):
                         metrics["loss/total"] = loss
+                    log_set_prefixes =(
+                        (
+                            f"log_set/{log_set_name}",
+                            f"log_set/{log_set_name}/task/{task_type}",
+                            f"log_set/{log_set_name}/pool/{pool_index}",
+                        )
+                        if log_set_name is not None
+                        else ()
+                    )
+                    weighted_prefixes =(
+                        (
+                            (
+                                "schedule_weighted",
+                                float(schedule_weight) / max(total_step_count, 1),
+                            ),
+                            (
+                                f"schedule_weighted/task/{task_type}",
+                                float(schedule_weight) / task_step_count,
+                            ),
+                        )
+                        if log_set_name is not None
+                        else ()
+                    )
                     accumulator.add(
                         metrics,
                         prefixes=(
@@ -264,7 +316,9 @@ def _validation_accumulator(model, validation_tasks, config):
                             f"episode/{episode}",
                             f"task/{task_type}/expert/{expert_index}",
                             f"task/{task_type}/pool/{pool_index}",
+                            *log_set_prefixes,
                         ),
+                        weighted_prefixes=weighted_prefixes,
                     )
 
     for module, training in module_states:
@@ -339,6 +393,25 @@ def _validation_for_task_set(validation_task_sets, selected_name):
     return None
 
 
+def _validation_for_active_task_sets(
+    model, validation_task_sets, active_task_sets, config, epoch
+):
+    if not validation_task_sets:
+        return None
+    accumulator =MetricAccumulator ()
+    evaluated =0
+    for task_set in active_task_sets :
+        tasks =_validation_for_task_set (
+        validation_task_sets ,task_set ['name'])
+        if not tasks :continue
+        _validation_accumulator (
+        model ,tasks ,config ,accumulator =accumulator ,
+        log_set_name =task_set ['name'],
+        schedule_weight =training_log_set_weight (task_set ,epoch ))
+        evaluated +=1
+    return accumulator if evaluated else None
+
+
 def train(
     model,
     training_tasks,
@@ -378,8 +451,9 @@ def train(
         ),
         1.0,
     )
+    scheduler_horizon = max(1, int(config["epochs"]) - int(resume_epoch))
     scheduler = CosineAnnealingLR(
-        optimizer, T_max=config["epochs"], eta_min=1e-6
+        optimizer, T_max=scheduler_horizon, eta_min=1e-6
     )
     use_amp = torch.cuda.is_available()
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -420,11 +494,6 @@ def train(
             torch.cuda.set_rng_state_all(resume_state["cuda_rng"])
         log_set_rng.setstate(resume_state["log_set_rng"])
         print("✅ Restored optimizer, scheduler, AMP scaler, and all RNG states.")
-    else:
-        for completed_epoch in range(1, int(resume_epoch) + 1):
-            choose_training_log_set(
-                training_task_sets, completed_epoch, rng=log_set_rng
-            )
     training_strategy = config.get("training_strategy", "episodic")
     print(f"✅ Training Strategy: '{training_strategy}'")
     if training_strategy in {"retrieval", "mixed"}:
@@ -489,12 +558,6 @@ def train(
         epoch_number = epoch + 1
         active_task_sets = active_training_log_sets(
             training_task_sets, epoch_number
-        )
-        selected_task_set = choose_training_log_set(
-            training_task_sets, epoch_number, rng=log_set_rng
-        )
-        selected_validation_tasks = _validation_for_task_set(
-            validation_task_sets, selected_task_set["name"]
         )
         active_names = ", ".join(task_set["name"] for task_set in active_task_sets)
         print(
@@ -753,8 +816,12 @@ def train(
             message += f" | Component LRs: {special_lrs}"
         print(message)
 
-        validation = _validation_accumulator(
-            model, selected_validation_tasks, config
+        validation = _validation_for_active_task_sets(
+            model,
+            validation_task_sets,
+            active_task_sets,
+            config,
+            epoch_number,
         )
         update_metrics = (
             parameter_update_metrics(model, parameter_snapshot)

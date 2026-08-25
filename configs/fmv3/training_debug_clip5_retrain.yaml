@@ -3,4 +3,5 @@
 # update (pre-clip norm approximately 6--7 versus cap 1).
 extends: training_debug_full_retrain.yaml
 experiment_name: training_debug_clip5_retrain
+gradient_clip_mode: global
 gradient_clip_norm: 5.0

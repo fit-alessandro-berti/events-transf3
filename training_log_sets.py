@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import random
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
 DEFAULT_LOG_PATTERNS = ("*.xes", "*.xes.gz")
+_FILE_HASH_CACHE: dict[Path, tuple[int, int, str]] = {}
 
 
 def _epoch_range(spec: Mapping[str, Any], total_epochs: int) -> tuple[int, int]:
@@ -62,6 +64,33 @@ def _directory_log_paths(spec: Mapping[str, Any]) -> dict[str, str]:
             if path.is_file() and path.resolve() not in excluded_paths:
                 discovered[_path_key(path)] = os.fspath(path)
     return discovered
+
+
+def _manifest_rows(log_paths: Mapping[str, Any]) -> list[dict[str, str]]:
+    rows = []
+    for name, raw_path in sorted(log_paths.items()):
+        path = Path(os.fspath(raw_path))
+        rows.append(
+            {
+                "name": str(name),
+                "path": os.fspath(path),
+                "filename": path.name,
+                "sha256": _sha256(path),
+            }
+        )
+    return rows
+
+
+def _manifest_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
+    digest = hashlib.sha256()
+    for row in rows:
+        digest.update(str(row["name"]).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(row["filename"]).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(row["sha256"]).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _weight_schedule(
@@ -146,6 +175,28 @@ def resolve_training_log_sets(
                     f"Training log set '{name}' contains duplicate log key '{key}'."
                 )
             log_paths[key] = path
+        guard_directory = raw_spec.get("reject_unknown_in_directory")
+        if guard_directory:
+            guard_spec = {
+                "directory": guard_directory,
+                "patterns": raw_spec.get("guard_patterns", DEFAULT_LOG_PATTERNS),
+            }
+            guarded_paths = {
+                Path(path).resolve()
+                for path in _directory_log_paths(guard_spec).values()
+            }
+            allowed_extras = raw_spec.get("allowed_extra_paths", ()) or ()
+            if isinstance(allowed_extras, (str, os.PathLike)):
+                allowed_extras = (allowed_extras,)
+            allowed_paths = {
+                Path(path).resolve() for path in log_paths.values()
+            } | {Path(os.fspath(path)).resolve() for path in allowed_extras}
+            unknown_paths = sorted(guarded_paths - allowed_paths)
+            if unknown_paths:
+                raise ValueError(
+                    f"Training log set '{name}' found unknown event logs: "
+                    + ", ".join(os.fspath(path) for path in unknown_paths)
+                )
         if not log_paths:
             raise ValueError(f"Training log set '{name}' contains no event logs.")
         missing = [path for path in log_paths.values() if not Path(path).is_file()]
@@ -153,6 +204,50 @@ def resolve_training_log_sets(
             raise ValueError(
                 f"Training log set '{name}' contains missing files: {missing}"
             )
+        expected_file_hashes = raw_spec.get("file_sha256", {}) or {}
+        if not isinstance(expected_file_hashes, Mapping):
+            raise ValueError(
+                f"Training log set '{name}' has a non-mapping 'file_sha256'."
+            )
+        unknown_hash_keys = sorted(set(expected_file_hashes) - set(log_paths))
+        if unknown_hash_keys:
+            raise ValueError(
+                f"Training log set '{name}' has hashes for unknown log keys: "
+                + ", ".join(unknown_hash_keys)
+            )
+        rows = _manifest_rows(log_paths)
+        actual_file_hashes = {row["name"]: row["sha256"] for row in rows}
+        mismatches = [
+            key
+            for key, expected in expected_file_hashes.items()
+            if str(expected).lower() != actual_file_hashes[str(key)].lower()
+        ]
+        if mismatches:
+            raise ValueError(
+                f"Training log set '{name}' content hash mismatch for: "
+                + ", ".join(sorted(mismatches))
+            )
+        actual_manifest_hash = _manifest_sha256(rows)
+        expected_manifest_hash = raw_spec.get("manifest_sha256")
+        if expected_manifest_hash and (
+            str(expected_manifest_hash).lower() != actual_manifest_hash.lower()
+        ):
+            raise ValueError(
+                f"Training log set '{name}' manifest mismatch: files were added, "
+                "removed, renamed, or modified"
+            )
+        if raw_spec.get("require_manifest", False):
+            if not expected_manifest_hash:
+                raise ValueError(
+                    f"Training log set '{name}' requires manifest_sha256"
+                )
+            if set(expected_file_hashes) != set(log_paths) and not raw_spec.get(
+                "allow_aggregate_manifest_only", False
+            ):
+                raise ValueError(
+                    f"Training log set '{name}' requires one file_sha256 entry "
+                    "for every configured log"
+                )
         resolved.append(
             {
                 "name": name,
@@ -160,6 +255,8 @@ def resolve_training_log_sets(
                 "end_epoch": last_epoch,
                 "weight_schedule": weight_schedule,
                 "log_paths": log_paths,
+                "manifest_sha256": actual_manifest_hash,
+                "manifest_rows": rows,
             }
         )
 
@@ -179,6 +276,43 @@ def resolve_training_log_sets(
                 f"{preview}{suffix}"
             )
     return resolved
+
+
+def training_log_manifest(
+    log_sets: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build the ordered, content-addressed corpus manifest persisted per run."""
+    sets = []
+    for log_set in log_sets:
+        rows = log_set.get("manifest_rows") or _manifest_rows(log_set["log_paths"])
+        sets.append(
+            {
+                "name": str(log_set["name"]),
+                "start_epoch": int(log_set["start_epoch"]),
+                "end_epoch": int(log_set["end_epoch"]),
+                "weight_schedule": [list(item) for item in log_set.get("weight_schedule", ())],
+                "manifest_sha256": str(
+                    log_set.get("manifest_sha256") or _manifest_sha256(rows)
+                ),
+                "logs": list(rows),
+            }
+        )
+    payload = {"schema_version": 1, "sets": sets}
+    payload["manifest_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
+def save_training_log_manifest(
+    checkpoint_dir: str | os.PathLike, log_sets: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    payload = training_log_manifest(log_sets)
+    path = Path(checkpoint_dir) / "training_log_manifest.json"
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return payload
 
 
 def combined_training_log_paths(
@@ -283,11 +417,19 @@ def validate_evaluation_split(
 
 
 def _sha256(path: Path) -> str:
+    path = path.resolve()
+    stat = path.stat()
+    cached = _FILE_HASH_CACHE.get(path)
+    signature = (int(stat.st_size), int(stat.st_mtime_ns))
+    if cached is not None and cached[:2] == signature:
+        return cached[2]
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
-    return digest.hexdigest()
+    value = digest.hexdigest()
+    _FILE_HASH_CACHE[path] = (*signature, value)
+    return value
 
 
 def validate_training_evaluation_disjointness(

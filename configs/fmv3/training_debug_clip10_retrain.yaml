@@ -4,4 +4,5 @@
 # while retaining protection against the largest outliers.
 extends: training_debug_full_retrain.yaml
 experiment_name: training_debug_clip10_retrain
+gradient_clip_mode: global
 gradient_clip_norm: 10.0

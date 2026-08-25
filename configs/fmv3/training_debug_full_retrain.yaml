@@ -4,12 +4,19 @@
 # falling training loss transfers beyond the prefixes used for optimization.
 extends: example_selector_selected.yaml
 experiment_name: training_debug_full_retrain
+run_mode: train
+training_enabled: true
+assembly: __delete__
+initialize_from_checkpoint: __delete__
+initialize_from_artifacts: __delete__
 selected_checkpoint_epoch: 20
 epochs: 20
 episodes_per_epoch: 300
 lr: 0.0001
 weight_decay: 0.01
 trainable_scope: all
+gradient_clip_mode: global
+gradient_clip_norm: 1.0
 classification_task_probability: 0.50
 proto_head_warmup_epochs: 0
 proto_head_lr_mult_after_warmup: 1.0

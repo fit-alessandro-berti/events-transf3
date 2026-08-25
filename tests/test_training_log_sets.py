@@ -104,6 +104,53 @@ class TrainingLogSetTests(unittest.TestCase):
             self.assertEqual(resolved[0]["start_epoch"], 1)
             self.assertEqual(resolved[0]["end_epoch"], 3)
 
+    def test_content_addressed_directory_rejects_unknown_or_changed_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "one.xes").write_bytes(b"one")
+            base = {
+                "epochs": 1,
+                "training_log_sets": [
+                    {"name": "snapshot", "directory": str(root)}
+                ],
+            }
+            resolved = resolve_training_log_sets(base)
+            manifest_hash = resolved[0]["manifest_sha256"]
+            protected = {
+                "epochs": 1,
+                "training_log_sets": [
+                    {
+                        "name": "snapshot",
+                        "directory": str(root),
+                        "manifest_sha256": manifest_hash,
+                        "require_manifest": True,
+                        "allow_aggregate_manifest_only": True,
+                    }
+                ],
+            }
+            resolve_training_log_sets(protected)
+            (root / "two.xes").write_bytes(b"two")
+            with self.assertRaisesRegex(ValueError, "manifest mismatch"):
+                resolve_training_log_sets(protected)
+
+    def test_per_file_hash_mismatch_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "base.xes"
+            path.write_bytes(b"actual")
+            with self.assertRaisesRegex(ValueError, "content hash mismatch"):
+                resolve_training_log_sets(
+                    {
+                        "epochs": 1,
+                        "training_log_sets": [
+                            {
+                                "name": "source",
+                                "log_paths": {"base": str(path)},
+                                "file_sha256": {"base": "0" * 64},
+                            }
+                        ],
+                    }
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

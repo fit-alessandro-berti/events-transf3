@@ -18,6 +18,7 @@ def init_loader (config ):
     data_config =config .get ('data',{})or {}
     loader =XESLogLoader (
     strategy =strategy ,sbert_model_name =sbert_model_name ,
+    sbert_model_revision =config ['pretrained_settings'].get ('revision'),
     max_string_length =config .get ('learned_settings',{}).get ('max_string_length',64 ),
     max_generic_attributes =data_config .get ('max_generic_attributes',16 ),
     attribute_hash_buckets =data_config .get ('attribute_hash_buckets',4096 ),
@@ -95,6 +96,7 @@ def load_state_dict_compatible (model ,state_dict ):
     or '.embedder.context_projection.'in key
     or '.embedder.attribute_encoder.'in key
     or '.embedder.history_projection.'in key
+    or '.embedder.history_transition_projection.'in key
     or '.embedder.history_token'in key
     or '.proto_head.regression_residual_head.'in key
     ]

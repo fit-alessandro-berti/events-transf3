@@ -6,6 +6,12 @@ experiment_name: example_selector_classification
 run_mode: initialize
 training_enabled: true
 initialize_from_checkpoint: checkpoints/fmv3/loss_refinement_selected/model_epoch_43.pth
+initialize_from_artifacts: checkpoints/fmv3/loss_refinement_selected/training_artifacts.pth
+source_epoch: 43
+additional_epochs: 1
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 44
 episodes_per_epoch: 300
 lr: 0.002

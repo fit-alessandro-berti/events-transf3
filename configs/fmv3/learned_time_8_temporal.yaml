@@ -2,6 +2,12 @@ extends: learned_time_8_dynamic.yaml
 experiment_name: learned_time_8_temporal
 run_mode: initialize
 initialize_from_checkpoint: checkpoints/fmv3/learned_time_8_dynamic/model_epoch_31.pth
+initialize_from_artifacts: checkpoints/fmv3/learned_time_8_dynamic/training_artifacts.pth
+source_epoch: 31
+additional_epochs: 2
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 33
 fmv3_head:
   regression_time_input_transforms: true

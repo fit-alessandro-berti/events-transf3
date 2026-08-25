@@ -2,6 +2,12 @@ extends: corrected_fmv3.yaml
 experiment_name: learned_time_4
 run_mode: initialize
 initialize_from_checkpoint: checkpoints/fmv3/corrected_fmv3/model_epoch_23.pth
+initialize_from_artifacts: checkpoints/fmv3/corrected_fmv3/training_artifacts.pth
+source_epoch: 23
+additional_epochs: 8
+reset_optimizer: true
+reset_scheduler: true
+allow_architecture_change: true
 epochs: 31
 lr: 0.003
 weight_decay: 0.0

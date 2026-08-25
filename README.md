@@ -50,25 +50,31 @@ epoch:
 TRAINING_LOG_SETS = [
     {
         "name": "source",
-        "directory": LOG_DIR,
-        "exclude_paths": ("./logs/held_out.xes.gz",),
+        "log_paths": {"source_a": "./logs/source_a.xes.gz"},
+        "file_sha256": {"source_a": "<sha256>"},
+        "manifest_sha256": "<ordered-manifest-sha256>",
+        "require_manifest": True,
         "epochs": (1, None),
         "weight_schedule": ((1, 5, 0.70), (6, 20, 0.40), (21, None, 0.25)),
     },
     {
         "name": "synthetic",
         "directory": os.path.join(LOG_DIR, "out"),
+        "manifest_sha256": "<ordered-manifest-sha256>",
+        "require_manifest": True,
+        "allow_aggregate_manifest_only": True,
         "epochs": (1, None),
         "weight_schedule": ((1, 5, 0.30), (6, 20, 0.60), (21, None, 0.75)),
     },
 ]
 ```
 
-Directories are scanned non-recursively for `.xes` and `.xes.gz` files. Add
-more entries as needed. Every configured training epoch must have positive
-weight. Before fitting or evaluation, resolved paths and SHA-256 hashes are
-checked so a copied, renamed, or directly referenced evaluation log cannot
-enter training.
+The foundation defaults are immutable: source logs are explicit and the large
+synthetic directory is guarded by an ordered aggregate hash. Added, removed,
+renamed, or modified XES files fail resolution. Legacy ad hoc directory sets
+remain available when no manifest is requested. Every configured training
+epoch must have positive weight. Resolved paths and hashes are also checked so
+a copied, renamed, or directly referenced evaluation log cannot enter training.
 
 The bundled `D_unseen` log is excluded and reserved for the final `meta_test`
 split. Checkpoints trained before this exclusion are contaminated and must be
@@ -87,10 +93,13 @@ Common options:
 - `--embedding_strategy learned|pretrained`
 - `--training_strategy episodic|retrieval|mixed`
 - `--resume` (exactly restore the latest full training state)
-- `--initialize_from PATH` (load model weights and intentionally reset optimizer state)
+- `--initialize_from PATH --initialize_artifacts PATH --source_epoch N --additional_epochs N`
+  (load weights and their exact loader artifacts while resetting optimizer state)
 - `--stop_after_epoch N`
 
-The script saves deployable `model_epoch_N.pth` files and exact-resume
+The script saves deployable `model_epoch_N.pth` files, the fully resolved YAML,
+content-addressed `training_log_manifest.json`, fingerprinted
+`training_run_manifest.json`, and exact-resume
 `training_state_epoch_N.pth` files. Exact state includes optimizer, scheduler,
 AMP scaler, Python/NumPy/Torch/CUDA RNGs, and log-set sampling RNG.
 Exact resume also verifies the saved configuration; use `--initialize_from`
@@ -100,10 +109,11 @@ best-effort GPU utilization to `training_metrics.jsonl`.
 
 Matched context-length and architecture controls are under
 `configs/foundation/` (`context_10.yaml`, `context_32.yaml`,
-`context_64.yaml`, `no_regression_residual.yaml`, and
-`independent_encoders.yaml`). Contexts longer than the configured window retain
-a learned compressed-history token, while the default model shares its encoder
-across four lightweight routed experts.
+`context_64.yaml`, `context_128.yaml`, `trustworthy_baseline.yaml`,
+`no_regression_residual.yaml`, and `independent_encoders.yaml`). Contexts longer
+than the configured window retain a learned compressed-history token augmented
+with a signed activity/transition sketch, while the default model shares its
+encoder across four lightweight routed experts.
 
 ## Evaluation
 
@@ -433,6 +443,9 @@ python main.py \
   --config configs/fmv3/corrected_fmv3.yaml \
   --checkpoint_dir checkpoints/fmv3/corrected_fmv3_reproduction \
   --initialize_from checkpoints/fmv3/00_fmv2/model_epoch_20.pth \
+  --initialize_artifacts checkpoints/fmv3/00_fmv2/training_artifacts.pth \
+  --source_epoch 20 \
+  --additional_epochs 3 \
   --stop_after_epoch 23
 ```
 

@@ -2,16 +2,56 @@ import os
 
 LOG_DIR = './logs'
 
-# Each directory is scanned non-recursively for *.xes and *.xes.gz files.
+# The foundation corpus is content-addressed. Source logs are enumerated
+# explicitly, while the much larger synthetic snapshot is protected by one
+# ordered aggregate hash. Unknown/changed files fail resolution instead of
+# silently becoming training data.
+SOURCE_LOG_PATHS = {
+    '00001_o2c': os.path.join(LOG_DIR, '00001_o2c.xes.gz'),
+    '00002_hire2retire': os.path.join(LOG_DIR, '00002_hire2retire.xes.gz'),
+    '00003_di2re': os.path.join(LOG_DIR, '00003_di2re.xes.gz'),
+    '00004_mak2stock': os.path.join(LOG_DIR, '00004_mak2stock.xes.gz'),
+    '00005_offer2accept': os.path.join(LOG_DIR, '00005_offer2accept.xes.gz'),
+    '00006_quote2order': os.path.join(LOG_DIR, '00006_quote2order.xes.gz'),
+    '00007_opp2quote': os.path.join(LOG_DIR, '00007_opp2quote.xes.gz'),
+    '00008_lead2opp': os.path.join(LOG_DIR, '00008_lead2opp.xes.gz'),
+    '00009_p2p': os.path.join(LOG_DIR, '00009_p2p.xes.gz'),
+    '00010_rid2mit': os.path.join(LOG_DIR, '00010_rid2mit.xes.gz'),
+    '00011_req2receipt': os.path.join(LOG_DIR, '00011_req2receipt.xes.gz'),
+    '00012_camp2lead': os.path.join(LOG_DIR, '00012_camp2lead.xes.gz'),
+}
+SOURCE_LOG_SHA256 = {
+    '00001_o2c': '8d7c6a5913b73695fb434a05de38c14f9c9ffff4ba1524f0c591770ed8d091cc',
+    '00002_hire2retire': 'adbdcf38c51cb0b547e8549adbe94b45bfdd5ed395d9ec4905ff4fde5a637697',
+    '00003_di2re': 'd294c2c01c8e31821980986d5ba8aee2ebd0bb010afa62b393df85133f0f2c43',
+    '00004_mak2stock': '28ecaec1802de6e12796bbccb9f1a5a96718522058bb3fd4cbc49d584f0aca6b',
+    '00005_offer2accept': 'ea42476307c8f09a260d27ec652d817fb1839faf681f50095fd7d31f60c145f9',
+    '00006_quote2order': '023c2fc0e50de6b2d3697ce7d33b1d03a300d967afd6a4f7fbc075439167f4e0',
+    '00007_opp2quote': '8e76890c274ed109aea916d1619ac7142aa652945c463754dff00271e18e7851',
+    '00008_lead2opp': 'd02ede878ccf641eff266ffe69977d20913719eb99637542c508c4f25cbfe29d',
+    '00009_p2p': '5825978e75a0f0ef526a9d0b40291a667f36901f41113d2b69179526481289c2',
+    '00010_rid2mit': '0ae5d396b1870ccbdb4810196edf17e06eeb09e78ff9f9f0c7b197a963fc451c',
+    '00011_req2receipt': '2ab33011332bcc92cd0e17b87f3292699768cb73fbfdb280b4a97c6905e96fc2',
+    '00012_camp2lead': '3c1d955d6ac29d4b6715c65c970d7af350db822572c1a3cd5030954cf9f5a60b',
+}
+
 # Epoch ranges are inclusive. Add another dictionary to add another log set.
 TRAINING_LOG_SETS = [
     {
         'name': 'source',
-        'directory': LOG_DIR,
-        'patterns': ('*.xes', '*.xes.gz'),
-        # D_unseen is deliberately stored beside the source logs for legacy
-        # scripts, so the training scan must exclude it explicitly.
-        'exclude_paths': (os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),),
+        'log_paths': SOURCE_LOG_PATHS,
+        'file_sha256': SOURCE_LOG_SHA256,
+        'manifest_sha256': 'c0a2dde6acae017bec4c0e630e90223525ccfa6c0369b74ce1c6e1225247525a',
+        'require_manifest': True,
+        'reject_unknown_in_directory': LOG_DIR,
+        'allowed_extra_paths': (
+            os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),
+            os.path.join(LOG_DIR, '01_running-example.xes.gz'),
+            os.path.join(LOG_DIR, '02_teleclaims.xes.gz'),
+            os.path.join(LOG_DIR, '03_repairExample.xes.gz'),
+            os.path.join(LOG_DIR, '04_reviewing.xes.gz'),
+            os.path.join(LOG_DIR, 'dummy.xes.gz'),
+        ),
         'epochs': (1, None),
         'weight_schedule': (
             (1, 5, 0.70),
@@ -22,6 +62,10 @@ TRAINING_LOG_SETS = [
     {
         'name': 'synthetic',
         'directory': os.path.join(LOG_DIR, 'out'),
+        'patterns': ('*.xes',),
+        'manifest_sha256': '26f2990ccf61887c339d004351b1cd7d19722f0cdf448fadfcbd80df68e12d5f',
+        'require_manifest': True,
+        'allow_aggregate_manifest_only': True,
         'epochs': (1, None),
         'weight_schedule': (
             (1, 5, 0.30),
@@ -62,6 +106,7 @@ CONFIG = {
 'embedding_strategy':'learned',
 'pretrained_settings':{
 'sbert_model':'all-mpnet-base-v2',
+'revision':None , # Required as an immutable commit/tag for pretrained runs.
 'embedding_dim':768 ,
 },
 'learned_settings':{
@@ -136,8 +181,8 @@ CONFIG = {
 'num_cases_for_testing':500 ,
 'seed':42,
 'training_enabled':True,
-'gradient_clip_norm':1.0,
-'gradient_clip_mode':'adaptive',
+'gradient_clip_norm':5.0,
+'gradient_clip_mode':'global',
 'adaptive_gradient_clip_factor':0.02,
 'adaptive_gradient_clip_epsilon':1e-3,
 'training_lr_multipliers':{},
