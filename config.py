@@ -20,7 +20,13 @@ SOURCE_LOG_PATHS = {
     '00011_req2receipt': os.path.join(LOG_DIR, '00011_req2receipt.xes.gz'),
     '00012_camp2lead': os.path.join(LOG_DIR, '00012_camp2lead.xes.gz'),
     '00013_clos2rep': os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),
+    'activities_of_daily_living': os.path.join(
+        LOG_DIR, 'activities_of_daily_living.xes.gz'
+    ),
     'bpic2013_incidents': os.path.join(LOG_DIR, 'bpic2013_incidents.xes.gz'),
+    'bpic2015_municipality_1': os.path.join(
+        LOG_DIR, 'bpic2015_municipality_1.xes.gz'
+    ),
     'bpic2020_request_for_payment': os.path.join(
         LOG_DIR, 'bpic2020_request_for_payment.xes.gz'
     ),
@@ -40,7 +46,9 @@ SOURCE_LOG_SHA256 = {
     '00011_req2receipt': '2ab33011332bcc92cd0e17b87f3292699768cb73fbfdb280b4a97c6905e96fc2',
     '00012_camp2lead': '3c1d955d6ac29d4b6715c65c970d7af350db822572c1a3cd5030954cf9f5a60b',
     '00013_clos2rep': '94c504f1bd6d6ac7a769a8cdbb3f40333f7e0064be80e2f6c7717b63520d8787',
+    'activities_of_daily_living': '50d3cd76ad2cccb6bf8f0a7760a04264aea7c02d870ab850899a10dfc77c9ac8',
     'bpic2013_incidents': '6ec2136c607648608655802486df97a866f351668751b7ecbca51e1f8715d522',
+    'bpic2015_municipality_1': '941fad17a9adca05808b3d98264fa6f183e91c24107c64a8c12dd959c012b954',
     'bpic2020_request_for_payment': '028e2d645153190200b2ea998747efa02cf1beb6f83db62598963cf391f114b1',
     'production': 'be5956a57c8106db5e1151033e63ee4836e6d3b4f794b39e7674d0f3ac057d5c',
 }
@@ -51,7 +59,7 @@ TRAINING_LOG_SETS = [
         'name': 'source',
         'log_paths': SOURCE_LOG_PATHS,
         'file_sha256': SOURCE_LOG_SHA256,
-        'manifest_sha256': 'a4ea925ba9084ebfa0eea73919402320f55ba0aab76f5ce2f628c71335ad5618',
+        'manifest_sha256': 'd767326e4c68107aa5e19e8963cf22e9073a18dfb2c0ffa0b1aeffc2bd3e2023',
         'require_manifest': True,
         'reject_unknown_in_directory': LOG_DIR,
         'epochs': (1, None),
