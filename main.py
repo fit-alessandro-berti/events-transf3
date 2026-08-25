@@ -347,7 +347,7 @@ def main ():
     trainable_parameters =configure_trainable_scope (model ,trainable_scope )
     if trainable_scope in {
     'time_transform','regression_gate','expert_confidence','expert_routing_confidence','temporal_joint','prefix_attention','temporal_prefix_joint',
-    'classification_adapter','regression_refinement','classification_example_selector',
+    'classification_adapter','classification_redesign','regression_refinement','classification_example_selector',
     'regression_example_selector','example_selectors'}:
         print ("🔒 Frozen backbone; training only the selected adapter modules.")
         print (f"  - Trainable tensors: {len (trainable_parameters )}")

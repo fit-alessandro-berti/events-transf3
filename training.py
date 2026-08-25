@@ -106,6 +106,21 @@ def adaptive_clip_grad_(parameters, factor=0.02, epsilon=1e-3):
     return total_squared **0.5 ,clipped /max (eligible_units ,1 )
 
 
+def shared_encoder_gradient_vector(expert, max_elements=65536):
+    """Compact deterministic snapshot for cross-task gradient-cosine audits."""
+    values =[]
+    remaining =max (int (max_elements ),1 )
+    for parameter in expert .encoder .transformer_encoder .parameters ():
+        if parameter .grad is None :continue
+        flat =parameter .grad .detach ().float ().reshape (-1 )
+        if flat .numel ()>remaining :flat =flat [:remaining ]
+        values .append (flat )
+        remaining -=int (flat .numel ())
+        if remaining <=0 :break
+    if not values :return None
+    return torch .cat (values )
+
+
 def build_training_state(
     epoch, model, optimizer, scheduler, scaler, log_set_rng, config
 ):
@@ -553,6 +568,11 @@ def train(
         )
     gradient_clip_norm = max(float(config.get("gradient_clip_norm", 1.0)), 0.0)
     gradient_clip_mode = str(config.get("gradient_clip_mode", "global")).lower()
+    gradient_conflict_history ={}
+    gradient_conflict_path =os .path .join (
+    checkpoint_dir ,"gradient_conflict.jsonl")
+    gradient_conflict_interval =max (int (config .get (
+    "gradient_conflict_log_interval",25 )),0 )
     last_saved_epoch = 0
     for epoch in range(resume_epoch, config["epochs"]):
         epoch_number = epoch + 1
@@ -727,6 +747,30 @@ def train(
                     step_metrics.update(loss_gradient_metrics(model, step_metrics))
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
+                if gradient_conflict_interval and step %gradient_conflict_interval ==0 :
+                    current_gradient =shared_encoder_gradient_vector (
+                    active_expert ,config .get (
+                    "gradient_conflict_max_elements",65536 ))
+                    other_task =(
+                    "regression"if task_type =="classification"else "classification")
+                    previous =gradient_conflict_history .get ((expert_index ,other_task ))
+                    if current_gradient is not None :
+                        if previous is not None and previous .numel ()==current_gradient .numel ():
+                            cosine =torch .dot (current_gradient ,previous )/(
+                            current_gradient .norm ()*previous .norm ()).clamp_min (1e-12 )
+                            step_metrics ["optimization/shared_task_gradient_cosine"]=(
+                            cosine .detach ())
+                            step_metrics ["optimization/shared_task_gradient_conflict"]=(
+                            (cosine <0 ).float ().detach ())
+                            with open (gradient_conflict_path ,"a",encoding ="utf-8")as handle :
+                                handle .write (json .dumps ({
+                                "epoch":epoch_number ,"step":step ,
+                                "expert":expert_index ,"task":task_type ,
+                                "shared_task_gradient_cosine":float (cosine .detach ().cpu ()),
+                                "conflict":bool (cosine <0 ),
+                                },sort_keys =True )+"\n")
+                        gradient_conflict_history [(expert_index ,task_type )]=(
+                        current_gradient .detach ().clone ())
                 if sampled_step:
                     step_metrics.update(gradient_metrics(model))
                 if gradient_clip_mode == "adaptive":

@@ -28,16 +28,40 @@ def _load_checkpoint_config(checkpoint_dir: Path):
     yaml_path = checkpoint_dir / "training_config.yaml"
     torch_path = checkpoint_dir / "training_config.pth"
     if yaml_path.exists():
-        deep_merge(CONFIG, load_yaml_config(str(yaml_path)))
+        saved =load_yaml_config (str (yaml_path ))
     elif torch_path.exists():
-        deep_merge(CONFIG, torch.load(torch_path, map_location="cpu", weights_only=False))
+        saved =torch .load (torch_path ,map_location ="cpu",weights_only =False )
     else:
         raise FileNotFoundError(f"No training config in {checkpoint_dir}")
+    saved_head =saved .get ("fmv3_head",{})or {}
+    if "semantic_candidate_decoder_enabled"not in saved_head :
+        # A historical checkpoint did not train any of the schema-conditioned
+        # modules.  Keep its exact support-only graph unless an eval override
+        # explicitly opts into a migration experiment.
+        saved .setdefault ("fmv3_head",{}).update ({
+        "semantic_candidate_decoder_enabled":False ,
+        "process_candidate_decoder_enabled":False ,
+        "support_fitted_classifier_enabled":False ,
+        "classification_separate_projections_enabled":False ,
+        "classification_private_transformer_layers":0 ,
+        })
+        saved_eval =saved .setdefault ("fmv3_evaluation",{})
+        saved_eval .setdefault ("classification_retrieval_policy","nearest")
+        saved_eval .setdefault ("schema_mode","support_only")
+        saved_eval .setdefault ("retrieval_modes",["configured"])
+        if "evaluation_profiles"not in saved_eval :
+            saved_eval ["evaluation_profiles"]=[{
+            "name":"main","retrieval_modes":["configured"],
+            "prior_modes":saved_eval .get ("prior_modes",["balanced","natural"]),
+            "prior_strengths":saved_eval .get ("prior_strengths",[1.0 ]),
+            "retrieval_k":saved_eval .get ("retrieval_k",[5 ,20 ,50 ]),
+            }]
+    deep_merge (CONFIG ,saved )
 
 
 def _write_summary(rows, output_dir: Path):
     columns = [
-        "task", "experiment", "evaluation_split", "evaluation_profile", "log", "repetition", "support_scenario", "case_budget",
+        "task", "experiment", "evaluation_split", "evaluation_profile", "schema_mode", "log", "repetition", "support_scenario", "case_budget",
         "support_prefixes", "retrieval_mode", "prior_mode", "prior_strength", "retrieval_k", "n_queries",
         "structured_max_order", "structured_smoothing", "structured_weight", "structured_tau",
         "structured_context_coverage", "structured_mean_context_support",
@@ -46,7 +70,11 @@ def _write_summary(rows, output_dir: Path):
         "virtual_expert_min_support_prefixes", "virtual_expert_full_support_weight",
         "virtual_expert_subbag_weight",
         "accuracy", "balanced_accuracy", "adjusted_balanced_accuracy", "macro_precision", "macro_f1", "zero_recall_fraction",
-        "support_pool_availability", "macro_label_recall_at_k", "macro_retrieval_given_pool",
+        "support_pool_availability", "macro_class_availability",
+        "macro_label_recall_at_k", "macro_retrieval_given_pool",
+        "macro_label_recall_at_k_any_expert", "macro_label_recall_at_k_every_expert",
+        "macro_label_recall_at_k_highest_weight_expert", "macro_label_recall_at_k_union_experts",
+        "recall_support_n0", "recall_support_n1", "recall_support_n2_5", "recall_support_n_gt5",
         "macro_decision_given_retrieval", "nll", "multiclass_brier",
         "ece_10", "aurc", "mae_hours", "rmse_hours", "log_mae", "median_absolute_error_hours", "normalized_mae",
         "mae_skill_vs_median", "rmse_skill_vs_median", "d2_absolute_error", "r2", "interval_coverage",

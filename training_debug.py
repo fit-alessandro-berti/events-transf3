@@ -567,8 +567,14 @@ def split_training_tasks_by_case(training_tasks, fraction, seed, log_names=None)
             "tasks": {},
         }
         for task, pool in (("classification", class_pool), ("regression", reg_pool)):
-            train_pool = [item for item in pool if str(item[2]) not in validation_cases]
-            validation_pool = [item for item in pool if str(item[2]) in validation_cases]
+            if hasattr (pool ,"subset"):
+                train_pool =pool .subset (
+                lambda item :str (item [2 ])not in validation_cases )
+                validation_pool =pool .subset (
+                lambda item :str (item [2 ])in validation_cases )
+            else :
+                train_pool = [item for item in pool if str(item[2]) not in validation_cases]
+                validation_pool = [item for item in pool if str(item[2]) in validation_cases]
             train[task].append(train_pool)
             validation[task].append(validation_pool)
             row["tasks"][task] = {

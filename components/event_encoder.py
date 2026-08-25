@@ -171,6 +171,16 @@ class EventEncoder (nn .Module ):
         norm_first =True
         )
         self .transformer_encoder =nn .TransformerEncoder (encoder_layer ,num_layers =n_layers )
+        self .classification_private_encoder =None
+        private_layers =max (int (prefix_config .get (
+        'classification_private_transformer_layers',0 )),0 )
+        if private_layers :
+            private_layer =nn .TransformerEncoderLayer (
+            d_model =d_model ,nhead =n_heads ,dim_feedforward =d_model *4 ,
+            dropout =dropout ,batch_first =True ,activation ='gelu',
+            norm_first =True )
+            self .classification_private_encoder =nn .TransformerEncoder (
+            private_layer ,num_layers =private_layers )
         self .pool_query =nn .Parameter (torch .zeros (1 ,1 ,d_model ))
         nn .init .normal_ (self .pool_query ,std =0.02 )
         self .mha_pool =nn .MultiheadAttention (
@@ -195,6 +205,9 @@ class EventEncoder (nn .Module ):
         src =src *math .sqrt (self .d_model )
         src =self .pos_encoder (src )
         output =self .transformer_encoder (src ,src_key_padding_mask =src_key_padding_mask )
+        if task_type =='classification'and self .classification_private_encoder is not None :
+            output =self .classification_private_encoder (
+            output ,src_key_padding_mask =src_key_padding_mask )
         cls_out =output [:,0 ,:]
         tokens =output [:,1 :,:]
         token_mask =None

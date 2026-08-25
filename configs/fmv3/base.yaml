@@ -12,7 +12,10 @@ epochs: 20
 episodes_per_epoch: 200
 training_strategy: retrieval
 episodic_label_shuffle: "yes"
-retrieval_train_k: 32
+retrieval_train_k: 20
+retrieval_k_start: 20
+retrieval_k_end: 20
+retrieval_k_ramp_epochs: 1
 retrieval_train_batch_size: 128
 retrieval_min_per_class: 2
 retrieval_train_max_classes: 32
@@ -37,6 +40,10 @@ gradient_clip_norm: 5.0
 # Optional multipliers keyed by the diagnostic parameter-group names. Empty
 # preserves the historical two-group optimizer exactly.
 training_lr_multipliers: {}
+# Lightweight audit before choosing PCGrad/CAGrad: compare classification and
+# regression gradients on the shared Transformer without retaining full grads.
+gradient_conflict_log_interval: 25
+gradient_conflict_max_elements: 65536
 # Opt-in structured telemetry. Disabled defaults preserve the historical
 # training data and runtime path exactly.
 training_diagnostics:
@@ -51,6 +58,25 @@ training_diagnostics:
   overfitting_relative_tolerance: 0.02
 trainable_scope: all
 fmv3_head:
+  classification_mode: global_local
+  # Schema-known decoder: label semantics remain the base classifier at n=0;
+  # target-log support becomes an increasingly strong residual as n grows.
+  classification_separate_projections_enabled: true
+  classification_projection_hidden_dim: 256
+  classification_private_transformer_layers: 1
+  semantic_candidate_decoder_enabled: true
+  semantic_temperature: 0.2
+  semantic_support_strength: 1.0
+  support_gate_kappa: 2.0
+  process_candidate_decoder_enabled: true
+  process_candidate_hidden_dim: 256
+  process_candidate_dropout: 0.1
+  process_candidate_strength: 1.0
+  # R2D2-style support fit learns only a regularized residual around the
+  # semantic class weights; absent candidates therefore keep their prior.
+  support_fitted_classifier_enabled: true
+  support_fitted_regularization: 10.0
+  support_fitted_strength: 1.0
   regression_mode: sqrt_knn
   # Regression modes:
   # - sqrt_knn: historical soft-kNN in stored sqrt(hours) space
@@ -151,20 +177,41 @@ fmv3_head:
   expert_routing_temperature: 1.0
 fmv3_training:
   episode_mix:
-    balanced: 0.20
-    natural: 0.20
-    long_tail: 0.15
-    random_shot: 0.15
-    missing_local_label: 0.25
-    missing_pool_label: 0.05
+    natural: 0.60
+    long_tail: 0.20
+    missing_local_label: 0.10
+    balanced: 0.10
+  deployment_case_episodes: true
+  support_case_budgets: [1, 2, 4, 8, 16, 32, 64, 128, full]
+  deployment_query_case_fraction: 0.30
+  deployment_queries_per_episode: 10
+  # Zero means no prefix cap: every valid prefix from selected support cases.
+  deployment_support_max_prefixes: 0
+  classification_retrieval_policy: class_diverse
+  class_diverse_shortlist_classes: 10
+  class_diverse_examples_per_class: 2
+  class_diverse_semantic_weight: 1.0
+  candidate_loss_weight: 1.0
+  retrieval_loss_weight: 0.25
+  decision_loss_weight: 1.0
+  process_loss_weight: 0.25
+  retrieval_margin: 0.15
+  structured_memory_enabled: true
+  structured_max_order: 3
+  structured_smoothing: 0.5
+  structured_weight: 0.75
+  structured_tau: 0.5
   long_tail_power: 1.5
   random_shot_min: 1
   random_shot_max: 20
   missing_local_fraction: 1.0
   missing_pool_fraction: 1.0
 fmv3_evaluation:
+  schema_mode: schema_known
   case_budgets: [1, 2, 4, 8, 16, 32, 64, 128]
-  support_scenarios: [natural, class_aware]
+  # Natural remains the main benchmark; coverage-aware is reported separately
+  # as active support acquisition.
+  support_scenarios: [natural, coverage_aware]
   repetitions: 5
   test_case_fraction: 0.30
   max_test_cases: 50
@@ -173,10 +220,18 @@ fmv3_evaluation:
   include_full_budget: true
   include_full_budget_max_cases: 1000
   retrieval_k: [5, 20, 50]
+  classification_retrieval_policy: class_diverse
+  class_diverse_shortlist_classes: 10
+  class_diverse_examples_per_class: 2
+  class_diverse_semantic_weight: 1.0
   bootstrap_repetitions: 200
   prior_modes: [balanced, natural]
   prior_strengths: [1.0]
-  retrieval_modes: [configured]
+  retrieval_modes: [fm_structured_product]
+  # Add foundation_logistic to a diagnostic profile to fit a class-balanced
+  # linear classifier on frozen FM decision embeddings.
+  foundation_logistic_c: 1.0
+  foundation_logistic_max_iter: 500
   dynamic_retrieval_max_k: 200
   dynamic_retrieval_entropy_threshold: 0.65
   threshold_fraction: 0.90
@@ -212,7 +267,7 @@ fmv3_evaluation:
   expert_aggregation_diagnostics: false
   evaluation_profiles:
     - name: main
-      retrieval_modes: [configured]
+      retrieval_modes: [fm_structured_product]
       prior_modes: [balanced, natural]
       prior_strengths: [1.0]
       retrieval_k: [5, 20, 50]

@@ -15,6 +15,7 @@ def configure_trainable_scope(model, scope):
         "prefix_attention",
         "temporal_prefix_joint",
         "classification_adapter",
+        "classification_redesign",
         "regression_refinement",
         "classification_example_selector",
         "regression_example_selector",
@@ -54,6 +55,20 @@ def configure_trainable_scope(model, scope):
                 )
             elif selected == "classification_adapter":
                 allowed = "classification_embedding_adapter." in name
+            elif selected =="classification_redesign":
+                allowed =any (fragment in name for fragment in (
+                "classification_embedding_adapter.",
+                "classification_retrieval_projection.",
+                "classification_decision_projection.",
+                "candidate_label_projection.",
+                "encoder.classification_private_encoder.",
+                "proto_head.semantic_query_projection.",
+                "proto_head.semantic_candidate_projection.",
+                "proto_head.process_candidate_decoder.",
+                "proto_head.semantic_logit_scale",
+                "proto_head._support_gate_kappa_raw",
+                "proto_head._support_fitted_regularization_raw",
+                ))
             elif selected == "regression_refinement":
                 allowed = (
                     "proto_head.time_transform_bank." in name
@@ -82,6 +97,7 @@ def configure_trainable_scope(model, scope):
         "prefix_attention",
         "temporal_prefix_joint",
         "classification_adapter",
+        "classification_redesign",
         "regression_refinement",
         "classification_example_selector",
         "regression_example_selector",

@@ -1,4 +1,4 @@
-# FM-v3 architecture changes: from FM-v2 to selected example-aware FM-v3
+# FM-v3 architecture changes: from FM-v2 to schema-conditioned FM-v3
 
 This document is the source of truth for the architecture currently selected
 for the paper. It explains what changed, why each change was made, which parts
@@ -19,9 +19,47 @@ current epoch-44 endpoint, including task-isolated support selection and its
 retained metric tradeoffs, is documented in
 [`fmv3_example_selector_report.md`](fmv3_example_selector_report.md).
 
+## Current schema-conditioned foundation redesign
+
+The implementation now removes the support-pool candidate ceiling described by
+the epoch-44 audit. Activity identifiers remain log-local, but the complete
+activity-name schema is retained by preprocessing and encoded by the same
+character CNN (or by frozen SentenceTransformer vectors in the pretrained
+configuration). A query scores every candidate name. Support evidence is an
+additive residual gated by $n_c/(n_c+\kappa)$, hence its contribution is exactly
+zero at $n_c=0$ and grows with target-log evidence. A candidate-conditioned
+process MLP and a class-balanced differentiable ridge residual add process and
+discriminative support evidence; the ridge residual is constrained to zero for
+an absent class.
+
+Classification uses separate retrieval and decision projections. Retrieval is
+class-diverse: semantic candidate scores shortlist classes, the best examples
+are taken per shortlisted class, and remaining slots are filled by ordinary
+similarity. Training uses disjoint support/query cases and the same case-budget
+distribution and $k=20$ retrieval as deployment. The update mixture is 60%
+natural, 20% long-tailed, 10% deliberately missing-local-label, and 10%
+balanced warm-up. Candidate, retrieval-ranking, represented-class decision,
+and process losses are averaged equally over zero-, one-, few-, and
+many-support strata where applicable.
+
+Two evaluation contracts are reported separately:
+
+- **Schema-known evaluation** supplies the complete target-log activity
+  vocabulary and activity names. It does not supply a query label or any future
+  query event. Zero-support labels are legal predictions in this setting.
+- **Support-only evaluation** exposes only activities present in labeled
+  support. A support-absent activity is not a legal prediction, so semantic
+  candidate features are disabled and its probability remains zero.
+
+All new result rows record `schema_mode`. They also report macro class
+availability, recall by support-frequency stratum, and retrieval coverage for
+any expert, every expert, the highest-weight expert, and the expert union.
+Consequently, schema-known and support-only rows must never be averaged as if
+they measured the same information setting.
+
 ## Short version
 
-The final system is not the original `06_full_fmv3` model. It has nine selected
+The final system is not the original `06_full_fmv3` model. It has ten selected
 layers:
 
 1. **Corrected FM-v3 checkpoint:** retain FM-v2's reliable centered local
@@ -66,6 +104,11 @@ layers:
    relevance, class coherence, and class-support corrections; regression also
    learns robust support-target consistency. Neither path sees a query label
    or query target.
+10. **Schema-conditioned support adaptation:** retain the complete log-local
+    activity-name vocabulary, score every candidate semantically, add
+    count-gated support, a support-fitted ridge residual, and a learned process
+    score, and train them under exact case-budget episodes with separate
+    retrieval/decision projections and class-diverse top-20 retrieval.
 
 The six-layer Transformer encoder and its four-expert mixture remain the frozen
 representation backbone; the router materializes two experts per task. The

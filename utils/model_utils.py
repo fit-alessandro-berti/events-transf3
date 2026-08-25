@@ -86,12 +86,16 @@ def load_state_dict_compatible (model ,state_dict ):
     or '.proto_head.regression_expert_confidence.'in key
     or '.task_confidence_head.'in key
     or '.classification_embedding_adapter.'in key
+    or '.classification_retrieval_projection.'in key
+    or '.classification_decision_projection.'in key
+    or '.candidate_label_projection.'in key
     or '.regression_embedding_adapter.'in key
     or '.proto_head.classification_example_selector.'in key
     or '.proto_head.regression_example_selector.'in key
     or '.embedder.time_input_adapter.'in key
     or '.embedder.temporal_input_encoder.'in key
     or 'encoder.state_aware_pool.'in key
+    or 'encoder.classification_private_encoder.'in key
     or '.expert_adapter.'in key
     or '.embedder.context_projection.'in key
     or '.embedder.attribute_encoder.'in key
@@ -99,6 +103,12 @@ def load_state_dict_compatible (model ,state_dict ):
     or '.embedder.history_transition_projection.'in key
     or '.embedder.history_token'in key
     or '.proto_head.regression_residual_head.'in key
+    or '.proto_head.semantic_query_projection.'in key
+    or '.proto_head.semantic_candidate_projection.'in key
+    or '.proto_head.process_candidate_decoder.'in key
+    or key .endswith ('.proto_head.semantic_logit_scale')
+    or key .endswith ('.proto_head._support_gate_kappa_raw')
+    or key .endswith ('.proto_head._support_fitted_regularization_raw')
     ]
     migrating_to_independent_inputs =any (
     '.embedder.temporal_input_encoder.'in key for key in allowed_missing )
@@ -111,9 +121,19 @@ def load_state_dict_compatible (model ,state_dict ):
     or '.proto_head.regression_expert_confidence.'in key
     or '.task_confidence_head.'in key
     or '.classification_embedding_adapter.'in key
+    or '.classification_retrieval_projection.'in key
+    or '.classification_decision_projection.'in key
+    or '.candidate_label_projection.'in key
     or '.regression_embedding_adapter.'in key
     or '.proto_head.classification_example_selector.'in key
     or '.proto_head.regression_example_selector.'in key
+    or 'encoder.classification_private_encoder.'in key
+    or '.proto_head.semantic_query_projection.'in key
+    or '.proto_head.semantic_candidate_projection.'in key
+    or '.proto_head.process_candidate_decoder.'in key
+    or key .endswith ('.proto_head.semantic_logit_scale')
+    or key .endswith ('.proto_head._support_gate_kappa_raw')
+    or key .endswith ('.proto_head._support_fitted_regularization_raw')
     )
     ]
     disallowed_missing =sorted (set (incompatible .missing_keys )-set (allowed_missing ))

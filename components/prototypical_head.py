@@ -452,6 +452,75 @@ class PrototypicalHead(nn.Module):
         # Kept for strict compatibility with historical FM-v2 checkpoints.
         self._proto_shrink = nn.Parameter(torch.tensor(-2.0))
         self.count_prior = nn.Parameter(torch.tensor(0.0))
+        self.semantic_candidate_decoder_enabled = _as_bool(
+            config.get("semantic_candidate_decoder_enabled", False)
+        )
+        self.semantic_support_strength = float(
+            config.get("semantic_support_strength", 1.0)
+        )
+        semantic_temperature = max(
+            float(config.get("semantic_temperature", 0.2)), 1e-4
+        )
+        semantic_logit_scale =torch .tensor (math .log (1.0 /semantic_temperature ))
+        support_kappa = max(float(config.get("support_gate_kappa", 2.0)), 1e-4)
+        support_gate_kappa_raw =torch .tensor (math .log (math .expm1 (support_kappa )))
+        if self .semantic_candidate_decoder_enabled :
+            self .semantic_logit_scale =nn .Parameter (semantic_logit_scale )
+            self ._support_gate_kappa_raw =nn .Parameter (support_gate_kappa_raw )
+        else :
+            self .register_buffer (
+            "semantic_logit_scale",semantic_logit_scale ,persistent =False )
+            self .register_buffer (
+            "_support_gate_kappa_raw",support_gate_kappa_raw ,persistent =False )
+        self.semantic_query_projection = None
+        self.semantic_candidate_projection = None
+        self.process_candidate_decoder = None
+        self.process_candidate_decoder_enabled = _as_bool(
+            config.get("process_candidate_decoder_enabled", False)
+        )
+        self.process_candidate_strength = float(
+            config.get("process_candidate_strength", 1.0)
+        )
+        self.support_fitted_classifier_enabled = _as_bool(
+            config.get("support_fitted_classifier_enabled", False)
+        )
+        self.support_fitted_strength = float(
+            config.get("support_fitted_strength", 1.0)
+        )
+        ridge_regularization = max(
+            float(config.get("support_fitted_regularization", 10.0)), 1e-4
+        )
+        ridge_raw =torch .tensor (math .log (math .expm1 (ridge_regularization )))
+        if self .support_fitted_classifier_enabled :
+            self ._support_fitted_regularization_raw =nn .Parameter (ridge_raw )
+        else :
+            self .register_buffer (
+            "_support_fitted_regularization_raw",ridge_raw ,persistent =False )
+        if self.semantic_candidate_decoder_enabled:
+            if feature_dim is None:
+                raise ValueError(
+                    "feature_dim is required when semantic_candidate_decoder_enabled is true"
+                )
+            feature_dim = int(feature_dim)
+            self.semantic_query_projection = nn.Linear(
+                feature_dim, feature_dim, bias=False
+            )
+            self.semantic_candidate_projection = nn.Linear(
+                feature_dim, feature_dim, bias=False
+            )
+            nn.init.eye_(self.semantic_query_projection.weight)
+            nn.init.eye_(self.semantic_candidate_projection.weight)
+            if self.process_candidate_decoder_enabled:
+                process_hidden = max(
+                    int(config.get("process_candidate_hidden_dim", feature_dim)), 8
+                )
+                self.process_candidate_decoder = nn.Sequential(
+                    nn.LayerNorm(4 * feature_dim),
+                    nn.Linear(4 * feature_dim, process_hidden),
+                    nn.GELU(),
+                    nn.Dropout(max(float(config.get("process_candidate_dropout", 0.1)), 0.0)),
+                    nn.Linear(process_hidden, 1),
+                )
 
     @property
     def evidence_gamma(self) -> torch.Tensor:
@@ -464,6 +533,123 @@ class PrototypicalHead(nn.Module):
         if self.shrinkage_mode == "learned":
             return F.softplus(self._kappa_raw).clamp_min(1e-4)
         return self._kappa_raw.new_tensor(max(float(self.config.get("shrinkage_kappa", 2.0)), 1e-4))
+
+    @property
+    def support_gate_kappa(self) -> torch.Tensor:
+        return F.softplus(self._support_gate_kappa_raw).clamp_min(1e-4)
+
+    def _candidate_conditioned_evidence(
+        self, query, candidate_features, support_evidence, support_counts,
+        discriminative_evidence=None,
+    ):
+        """Use label semantics as the base and support evidence as a residual.
+
+        The support gate is exactly zero for an absent class, so every schema
+        candidate remains finite and predictive without inventing a prototype.
+        """
+        if not self.semantic_candidate_decoder_enabled or candidate_features is None:
+            return support_evidence, None, None, None
+        if candidate_features.ndim != 2:
+            raise ValueError("candidate_features must have shape [classes, feature]")
+        if candidate_features.size(0) != support_evidence.size(1):
+            raise ValueError(
+                "candidate_features must align one-to-one with candidate_classes"
+            )
+        query_semantic = _l2_normalize(self.semantic_query_projection(query))
+        candidates = _l2_normalize(
+            self.semantic_candidate_projection(candidate_features)
+        )
+        scale = self.semantic_logit_scale.exp().clamp(1.0, 100.0)
+        semantic = (query_semantic @ candidates.t()) * scale
+        process = torch.zeros_like(semantic)
+        if self.process_candidate_decoder is not None:
+            q = query.unsqueeze(1).expand(-1, candidates.size(0), -1)
+            c = candidate_features.unsqueeze(0).expand(query.size(0), -1, -1)
+            process_inputs = torch.cat([q, c, q * c, torch.abs(q - c)], dim=-1)
+            process = self.process_candidate_decoder(process_inputs).squeeze(-1)
+        counts = support_counts
+        if counts.ndim == 1:
+            counts = counts.unsqueeze(0).expand(query.size(0), -1)
+        gate = counts / (counts + self.support_gate_kappa)
+        safe_support = torch.where(
+            torch.isfinite(support_evidence),
+            support_evidence,
+            torch.zeros_like(support_evidence),
+        )
+        fused = (
+            semantic
+            + self.process_candidate_strength * process
+            + self.semantic_support_strength * gate * safe_support
+        )
+        if discriminative_evidence is not None:
+            fused =fused +self .support_fitted_strength *discriminative_evidence
+        return fused, semantic, process, gate
+
+    @property
+    def support_fitted_regularization(self):
+        return F .softplus (self ._support_fitted_regularization_raw ).clamp_min (1e-4 )
+
+    def _support_fitted_residual(
+        self, support, labels, query, classes, candidate_features
+    ):
+        """Differentiable class-balanced ridge residual around semantic weights."""
+        if (
+            not self.support_fitted_classifier_enabled
+            or candidate_features is None
+            or support.numel() == 0
+        ):
+            return None
+        output_dtype =query .dtype
+        # CUDA linalg does not support fp16 solves, and ridge conditioning is
+        # substantially safer in fp32 even when the surrounding model uses AMP.
+        with torch .autocast (device_type =support .device .type ,enabled =False ):
+            support_x =_l2_normalize (
+            self .semantic_query_projection (support .float ()))
+            query_x =_l2_normalize (
+            self .semantic_query_projection (query .float ()))
+            candidate_weights =_l2_normalize (
+            self .semantic_candidate_projection (candidate_features .float ()))
+            scale =self .semantic_logit_scale .float ().exp ().clamp (1.0 ,100.0 )
+            semantic_support =support_x @candidate_weights .t ()*scale
+            class_mask =labels .unsqueeze (1).eq (classes .unsqueeze (0))
+            counts =class_mask .sum (dim =0).float ()
+            targets =class_mask .to (support_x .dtype )*scale
+            residual_targets =targets -semantic_support
+            # Every observed class contributes equal total mass to the support fit.
+            sample_weights =torch .where (
+            class_mask .any (dim =1 ),
+            1.0 /counts [class_mask .float ().argmax (dim =1)].clamp_min (1.0 ),
+            torch .zeros (support_x .size (0),device =support_x .device ),
+            )
+            weighted_x =support_x *torch .sqrt (sample_weights ).unsqueeze (1)
+            weighted_targets =residual_targets *torch .sqrt (sample_weights ).unsqueeze (1)
+            identity =torch .eye (
+            support_x .size (1),dtype =support_x .dtype ,device =support_x .device )
+            lhs =weighted_x .t ()@weighted_x +self .support_fitted_regularization .float ()*identity
+            rhs =weighted_x .t ()@weighted_targets
+            delta =torch .linalg .solve (lhs ,rhs )
+            # Truly absent labels retain their semantic classifier exactly.
+            delta =delta * (counts >0 ).to (delta .dtype ).unsqueeze (0)
+            residual =query_x @delta
+        return residual .to (output_dtype )
+
+    def _support_fitted_residual_batched(
+        self, support, labels, mask, query, classes, candidate_features
+    ):
+        if not self.support_fitted_classifier_enabled or candidate_features is None:
+            return None
+        if mask .size (0)>0 and bool ((mask ==mask [0 :1 ]).all ()):
+            selected =mask [0 ]
+            return self ._support_fitted_residual (
+            support [selected ],labels [selected ],query ,classes ,candidate_features )
+        rows =[]
+        for row in range (query .size (0)):
+            selected =mask [row ]
+            residual =self ._support_fitted_residual (
+            support [selected ],labels [selected ],query [row :row +1 ],
+            classes ,candidate_features )
+            rows .append (residual [0 ])
+        return torch .stack (rows )
 
     def _center_and_renorm(self, support: torch.Tensor, query: torch.Tensor):
         mu = support.mean(dim=0, keepdim=True)
@@ -769,6 +955,9 @@ class PrototypicalHead(nn.Module):
         global_support_labels,
         global_support_mask=None,
         candidate_classes=None,
+        candidate_features=None,
+        prior_mode=None,
+        prior_strength=None,
         return_diagnostics=False,
     ):
         """Vectorized classification for query-specific retrieval/pool masks."""
@@ -787,9 +976,11 @@ class PrototypicalHead(nn.Module):
         if candidate_classes is None:
             classes = torch.unique(global_support_labels, sorted=True)
         else:
-            classes = torch.unique(
-                candidate_classes.to(global_support_labels.device), sorted=True
-            )
+            supplied_classes = candidate_classes.to(global_support_labels.device)
+            order = torch.argsort(supplied_classes)
+            classes = supplied_classes[order]
+            if candidate_features is not None:
+                candidate_features = candidate_features.to(query.device)[order]
         classes = classes[classes != self.abstain_label]
         if classes.numel() == 0:
             empty = (None, None, None, {}) if return_diagnostics else (None, None, None)
@@ -829,11 +1020,24 @@ class PrototypicalHead(nn.Module):
                 local_counts.clamp_min(1.0)
             )
             logits = logits.masked_fill(local_counts == 0, -torch.inf)
+            discriminative_evidence =self ._support_fitted_residual_batched (
+            pool ,global_support_labels ,global_support_mask ,query_features ,
+            classes ,candidate_features )
+            logits, semantic_evidence, process_evidence, support_gate = (
+                self._candidate_conditioned_evidence(
+                    query_features, candidate_features, logits, local_counts,
+                    discriminative_evidence,
+                )
+            )
             probabilities = F.softmax(logits, dim=1)
             diagnostics = {
                 "mode": selected_mode,
                 "local_counts": local_counts,
                 "pool_counts": local_counts,
+                "semantic_evidence": semantic_evidence,
+                "process_evidence": process_evidence,
+                "support_gate": support_gate,
+                "support_fitted_evidence": discriminative_evidence,
                 **self._selection_diagnostics(selection_logits, attention),
             }
             result = logits, classes, probabilities, diagnostics
@@ -961,21 +1165,34 @@ class PrototypicalHead(nn.Module):
         else:
             raise ValueError(f"Unknown classification mode: {selected_mode}")
 
+        discriminative_evidence =self ._support_fitted_residual_batched (
+        pool ,global_support_labels ,global_support_mask ,query_features ,
+        classes ,candidate_features )
+        evidence, semantic_evidence, process_evidence, support_gate = (
+            self._candidate_conditioned_evidence(
+                query_features, candidate_features, evidence, pool_counts,
+                discriminative_evidence,
+            )
+        )
+        selected_prior_mode = str(prior_mode or self.prior_mode)
+        selected_prior_strength = (
+            self.prior_strength if prior_strength is None else float(prior_strength)
+        )
         if (
-            self.prior_mode in {"none", "uniform", "balanced"}
-            or self.prior_strength == 0.0
+            selected_prior_mode in {"none", "uniform", "balanced"}
+            or selected_prior_strength == 0.0
         ):
             prior_logits = torch.zeros_like(evidence)
-        elif self.prior_mode in {"natural", "empirical"}:
+        elif selected_prior_mode in {"natural", "empirical"}:
             smoothed = pool_counts + self.prior_smoothing
-            prior_logits = self.prior_strength * torch.log(
+            prior_logits = selected_prior_strength * torch.log(
                 (
                     smoothed
                     / smoothed.sum(dim=1, keepdim=True).clamp_min(1e-8)
                 ).clamp_min(1e-8)
             )
         else:
-            raise ValueError(f"Unknown prior mode: {self.prior_mode}")
+            raise ValueError(f"Unknown prior mode: {selected_prior_mode}")
         logits = evidence + prior_logits
         output_classes = classes
         if self.enable_abstention:
@@ -996,6 +1213,10 @@ class PrototypicalHead(nn.Module):
             "global_evidence": global_evidence,
             "gate": gate,
             "prototypes": prototypes,
+            "semantic_evidence": semantic_evidence,
+            "process_evidence": process_evidence,
+            "support_gate": support_gate,
+            "support_fitted_evidence": discriminative_evidence,
             **self._selection_diagnostics(
                 selection_logits, F.softmax(local_similarities, dim=1)
             ),
@@ -1013,6 +1234,7 @@ class PrototypicalHead(nn.Module):
         global_support_features: Optional[torch.Tensor] = None,
         global_support_labels: Optional[torch.Tensor] = None,
         candidate_classes: Optional[torch.Tensor] = None,
+        candidate_features: Optional[torch.Tensor] = None,
         prior_counts: Optional[torch.Tensor] = None,
         prior_mode: Optional[str] = None,
         prior_strength: Optional[float] = None,
@@ -1030,7 +1252,41 @@ class PrototypicalHead(nn.Module):
         query = _l2_normalize(query_features)
         if selected_mode == "legacy_soft_knn":
             local_support, local_query = self._center_and_renorm(local_support, query)
-            result = self._legacy_soft_knn(local_support, support_labels, local_query)
+            legacy_logits, legacy_classes, _, diagnostics = self._legacy_soft_knn(
+                local_support, support_labels, local_query
+            )
+            if candidate_classes is not None and candidate_features is not None:
+                order = torch.argsort(candidate_classes)
+                classes = candidate_classes.to(support_labels.device)[order]
+                candidate_features = candidate_features.to(query.device)[order]
+                expanded = legacy_logits.new_full(
+                    (legacy_logits.size(0), classes.numel()), -torch.inf
+                )
+                for old_column, label in enumerate(legacy_classes):
+                    match = (classes == label).nonzero(as_tuple=False)
+                    if match.numel():
+                        expanded[:, match[0, 0]] = legacy_logits[:, old_column]
+                counts = self._class_counts(support_labels, classes).to(query.device)
+                discriminative =self ._support_fitted_residual (
+                support_features ,support_labels ,query_features ,classes ,
+                candidate_features )
+                legacy_logits, semantic, process, gate = (
+                    self._candidate_conditioned_evidence(
+                        query_features, candidate_features, expanded, counts,
+                        discriminative,
+                    )
+                )
+                diagnostics.update({
+                    "local_counts": counts,
+                    "pool_counts": counts,
+                    "semantic_evidence": semantic,
+                    "process_evidence": process,
+                    "support_gate": gate,
+                    "support_fitted_evidence": discriminative,
+                })
+                legacy_classes = classes
+            confidence = F.softmax(legacy_logits, dim=-1)
+            result = legacy_logits, legacy_classes, confidence, diagnostics
             return result if return_diagnostics else result[:3]
 
         pool_features = global_support_features if global_support_features is not None else support_features
@@ -1044,7 +1300,11 @@ class PrototypicalHead(nn.Module):
                 sorted=True,
             )
         else:
-            classes = torch.unique(candidate_classes.to(support_labels.device), sorted=True)
+            supplied_classes = candidate_classes.to(support_labels.device)
+            order = torch.argsort(supplied_classes)
+            classes = supplied_classes[order]
+            if candidate_features is not None:
+                candidate_features = candidate_features.to(query.device)[order]
         classes = classes[classes != self.abstain_label]
         if classes.numel() == 0:
             return (None, None, None, {}) if return_diagnostics else (None, None, None)
@@ -1083,6 +1343,14 @@ class PrototypicalHead(nn.Module):
         else:
             raise ValueError(f"Unknown classification mode: {selected_mode}")
 
+        discriminative_evidence =self ._support_fitted_residual (
+        pool_features ,pool_labels ,query_features ,classes ,candidate_features )
+        evidence, semantic_evidence, process_evidence, support_gate = (
+            self._candidate_conditioned_evidence(
+                query_features, candidate_features, evidence, pool_counts,
+                discriminative_evidence,
+            )
+        )
         logits = evidence + self._prior_logits(pool_counts, query.size(0), prior_mode, prior_strength)
         if self.enable_abstention:
             best_evidence = evidence.max(dim=1).values
@@ -1108,6 +1376,10 @@ class PrototypicalHead(nn.Module):
             "gate": gate,
             "prototypes": prototypes,
             "prototype_variances": prototype_variances,
+            "semantic_evidence": semantic_evidence,
+            "process_evidence": process_evidence,
+            "support_gate": support_gate,
+            "support_fitted_evidence": discriminative_evidence,
             **self._selection_diagnostics(
                 selection_logits, F.softmax(local_sims, dim=1)
             ),

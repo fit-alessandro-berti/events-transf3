@@ -168,6 +168,27 @@ Confidence-bucket reporting uses 5 dynamic buckets (equal-sized by confidence ra
 
 FM-v3 is configured through composable YAML files under `configs/fmv3/`. Any scalar or list can also be overridden without editing code:
 
+The current foundation configuration is a schema-conditioned redesign. It
+scores the complete log-local activity vocabulary from activity names, then
+adds count-gated support, class-diverse retrieval, a support-fitted ridge
+residual, and a candidate-conditioned process score. Classification training
+uses case-disjoint deployment episodes with the evaluation case budgets and
+`retrieval_train_k: 20`; only the 10% balanced warm-up path guarantees a
+same-label neighbor.
+
+Evaluation names the information contract explicitly:
+
+- `fmv3_evaluation.schema_mode: schema_known` supplies the target activity
+  vocabulary (names, never query labels or future events), so an activity with
+  zero labeled support can still receive finite probability.
+- `fmv3_evaluation.schema_mode: support_only` disables candidate-name scores;
+  an activity absent from support is therefore not legally predictable.
+
+These settings are separate experimental claims and must not be pooled in a
+single result table. Historical checkpoints that predate the candidate decoder
+are automatically evaluated as `support_only` unless an override requests an
+explicit migration experiment.
+
 For a complete explanation of the selected architecture—including what changed
 at training time, what changed only at inference, the equations for coverage
 fallback and structured-memory fusion, and the rejected alternatives—start

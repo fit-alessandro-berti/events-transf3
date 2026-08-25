@@ -60,6 +60,20 @@ class MetaLearner (nn .Module ):
             # Exact identity at initialization and when migrating a checkpoint.
             nn .init .zeros_ (self .classification_embedding_adapter [-1 ].weight )
             nn .init .zeros_ (self .classification_embedding_adapter [-1 ].bias )
+        self .classification_retrieval_projection =None
+        self .classification_decision_projection =None
+        projection_enabled =routing_config .get (
+        'classification_separate_projections_enabled',False )
+        if isinstance (projection_enabled ,str ):
+            projection_enabled =projection_enabled .strip ().lower ()in {
+            '1','true','yes','y','on'}
+        if projection_enabled :
+            projection_hidden =max (int (routing_config .get (
+            'classification_projection_hidden_dim',d_model )),8 )
+            self .classification_retrieval_projection =self ._residual_projection (
+            d_model ,projection_hidden )
+            self .classification_decision_projection =self ._residual_projection (
+            d_model ,projection_hidden )
         self .regression_embedding_adapter =None
         if routing_config .get ('regression_embedding_adapter_enabled',False ):
             adapter_hidden =max (int (routing_config .get (
@@ -87,6 +101,7 @@ class MetaLearner (nn .Module ):
             time_input_config =proto_head_config ,
             attribute_hash_buckets =kwargs .get ('attribute_hash_buckets',4096 ))
             self .pad_event ={'activity_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'resource_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'activity_id':0 ,'cost':0.0 ,'time_from_start':0.0 ,'time_from_previous':0.0 ,'timestamp':0.0 ,'case_id':'pad','calendar_features':(0.0 ,)*5 ,'resource_missing':1.0 ,'cost_missing':1.0 ,'lifecycle_missing':1.0 ,'generic_attributes':()}
+            candidate_input_dim =self .embedding_dim
         elif self .strategy =='learned':
             max_string_length =kwargs .get ('max_string_length',64 )
             self .embedder =LearnedEventEmbedder (
@@ -111,8 +126,33 @@ class MetaLearner (nn .Module ):
             'resource_char_ids':(0 ,)*max_string_length ,
             'lifecycle_char_ids':(0 ,)*max_string_length
             }
+            candidate_input_dim =int (kwargs ['char_cnn_output_dim'])
         else :
             raise ValueError (f"Unknown embedding strategy: '{self .strategy }'")
+        semantic_enabled =routing_config .get ('semantic_candidate_decoder_enabled',False )
+        if isinstance (semantic_enabled ,str ):
+            semantic_enabled =semantic_enabled .strip ().lower ()in {
+            '1','true','yes','y','on'}
+        self .semantic_candidate_decoder_enabled =bool (semantic_enabled )
+        self .candidate_label_projection =None
+        if self .semantic_candidate_decoder_enabled :
+            self .candidate_label_projection =nn .Sequential (
+            nn .LayerNorm (candidate_input_dim ),
+            nn .Linear (candidate_input_dim ,d_model ),
+            nn .GELU (),
+            nn .LayerNorm (d_model ),
+            )
+    @staticmethod
+    def _residual_projection (feature_dim ,hidden_dim ):
+        projection =nn .Sequential (
+        nn .LayerNorm (feature_dim ),
+        nn .Linear (feature_dim ,hidden_dim ),
+        nn .GELU (),
+        nn .Linear (hidden_dim ,feature_dim ),
+        )
+        nn .init .zeros_ (projection [-1 ].weight )
+        nn .init .zeros_ (projection [-1 ].bias )
+        return projection
     def set_char_vocab (self ,char_to_id :dict ):
         if self .strategy =='learned':
             self .embedder .char_to_id =char_to_id
@@ -141,6 +181,30 @@ class MetaLearner (nn .Module ):
         if task_type =='regression'and self .regression_embedding_adapter is not None :
             return encoded +self .regression_embedding_adapter (encoded )
         return encoded
+    def classification_retrieval_features (self ,encoded ):
+        if self .classification_retrieval_projection is None :return encoded
+        return encoded +self .classification_retrieval_projection (encoded )
+    def classification_decision_features (self ,encoded ):
+        if self .classification_decision_projection is None :return encoded
+        return encoded +self .classification_decision_projection (encoded )
+    def encode_candidate_labels (self ,candidate_labels ):
+        """Encode a complete log-local label schema without event context."""
+        if not self .semantic_candidate_decoder_enabled :return None
+        candidates =list (candidate_labels or ())
+        device =next (self .parameters ()).device
+        if not candidates :return torch .empty (0 ,self .d_model ,device =device )
+        if self .strategy =='learned':
+            names =[str (candidate .get ('activity_name',''))for candidate in candidates ]
+            cached =[
+            candidate .get ('activity_char_ids',())for candidate in candidates ]
+            raw =self .embedder .char_embedder (
+            names ,self .embedder .char_to_id ,
+            cached_ids =cached if all (cached )else None )
+        else :
+            raw =torch .as_tensor (np .stack ([
+            candidate ['activity_embedding']for candidate in candidates
+            ]),dtype =torch .float32 ,device =device )
+        return self .candidate_label_projection (raw )
     def _encode_batch (self ,batch_of_sequences ,task_type =None ,time_scale_factor =None ):
         device =next (self .parameters ()).device
         max_len =max (len (seq )for seq in batch_of_sequences )if batch_of_sequences else 0
@@ -174,6 +238,8 @@ class MetaLearner (nn .Module ):
             next (self .parameters ()))
         all_encoded =self ._process_batch (
         all_seqs ,task_type =task_type ,time_scale_factor =time_scale_factor )
+        if task_type =='classification':
+            all_encoded =self .classification_decision_features (all_encoded )
         support_features =all_encoded [:len (support_seqs )]
         query_features =all_encoded [len (support_seqs ):]
         device =all_encoded .device

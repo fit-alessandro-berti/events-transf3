@@ -43,6 +43,7 @@ class PrefixTask:
     trace: list
     end_index: int
     classification_target: int | None
+    classification_target_name: str | None
     regression_target: float
     case_id: object
     max_sequence_length: int
@@ -103,12 +104,17 @@ class PrefixTask:
 class TaskPoolView(Sequence):
     """Tuple-compatible lazy task view over shared :class:`PrefixTask` records."""
 
-    def __init__(self, records, task_type, indices=None):
+    def __init__(
+        self, records, task_type, indices=None, *, candidate_labels=(),
+        label_name_by_id=None,
+    ):
         if task_type not in {"classification", "regression"}:
             raise ValueError(f"Unknown task type: {task_type}")
         self.records = records
         self.task_type = task_type
         self.indices = None if indices is None else tuple(indices)
+        self.candidate_labels = tuple(candidate_labels)
+        self.label_name_by_id = dict(label_name_by_id or {})
         self._case_indices = None
 
     def __len__(self):
@@ -155,7 +161,13 @@ class TaskPoolView(Sequence):
             )
             if predicate(self._tuple(self.records[record_index]))
         ]
-        return TaskPoolView(self.records, self.task_type, selected)
+        return TaskPoolView(
+            self.records,
+            self.task_type,
+            selected,
+            candidate_labels=self.candidate_labels,
+            label_name_by_id=self.label_name_by_id,
+        )
 
 
 def _data_setting(config, name, fallback):
@@ -189,6 +201,8 @@ def get_classification_and_regression_tasks(
     if minimum_prefix_length < 1:
         raise ValueError("minimum_prefix_length must be at least 1")
 
+    candidate_labels = tuple(getattr(log, "candidate_labels", ()))
+    label_name_by_id = dict(getattr(log, "label_name_by_id", {}))
     records = []
     for trace in log or ():
         if len(trace) < minimum_prefix_length + 1:
@@ -197,6 +211,9 @@ def get_classification_and_regression_tasks(
         final_timestamp = trace[-1]["timestamp"]
         for end_index in range(minimum_prefix_length - 1, len(trace) - 1):
             next_activity = trace[end_index + 1].get("activity_id")
+            next_activity_name = trace[end_index + 1].get("activity_name")
+            if next_activity_name is None and next_activity is not None:
+                next_activity_name = label_name_by_id.get(int(next_activity))
             remaining_hours = (
                 final_timestamp - trace[end_index]["timestamp"]
             ) / 3600.0
@@ -205,6 +222,7 @@ def get_classification_and_regression_tasks(
                     trace=trace,
                     end_index=end_index,
                     classification_target=next_activity,
+                    classification_target_name=next_activity_name,
                     regression_target=transform_time(remaining_hours),
                     case_id=case_id,
                     max_sequence_length=max_seq_len,
@@ -221,8 +239,15 @@ def get_classification_and_regression_tasks(
             records,
             "classification",
             None if len(class_indices) == len(records) else class_indices,
+            candidate_labels=candidate_labels,
+            label_name_by_id=label_name_by_id,
         ),
-        TaskPoolView(records, "regression"),
+        TaskPoolView(
+            records,
+            "regression",
+            candidate_labels=candidate_labels,
+            label_name_by_id=label_name_by_id,
+        ),
     )
 
 

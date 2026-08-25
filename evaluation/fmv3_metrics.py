@@ -19,6 +19,11 @@ def classification_metrics(
     support_counts: Dict[int, int],
     pool_covered,
     retrieval_covered,
+    *,
+    retrieval_covered_any_expert=None,
+    retrieval_covered_every_expert=None,
+    retrieval_covered_highest_weight_expert=None,
+    retrieval_covered_union_experts=None,
 ):
     y_true = np.asarray(y_true, dtype=int)
     y_pred = np.asarray(y_pred, dtype=int)
@@ -100,7 +105,10 @@ def classification_metrics(
 
     balanced = float(recall.mean())
     chance = 1.0 / max(len(labels), 1)
-    return {
+    macro_class_availability =float (np .mean ([
+    pool_covered [y_true ==label ].mean ()if np .any (y_true ==label )else 0.0
+    for label in labels ]))
+    result = {
         "n_queries": int(len(y_true)),
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "balanced_accuracy": balanced,
@@ -113,6 +121,7 @@ def classification_metrics(
         "zero_recall_fraction": float((recall == 0).mean()),
         "recall_p10": float(np.percentile(recall, 10)),
         "support_pool_availability": float(pool_covered.mean()),
+        "macro_class_availability":macro_class_availability,
         "macro_label_recall_at_k": float(np.mean([
             retrieval_covered[y_true == label].mean() if np.any(y_true == label) else 0.0 for label in labels
         ])),
@@ -124,6 +133,10 @@ def classification_metrics(
         "conditional_balanced_accuracy_retrieval_covered": float(np.mean(conditional_retrieval_recalls)) if conditional_retrieval_recalls else None,
         "error_decomposition_per_class": decomposition,
         "frequency_bin_recall": frequency_recall,
+        "recall_support_n0":frequency_recall ["n=0"],
+        "recall_support_n1":frequency_recall ["n=1"],
+        "recall_support_n2_5":frequency_recall ["n=2-5"],
+        "recall_support_n_gt5":frequency_recall ["n>5"],
         "nll": float(-np.log(np.clip(true_prob, 1e-12, 1.0)).mean()),
         "multiclass_brier": float(np.mean(np.sum((probs - one_hot) ** 2, axis=1))),
         "ece_10": float(ece),
@@ -131,6 +144,21 @@ def classification_metrics(
         "aurc": aurc,
         "risk_coverage": risk_coverage,
     }
+    expert_coverage ={
+        "macro_label_recall_at_k_any_expert":retrieval_covered_any_expert,
+        "macro_label_recall_at_k_every_expert":retrieval_covered_every_expert,
+        "macro_label_recall_at_k_highest_weight_expert":retrieval_covered_highest_weight_expert,
+        "macro_label_recall_at_k_union_experts":retrieval_covered_union_experts,
+    }
+    for metric_name ,values in expert_coverage .items ():
+        if values is None :continue
+        values =np .asarray (values ,dtype =bool )
+        if values .shape !=y_true .shape :
+            raise ValueError (f"{metric_name} must align with y_true")
+        result [metric_name]=float (np .mean ([
+        values [y_true ==label ].mean ()if np .any (y_true ==label )else 0.0
+        for label in labels ]))
+    return result
 
 
 def regression_metrics(

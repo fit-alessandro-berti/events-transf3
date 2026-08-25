@@ -21,17 +21,25 @@ from evaluation.fmv3_metrics import (
     prefix_length_metrics,
 )
 from utils.data_utils import prefix_task_length
+from utils.retrieval_utils import class_diverse_topk_indices
 from time_transf import inverse_transform_time
 
 
-def encode_tasks(expert, tasks, batch_size=128, task_type=None):
+def encode_tasks(
+    expert, tasks, batch_size=128, task_type=None, representation="decision"
+):
     embeddings = []
     with torch.no_grad():
         for start in range(0, len(tasks), batch_size):
             sequences = [item[0] for item in tasks[start : start + batch_size]]
-            embeddings.append(F.normalize(
-                expert._process_batch(sequences, task_type=task_type), p=2, dim=1
-            ).cpu())
+            encoded =expert ._process_batch (sequences ,task_type =task_type )
+            if task_type =="classification":
+                if representation =="retrieval":
+                    encoded =expert .classification_retrieval_features (encoded )
+                elif representation =="decision":
+                    encoded =expert .classification_decision_features (encoded )
+                else :raise ValueError (f"Unknown classification representation: {representation}")
+            embeddings.append(F.normalize(encoded, p=2, dim=1).cpu())
     return torch.cat(embeddings) if embeddings else torch.empty((0, expert.d_model))
 
 
@@ -53,21 +61,50 @@ def _labels_by_case(tasks, allowed_cases):
     return result
 
 
+def _coverage_features_by_case(tasks, allowed_cases):
+    features =defaultdict (set )
+    for prefix ,label ,case_id in tasks :
+        case =str (case_id )
+        if case not in allowed_cases or label is None or int (label )==-100 :continue
+        target =int (label )
+        features [case ].add (("activity",target ))
+        if prefix is None :continue
+        if isinstance (prefix ,tuple )and all (
+        isinstance (value ,(int ,np .integer ))for value in prefix ):
+            context =tuple (map (int ,prefix ))
+        else :
+            context =tuple (
+            int (event ["activity_id"])
+            for event in prefix
+            if event .get ("activity_id")is not None
+            and int (event ["activity_id"])!=-100 )
+        if context :features [case ].add (("transition",context [-1 ],target ))
+        if len (context )>=2 :
+            features [case ].add (("rare_suffix",*context [-2 :],target ))
+    return features
+
+
 def support_case_order(tasks, allowed_cases, scenario, seed, max_cases=None):
     rng = random.Random(seed)
     cases = sorted(allowed_cases)
     rng.shuffle(cases)
     if scenario == "natural":
         return cases if max_cases is None else cases[: min(len(cases), int(max_cases))]
-    if scenario != "class_aware":
+    if scenario not in {"class_aware","coverage_aware"}:
         raise ValueError(f"Unknown support scenario: {scenario}")
     labels_by_case = _labels_by_case(tasks, allowed_cases)
+    coverage_features =_coverage_features_by_case (tasks ,allowed_cases )
+    feature_sets =(
+    coverage_features if scenario =="coverage_aware"
+    else {case :{("activity",label )for label in labels}
+    for case ,labels in labels_by_case .items ()}
+    )
     # Cases with the same label set always have the same greedy score. Grouping
     # them avoids rescanning very large support pools (e.g. ~70k Billing cases)
     # at every one of the first 128 selections.
     cases_by_signature = defaultdict(set)
     for case in cases:
-        cases_by_signature[frozenset(labels_by_case.get(case, set()))].add(case)
+        cases_by_signature[frozenset(feature_sets.get(case, set()))].add(case)
     selected = []
     counts = Counter()
     target = len(cases) if max_cases is None else min(len(cases), int(max_cases))
@@ -75,9 +112,11 @@ def support_case_order(tasks, allowed_cases, scenario, seed, max_cases=None):
         best_score = None
         best_signatures = []
         for labels in cases_by_signature:
-            uncovered = sum(counts[label] == 0 for label in labels)
+            weighted_uncovered =sum (
+            {"activity":4.0 ,"transition":2.0 ,"rare_suffix":1.0}.get (
+            feature [0 ],1.0 )for feature in labels if counts [feature ]==0 )
             balance_gain = sum(1.0 / (1.0 + counts[label]) for label in labels)
-            score = (uncovered, balance_gain, len(labels))
+            score = (weighted_uncovered, balance_gain, len(labels))
             if best_score is None or score > best_score:
                 best_score, best_signatures = score, [labels]
             elif score == best_score:
@@ -87,9 +126,9 @@ def support_case_order(tasks, allowed_cases, scenario, seed, max_cases=None):
         )
         chosen = rng.choice(best_cases)
         selected.append(chosen)
-        for label in labels_by_case.get(chosen, set()):
+        for label in feature_sets.get(chosen, set()):
             counts[label] += 1
-        signature = frozenset(labels_by_case.get(chosen, set()))
+        signature = frozenset(feature_sets.get(chosen, set()))
         cases_by_signature[signature].remove(chosen)
         if not cases_by_signature[signature]:
             del cases_by_signature[signature]
@@ -164,16 +203,20 @@ def prepare_case_plan(transformed_log, config):
         if len(trace) < minimum_prefix + 1:
             continue
         case_id = str(trace[0]["case_id"])
-        labels = {
-            int(trace[index + 1]["activity_id"])
-            for index in range(minimum_prefix - 1, len(trace) - 1)
-            if trace[index + 1]["activity_id"] is not None
-            and int(trace[index + 1]["activity_id"]) != -100
-        }
-        if not labels:
+        case_tasks =[]
+        for index in range (minimum_prefix -1 ,len (trace )-1 ):
+            next_label =trace [index +1 ].get ("activity_id")
+            if next_label is None or int (next_label )==-100 :continue
+            context =tuple (
+            int (event ["activity_id"])
+            for event in trace [max (0 ,index -2 ):index +1 ]
+            if event .get ("activity_id")is not None
+            and int (event ["activity_id"])!=-100 )
+            case_tasks .append ((context ,int (next_label ),case_id ))
+        if not case_tasks:
             continue
         traces_by_case[case_id] = trace
-        planning_tasks.extend((None, label, case_id) for label in labels)
+        planning_tasks .extend (case_tasks )
     plan, materialized_cases = _build_case_plan(planning_tasks, config)
     return plan, [traces_by_case[case] for case in traces_by_case if case in materialized_cases]
 
@@ -198,7 +241,6 @@ def prepare_case_plan_from_dataframe(
         [case_key, timestamp_key, "_fmv3_original_order"], kind="mergesort"
     )
     work["_fmv3_activity_id"] = work[activity_key].map(activity_to_id)
-    work["_fmv3_event_position"] = work.groupby(case_key, sort=False).cumcount()
     case_sizes = work.groupby(case_key, sort=False).size()
     minimum_prefix = int(
         (config.get("data", {}) or {}).get("minimum_prefix_length", 1)
@@ -206,17 +248,19 @@ def prepare_case_plan_from_dataframe(
     eligible_cases = set(
         case_sizes[case_sizes >= minimum_prefix + 1].index.tolist()
     )
-    label_rows = work[
-        (work["_fmv3_event_position"] >= minimum_prefix)
-        & work[case_key].isin(eligible_cases)
-        & work["_fmv3_activity_id"].notna()
-    ]
-    signatures = label_rows.groupby(case_key, sort=False)["_fmv3_activity_id"].agg(
-        lambda values: frozenset(map(int, values))
-    )
     planning_tasks = []
-    for case_id, labels in signatures.items():
-        planning_tasks.extend((None, label, str(case_id)) for label in labels)
+    for case_id ,case_rows in work [work [case_key ].isin (eligible_cases )].groupby (
+    case_key ,sort =False ):
+        activity_ids =[
+        None if pd .isna (value )else int (value )
+        for value in case_rows ["_fmv3_activity_id"].tolist ()]
+        for target_position in range (minimum_prefix ,len (activity_ids )):
+            target =activity_ids [target_position ]
+            if target is None :continue
+            context =tuple (
+            value for value in activity_ids [max (0 ,target_position -3 ):target_position ]
+            if value is not None )
+            planning_tasks .append ((context ,target ,str (case_id )))
     plan, materialized_cases = _build_case_plan(planning_tasks, config)
     selected = work[work[case_key].astype(str).isin(materialized_cases)].copy()
     return plan, selected, activity_names
@@ -426,6 +470,30 @@ def _fuse_structured_prediction(
     return fused
 
 
+def _enforce_support_only_candidates(prediction, class_universe):
+    """Make support-absent schema labels illegal after every fusion branch."""
+    probabilities =np .asarray (prediction ["probabilities"],dtype =float ).copy ()
+    support_counts =prediction .get ("support_counts",{})or {}
+    allowed =np .asarray ([
+    int (support_counts .get (int (label ),0 ))>0 for label in class_universe ],
+    dtype =bool )
+    probabilities [:,~allowed ]=0.0
+    denominator =probabilities .sum (axis =1 ,keepdims =True )
+    if bool ((denominator <=0 ).any ()):
+        zero_rows =np .where (denominator [:,0 ]<=0 )[0 ]
+        allowed_columns =np .where (allowed )[0 ]
+        probabilities [np .ix_ (zero_rows ,allowed_columns )]=1.0 /max (
+        int (allowed_columns .size ),1 )
+        denominator =probabilities .sum (axis =1 ,keepdims =True )
+    probabilities /=denominator .clip (min =1e-12 )
+    universe =np .asarray (class_universe ,dtype =int )
+    result =dict (prediction )
+    result ["probabilities"]=probabilities
+    result ["y_pred"]=universe [np .argmax (probabilities ,axis =1 )].tolist ()
+    result ["confidences"]=probabilities .max (axis =1 ).tolist ()
+    return result
+
+
 def _expert_confidence_weights(
     logits: torch.Tensor,
     temperature: float = 1.0,
@@ -584,6 +652,7 @@ def _batched_head_probabilities(
     retrieval_mode,
     prior_mode,
     prior_strength,
+    candidate_features=None,
 ):
     """Vectorized equivalent of per-query fixed-k classification heads."""
     device = query.device
@@ -591,6 +660,27 @@ def _batched_head_probabilities(
     num_queries, num_classes = query.size(0), classes.numel()
     local = pool[local_positions]
     local_labels = pool_labels[local_positions]
+    if head.semantic_candidate_decoder_enabled and candidate_features is not None:
+        result =head .forward_classification_batched (
+            local ,local_labels ,query ,
+            global_support_features =pool ,
+            global_support_labels =pool_labels ,
+            candidate_classes =classes ,
+            candidate_features =candidate_features ,
+            prior_mode =prior_mode ,prior_strength =prior_strength ,
+        )
+        logits ,output_classes ,probabilities =result
+        if logits is None :return query .new_zeros ((num_queries ,num_classes )),query .new_zeros (num_queries )
+        abstain =probabilities .new_zeros (num_queries )
+        aligned =probabilities .new_zeros ((num_queries ,num_classes ))
+        for output_column ,label in enumerate (output_classes ):
+            if int (label )==head .abstain_label :
+                abstain =probabilities [:,output_column ]
+                continue
+            match =(classes ==label ).nonzero (as_tuple =False )
+            if match .numel ():
+                aligned [:,match [0 ,0 ]]=probabilities [:,output_column ]
+        return aligned ,abstain
     class_masks = torch.stack([local_labels == cls for cls in classes], dim=2)
     local_counts = class_masks.sum(dim=1).float()
     pool_counts = torch.stack([(pool_labels == cls).sum() for cls in classes]).float()
@@ -768,6 +858,8 @@ def _predict_classification_fixed_k(
     prior_mode,
     prior_strength,
     eval_cfg=None,
+    retrieval_embeddings_by_expert=None,
+    candidate_features_by_expert=None,
 ):
     support_labels_cpu = labels[support_indices]
     support_counts = Counter(int(value) for value in support_labels_cpu.tolist())
@@ -778,18 +870,59 @@ def _predict_classification_fixed_k(
     query_indices_device = torch.as_tensor(query_indices, device=device)
     labels_device = labels.to(device)
     embeddings_device = [embedding.to(device) for embedding in embeddings_by_expert]
+    retrieval_embeddings_device =[
+    embedding .to (device )for embedding in (
+    retrieval_embeddings_by_expert or embeddings_by_expert )]
+    candidate_features_device =[
+    None if features is None else features .to (device )
+    for features in (candidate_features_by_expert or [None ]*len (experts ))]
     k_eff = min(int(retrieval_k), len(support_indices))
 
     expert_probabilities, abstain_probabilities, expert_confidence_logits, view_weights = [], [], [], []
-    for expert_index, (expert, embeddings) in enumerate(zip(experts, embeddings_device)):
+    retrieval_coverages_by_expert =defaultdict (list )
+    output_expert_ids =[]
+    policy =str ((eval_cfg or {}).get (
+    "classification_retrieval_policy","nearest" )).lower ()
+    for expert_index, (expert, embeddings, retrieval_embeddings) in enumerate(zip(
+    experts, embeddings_device, retrieval_embeddings_device)):
         expert_queries = embeddings[query_indices_device]
+        retrieval_queries =retrieval_embeddings [query_indices_device ]
         for view_indices, view_weight in _virtual_support_view_specs(
             support_indices, eval_cfg, "classification", labels=labels, salt=expert_index
         ):
             view_device = torch.as_tensor(view_indices, device=device)
             view_k = min(int(retrieval_k), int(view_device.numel()))
             expert_pool = embeddings[view_device]
-            local_positions = torch.topk(expert_queries @ expert_pool.t(), view_k, dim=1).indices
+            retrieval_pool =retrieval_embeddings [view_device ]
+            similarities =retrieval_queries @retrieval_pool .t ()
+            if policy =="class_diverse":
+                semantic_scores =None
+                if candidate_features_device [expert_index ]is not None :
+                    semantic_query =F .normalize (
+                    expert .proto_head .semantic_query_projection (expert_queries ),
+                    p =2 ,dim =1 )
+                    semantic_candidates =F .normalize (
+                    expert .proto_head .semantic_candidate_projection (
+                    candidate_features_device [expert_index ]),p =2 ,dim =1 )
+                    semantic_scores =semantic_query @semantic_candidates .t ()
+                local_positions =class_diverse_topk_indices (
+                similarities ,labels_device [view_device ],view_k ,
+                classes_per_shortlist =int ((eval_cfg or {}).get (
+                "class_diverse_shortlist_classes",10 )),
+                examples_per_class =int ((eval_cfg or {}).get (
+                "class_diverse_examples_per_class",2 )),
+                candidate_classes =torch .as_tensor (
+                prediction_classes ,device =device ),
+                candidate_scores =semantic_scores ,
+                semantic_weight =float ((eval_cfg or {}).get (
+                "class_diverse_semantic_weight",1.0 )),
+                )
+            else :
+                local_positions = torch.topk(similarities, view_k, dim=1).indices
+            local_labels =labels_device [view_device ][local_positions ]
+            true_labels =labels_device [query_indices_device ]
+            retrieval_coverages_by_expert [expert_index ].append ((
+            local_labels ==true_labels .unsqueeze (1 )).any (dim =1 ))
             probabilities, abstain = _batched_head_probabilities(
                 expert.proto_head,
                 expert_queries,
@@ -800,8 +933,10 @@ def _predict_classification_fixed_k(
                 retrieval_mode,
                 prior_mode,
                 prior_strength,
+                candidate_features =candidate_features_device [expert_index ],
             )
             expert_probabilities.append(probabilities)
+            output_expert_ids .append (expert_index )
             abstain_probabilities.append(abstain)
             view_weights.append(float(view_weight))
             if expert.proto_head.classification_expert_confidence_enabled:
@@ -810,10 +945,6 @@ def _predict_classification_fixed_k(
                 )
             else:
                 expert_confidence_logits.append(probabilities.new_zeros(probabilities.size(0)))
-    reference_queries = embeddings_device[0][query_indices_device]
-    reference_pool = embeddings_device[0][support_indices_device]
-    reference_positions = torch.topk(reference_queries @ reference_pool.t(), k_eff, dim=1).indices
-    local_labels = labels_device[support_indices_device][reference_positions]
     stacked_probabilities = torch.stack(expert_probabilities)
     stacked_abstain = torch.stack(abstain_probabilities)
     view_weights_tensor = torch.as_tensor(view_weights, device=device)
@@ -827,6 +958,27 @@ def _predict_classification_fixed_k(
         expert_weights = None
         mean_probs = _weighted_stack_mean(stacked_probabilities, view_weights_tensor)
         mean_abstain = _weighted_stack_mean(stacked_abstain, view_weights_tensor)
+    expert_coverage =torch .stack ([
+    torch .stack (retrieval_coverages_by_expert [expert_index ]).any (dim =0 )
+    for expert_index in range (len (experts ))])
+    coverage_any =expert_coverage .any (dim =0 )
+    coverage_every =expert_coverage .all (dim =0 )
+    output_expert_ids_tensor =torch .as_tensor (
+    output_expert_ids ,dtype =torch .long ,device =device )
+    if expert_weights is not None :
+        expert_total_weight =expert_weights .new_zeros ((
+        len (experts ),expert_weights .size (1 )))
+        expert_total_weight .index_add_ (0 ,output_expert_ids_tensor ,expert_weights )
+    else :
+        normalized_views =view_weights_tensor /view_weights_tensor .sum ().clamp_min (1e-8 )
+        expert_total_weight =normalized_views .new_zeros (len (experts ))
+        expert_total_weight .index_add_ (
+        0 ,output_expert_ids_tensor ,normalized_views )
+        expert_total_weight =expert_total_weight .unsqueeze (1 ).expand (
+        -1 ,expert_coverage .size (1 ))
+    highest_expert =expert_total_weight .argmax (dim =0 )
+    coverage_highest =expert_coverage .gather (
+    0 ,highest_expert .unsqueeze (0 )).squeeze (0 )
     best_conf, best_idx = mean_probs.max(dim=1)
     predicted = torch.as_tensor(prediction_classes, device=device)[best_idx]
     abstain_mask = mean_abstain > best_conf
@@ -840,14 +992,17 @@ def _predict_classification_fixed_k(
     pool_covered = torch.as_tensor(
         [support_counts.get(int(value), 0) > 0 for value in true.tolist()], device=device
     )
-    retrieval_covered = (local_labels == true.unsqueeze(1)).any(dim=1)
     result = {
         "y_true": true.cpu().tolist(),
         "y_pred": predicted.cpu().tolist(),
         "probabilities": mean_probs[:, metric_columns].cpu().numpy(),
         "confidences": confidence.cpu().tolist(),
         "pool_covered": pool_covered.cpu().tolist(),
-        "retrieval_covered": retrieval_covered.cpu().tolist(),
+        "retrieval_covered": coverage_any.cpu().tolist(),
+        "retrieval_covered_any_expert": coverage_any.cpu().tolist(),
+        "retrieval_covered_every_expert": coverage_every.cpu().tolist(),
+        "retrieval_covered_highest_weight_expert": coverage_highest.cpu().tolist(),
+        "retrieval_covered_union_experts": coverage_any.cpu().tolist(),
         "support_counts": dict(support_counts),
     }
     if expert_weights is not None:
@@ -904,6 +1059,55 @@ def _predict_classification_dynamic_batched(
     return merged
 
 
+@torch.no_grad ()
+def _predict_frozen_embedding_logistic(
+    embeddings_by_expert, labels, query_indices, support_indices,
+    class_universe, eval_cfg,
+):
+    """Class-balanced diagnostic on frozen foundation decision embeddings."""
+    from sklearn .linear_model import LogisticRegression
+
+    classes =list (map (int ,class_universe ))
+    class_to_column ={label :column for column ,label in enumerate (classes )}
+    support_y =labels [support_indices ].cpu ().numpy ().astype (int )
+    probabilities =[]
+    for expert_index ,embeddings in enumerate (embeddings_by_expert ):
+        support_x =embeddings [support_indices ].cpu ().numpy ()
+        query_x =embeddings [query_indices ].cpu ().numpy ()
+        observed =np .unique (support_y )
+        aligned =np .zeros ((len (query_indices ),len (classes )),dtype =float )
+        if len (observed )==1 :
+            if int (observed [0 ])in class_to_column :
+                aligned [:,class_to_column [int (observed [0 ])]]=1.0
+        else :
+            classifier =LogisticRegression (
+            C =float ((eval_cfg or {}).get ("foundation_logistic_c",1.0 )),
+            class_weight ="balanced",max_iter =int ((eval_cfg or {}).get (
+            "foundation_logistic_max_iter",500 )),
+            random_state =int ((eval_cfg or {}).get ("virtual_expert_seed",42 ))+expert_index )
+            classifier .fit (support_x ,support_y )
+            partial =classifier .predict_proba (query_x )
+            for source_column ,label in enumerate (classifier .classes_ ):
+                if int (label )in class_to_column :
+                    aligned [:,class_to_column [int (label )]]=partial [:,source_column ]
+        probabilities .append (aligned )
+    mean_probs =np .mean (probabilities ,axis =0 )
+    predicted =np .asarray (classes ,dtype =int )[np .argmax (mean_probs ,axis =1 )]
+    true =labels [query_indices ].cpu ().numpy ().astype (int )
+    support_counts =Counter (map (int ,support_y .tolist ()))
+    covered =np .asarray ([support_counts .get (int (label ),0 )>0 for label in true ])
+    return {
+    "y_true":true .tolist (),"y_pred":predicted .tolist (),
+    "probabilities":mean_probs ,"confidences":mean_probs .max (axis =1 ).tolist (),
+    "pool_covered":covered .tolist (),"retrieval_covered":covered .tolist (),
+    "retrieval_covered_any_expert":covered .tolist (),
+    "retrieval_covered_every_expert":covered .tolist (),
+    "retrieval_covered_highest_weight_expert":covered .tolist (),
+    "retrieval_covered_union_experts":covered .tolist (),
+    "support_counts":dict (support_counts ),
+    }
+
+
 @torch.no_grad()
 def predict_classification(
     experts,
@@ -918,7 +1122,13 @@ def predict_classification(
     prior_strength,
     eval_cfg,
     structured_contexts=None,
+    retrieval_embeddings_by_expert=None,
+    candidate_features_by_expert=None,
 ):
+    if retrieval_mode =="foundation_logistic":
+        return _predict_frozen_embedding_logistic (
+        embeddings_by_expert ,labels ,query_indices ,support_indices ,
+        class_universe ,eval_cfg )
     structured_modes = {"structured", "fm_structured_mix", "fm_structured_product"}
     if retrieval_mode in structured_modes:
         if structured_contexts is None:
@@ -935,6 +1145,8 @@ def predict_classification(
             experts, embeddings_by_expert, labels, query_indices, support_indices,
             class_universe, retrieval_k, "configured", prior_mode, prior_strength,
             eval_cfg=eval_cfg,
+            retrieval_embeddings_by_expert=retrieval_embeddings_by_expert,
+            candidate_features_by_expert=candidate_features_by_expert,
         )
         fusion = "mixture" if retrieval_mode == "fm_structured_mix" else "product"
         return _fuse_structured_prediction(
@@ -961,6 +1173,8 @@ def predict_classification(
             experts, embeddings_by_expert, labels, query_indices, support_indices,
             class_universe, retrieval_k, retrieval_mode, prior_mode, prior_strength,
             eval_cfg=eval_cfg,
+            retrieval_embeddings_by_expert=retrieval_embeddings_by_expert,
+            candidate_features_by_expert=candidate_features_by_expert,
         )
     support_labels_cpu = labels[support_indices]
     support_counts = Counter(int(value) for value in support_labels_cpu.tolist())
@@ -1369,6 +1583,10 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
     experts = list(model.experts) if hasattr(model, "experts") else [model]
     all_class_tasks = test_tasks["classification"]
     all_reg_tasks = test_tasks["regression"]
+    candidate_labels =sorted (
+    list (getattr (all_class_tasks ,"candidate_labels",())or ()),
+    key =lambda candidate :int (candidate ["label_id"]),
+    )
     if case_plan is None:
         test_cases, support_cases = fixed_case_split(
             all_class_tasks, seed, eval_cfg.get("test_case_fraction", 0.3), eval_cfg.get("max_test_cases", 50)
@@ -1407,9 +1625,15 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
     structured_order = int(eval_cfg.get("structured_max_order", 3))
     class_contexts = [_activity_context(task, structured_order) for task in class_tasks]
     reg_labels = torch.as_tensor([float(item[1]) for item in reg_tasks], dtype=torch.float32)
-    universe = sorted({int(class_labels[idx]) for idx in class_query_indices})
+    universe =(
+    [int (candidate ["label_id"])for candidate in candidate_labels ]
+    if candidate_labels else
+    sorted ({int (value )for value in class_labels .tolist ()})
+    )
     selected_counts = []
     class_embeddings = []
+    class_retrieval_embeddings =[]
+    candidate_features =[]
     reg_embeddings = []
     routing_support_class = [
         task for task in class_tasks if str(task[2]) in used_support_cases
@@ -1430,9 +1654,28 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
     if "classification" in requested_tasks:
         selected_counts.append(f"{len(class_tasks)} classification")
         class_embeddings = [
-            encode_tasks(expert, class_tasks, eval_cfg.get("embedding_batch_size", 128), "classification")
+            encode_tasks(
+                expert, class_tasks,
+                eval_cfg.get("embedding_batch_size", 128), "classification",
+                representation="decision",
+            )
             for expert in class_experts
         ]
+        class_retrieval_embeddings =[
+            encode_tasks(
+                expert, class_tasks,
+                eval_cfg.get("embedding_batch_size", 128), "classification",
+                representation="retrieval",
+            )
+            for expert in class_experts
+        ]
+        if str (eval_cfg .get ("schema_mode","schema_known")).lower ()=="support_only":
+            candidate_features =[None ]*len (class_experts )
+        else :
+            candidate_features =[
+                expert .encode_candidate_labels (candidate_labels )
+                for expert in class_experts
+            ]
     if "regression" in requested_tasks:
         selected_counts.append(f"{len(reg_tasks)} regression")
         reg_embeddings = [
@@ -1481,13 +1724,31 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                             class_support_indices, universe, int(retrieval_k), retrieval_mode,
                                             prior_mode, float(prior_strength), eval_cfg,
                                             structured_contexts=class_contexts,
+                                            retrieval_embeddings_by_expert=class_retrieval_embeddings,
+                                            candidate_features_by_expert=candidate_features,
                                         )
+                                        if str (eval_cfg .get (
+                                        "schema_mode","schema_known")).lower ()=="support_only":
+                                            prediction =_enforce_support_only_candidates (
+                                            prediction ,universe )
                                         metrics = classification_metrics(
                                             prediction["y_true"], prediction["y_pred"], prediction["probabilities"],
                                             universe, prediction["confidences"],
                                             [class_tasks[int(idx)][2] for idx in class_query_indices],
                                             prediction["support_counts"], prediction["pool_covered"],
                                             prediction["retrieval_covered"],
+                                            retrieval_covered_any_expert=prediction.get(
+                                                "retrieval_covered_any_expert"
+                                            ),
+                                            retrieval_covered_every_expert=prediction.get(
+                                                "retrieval_covered_every_expert"
+                                            ),
+                                            retrieval_covered_highest_weight_expert=prediction.get(
+                                                "retrieval_covered_highest_weight_expert"
+                                            ),
+                                            retrieval_covered_union_experts=prediction.get(
+                                                "retrieval_covered_union_experts"
+                                            ),
                                         )
                                         metrics["balanced_accuracy_ci"] = _bootstrap_balanced_accuracy(
                                             prediction, class_tasks, class_query_indices, universe,
@@ -1530,6 +1791,8 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                                 )
                                         row = {
                                             "task": "classification", "log": log_name,
+                                            "schema_mode":str (eval_cfg .get (
+                                            "schema_mode","schema_known")),
                                             "evaluation_split": config.get(
                                                 "evaluation_split", "unspecified"
                                             ),

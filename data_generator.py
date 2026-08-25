@@ -22,6 +22,23 @@ try:
 except ImportError:  # Learned embeddings do not require SentenceTransformer.
     SentenceTransformer = None
 
+
+class TransformedLog(list):
+    """List-compatible transformed traces with log-local label schema metadata.
+
+    Keeping this as a ``list`` subclass preserves every historical caller while
+    allowing schema-known classification to retain candidates which happen not
+    to occur in the materialized support/query cases.
+    """
+
+    def __init__(self, traces=(), *, candidate_labels=()):
+        super().__init__(traces)
+        self.candidate_labels = tuple(candidate_labels)
+        self.label_name_by_id = {
+            int(candidate["label_id"]): str(candidate["activity_name"])
+            for candidate in self.candidate_labels
+        }
+
 class XESLogLoader :
     def __init__ (self ,strategy :str ,sbert_model_name :str ='all-MiniLM-L6-v2',
     sbert_model_revision :str |None =None ,
@@ -130,16 +147,24 @@ class XESLogLoader :
             group_df ['orig_index']=np .arange (len (group_df ))
             raw_traces =self ._convert_df_to_raw_traces (group_df ,case_id_key ,activity_key ,timestamp_key ,
             resource_key ,cost_key )
+            names =activity_names_by_log .get (name )if activity_names_by_log else None
             if self .strategy =='learned':
-                names =activity_names_by_log .get (name )if activity_names_by_log else None
                 processed_logs [name ]=self ._transform_learned (raw_traces ,names )
             else :
-                processed_logs [name ]=self ._transform_pretrained (group_df ,raw_traces ,activity_key ,resource_key )
+                processed_logs [name ]=self ._transform_pretrained (
+                group_df ,raw_traces ,activity_key ,resource_key ,names )
         print ("✅ Transformation complete.")
         return processed_logs
     def _transform_learned (self ,raw_traces ,activity_names =None ):
         all_activities_in_log =activity_names or set (event ['activity']for trace in raw_traces for event in trace )
         local_activity_to_id ={name :i for i ,name in enumerate (sorted (list (all_activities_in_log )))}
+        candidate_labels =[
+        {
+        'label_id':label_id ,'activity_name':activity_name ,
+        'activity_char_ids':self ._char_ids (activity_name ),
+        }
+        for activity_name ,label_id in local_activity_to_id .items ()
+        ]
         log_with_strings =[]
         for raw_trace in raw_traces :
             processed_trace =[]
@@ -159,7 +184,7 @@ class XESLogLoader :
                 processed_event ['lifecycle_char_ids']=self ._char_ids (event ['lifecycle'])
                 processed_trace .append (processed_event )
             log_with_strings .append (processed_trace )
-        return log_with_strings
+        return TransformedLog (log_with_strings ,candidate_labels =candidate_labels )
     def _convert_df_to_raw_traces (self ,df ,case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key ):
         raw_log =[]
         df [timestamp_key ]=pd .to_datetime (
@@ -226,10 +251,13 @@ class XESLogLoader :
                 prev_time =current_time
             if trace :raw_log .append (trace )
         return raw_log
-    def _transform_pretrained (self ,df ,raw_traces ,activity_key ,resource_key ):
+    def _transform_pretrained (
+    self ,df ,raw_traces ,activity_key ,resource_key ,activity_names =None ):
         activity_embedding_map =self .activity_embedding_map .copy ()
         resource_embedding_map =self .resource_embedding_map .copy ()
-        current_activities =sorted (list (df [activity_key ].dropna ().unique ()))
+        current_activities =sorted (list (
+        activity_names if activity_names is not None
+        else df [activity_key ].dropna ().unique ()))
         resources_in_log =sorted (list (df [resource_key ].fillna ('Unknown').unique ()))
         # Labels are always log-local. Semantic similarity is an input feature,
         # never the identity of the target class.
@@ -254,6 +282,7 @@ class XESLogLoader :
                 processed_trace .append ({
                 'activity_embedding':activity_embedding_map .get (event ['activity'],self .pad_embedding ),
                 'resource_embedding':resource_embedding_map .get (event ['resource'],unknown_resource_emb ),
+                'activity_name':event ['activity'],
                 'activity_id':final_activity_id_map .get (event ['activity'],-100 ),
                 'cost':event ['cost'],'time_from_start':event ['time_from_start'],
                 'time_from_previous':event ['time_from_previous'],
@@ -261,7 +290,15 @@ class XESLogLoader :
                 })
                 processed_trace [-1 ].update (self ._context_features (event ))
             log_with_embeddings .append (processed_trace )
-        return log_with_embeddings
+        candidate_labels =[
+        {
+        'label_id':final_activity_id_map [activity_name ],
+        'activity_name':activity_name ,
+        'activity_embedding':activity_embedding_map [activity_name ],
+        }
+        for activity_name in current_activities
+        ]
+        return TransformedLog (log_with_embeddings ,candidate_labels =candidate_labels )
     def _char_ids (self ,value ):
         unknown =self .char_to_id .get (self .UNK_TOKEN ,self .unk_id )
         values =tuple (

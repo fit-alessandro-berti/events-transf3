@@ -29,7 +29,27 @@ ACTIVITIES = {
     "refund": "Issue customer refund",
     "handover": "Transfer case ownership",
     "end": "Close customer request",
+    # Long-tail/exception activities deliberately exercise the classification
+    # failure modes seen in target logs, including cryptic operational codes.
+    "code_nok": "CODE NOK",
+    "t07_3": "T07-3",
+    "release": "RELEASE",
+    "manual_override": "Authorize manual override",
+    "security_hold": "Place security hold",
+    "exception_close": "Close exceptional case",
 }
+LABEL_VARIANTS =(
+    {},
+    {
+        "start":"Open request","validate":"Check submitted data",
+        "approve":"Authorize request","reject":"Decline request",
+        "fulfill":"Execute fulfillment","end":"Complete request",
+    },
+    {
+        "start":"REQ OPEN","validate":"DATA CHECK","approve":"APPROVED",
+        "reject":"DECLINED","fulfill":"EXECUTE","end":"REQ CLOSED",
+    },
+)
 ROLES = ("analyst", "senior_analyst", "approver", "operator", "auditor", "vendor")
 CHANNELS = ("portal", "email", "phone", "partner_api")
 SCALE_HOURS = (1.0 / 60.0, 1.0, 24.0, 24.0 * 30.0)
@@ -63,7 +83,7 @@ def _duration(rng, scale_hours, complexity=1.0):
     return timedelta(hours=max(scale_hours * complexity * heavy_tail, 1.0 / 3600.0))
 
 
-def generate_trace(case_index, rng):
+def generate_trace(case_index, rng, label_style=0):
     """Return one realistic trace and case-level attributes."""
     scale_hours = float(rng.choice(SCALE_HOURS))
     era = int(case_index // 250)
@@ -77,6 +97,10 @@ def generate_trace(case_index, rng):
     }
     events = []
     cumulative_cost = 0.0
+    variants =LABEL_VARIANTS [int (label_style )%len (LABEL_VARIANTS )]
+
+    def activity_name(activity_key):
+        return variants .get (activity_key ,ACTIVITIES [activity_key ])
 
     def append(activity_key, role="analyst", complexity=1.0, amount_sign=1.0):
         nonlocal cursor, cumulative_cost
@@ -85,7 +109,7 @@ def generate_trace(case_index, rng):
             cursor = _next_business_time(cursor + _duration(rng, scale_hours, 0.1))
             events.append(
                 SyntheticEvent(
-                    ACTIVITIES["handover"],
+                    activity_name("handover"),
                     cursor,
                     resources["analyst"],
                     "analyst",
@@ -103,7 +127,7 @@ def generate_trace(case_index, rng):
         resource = "Unknown" if rng.random() < 0.03 else resources[role]
         events.append(
             SyntheticEvent(
-                ACTIVITIES[activity_key],
+                activity_name(activity_key),
                 cursor,
                 resource,
                 role,
@@ -114,6 +138,13 @@ def generate_trace(case_index, rng):
 
     append("start", complexity=0.1)
     append("validate", complexity=0.7)
+
+    # Rare loops and exceptions occur in only a handful of cases and are often
+    # absent from a low-budget support sample while remaining schema-known.
+    if rng .random ()<0.025 :
+        append ("code_nok",role ="senior_analyst",complexity =0.2 )
+        append ("validate",complexity =0.5 )
+    if rng .random ()<0.015 :append ("t07_3",complexity =0.15 )
 
     # An old decision changes distant approval/fulfillment behavior.
     high_risk = rng.random() < (0.20 + 0.15 * (priority == "urgent"))
@@ -126,14 +157,14 @@ def generate_trace(case_index, rng):
     review_end = _next_business_time(branch_start + _duration(rng, scale_hours, 1.4))
     parallel = [
         SyntheticEvent(
-            ACTIVITIES["documents"],
+            activity_name("documents"),
             document_end,
             resources["analyst"],
             "analyst",
             float(rng.uniform(20, 120)),
         ),
         SyntheticEvent(
-            ACTIVITIES["review"],
+            activity_name("review"),
             review_end,
             resources["senior_analyst"],
             "senior_analyst",
@@ -152,6 +183,10 @@ def generate_trace(case_index, rng):
     overdue = (cursor - start).total_seconds() / 3600.0 > 5.0 * scale_hours
     if overdue or cumulative_cost > 700:
         append("escalate", role="senior_analyst", complexity=0.4)
+    if high_risk and rng .random ()<0.04 :
+        append ("security_hold",role ="senior_analyst",complexity =0.3 )
+    if rng .random ()<0.02 :
+        append ("manual_override",role ="approver",complexity =0.2 )
 
     if high_risk and rng.random() < 0.45:
         append("reject", role="approver", complexity=0.4)
@@ -163,6 +198,9 @@ def generate_trace(case_index, rng):
         append("fulfill", role="vendor" if high_risk else "operator", complexity=2.0)
         # Separation of duty is encoded by the auditor resource pool.
         append("audit", role="auditor", complexity=0.8)
+        if rng .random ()<0.03 :append ("release",role ="auditor",complexity =0.1 )
+    if rng .random ()<0.01 :
+        append ("exception_close",role ="senior_analyst",complexity =0.1 )
     append("end", complexity=0.1)
 
     events.sort(key=lambda event: event.timestamp)
@@ -185,7 +223,9 @@ def generate_event_log(num_cases=250, seed=42):
     rng = np.random.default_rng(int(seed))
     log = EventLog()
     for case_index in range(int(num_cases)):
-        events, attributes = generate_trace(case_index, rng)
+        events, attributes = generate_trace(
+            case_index, rng, label_style=int(seed) % len(LABEL_VARIANTS)
+        )
         trace = Trace(attributes=attributes)
         for item in events:
             trace.append(
