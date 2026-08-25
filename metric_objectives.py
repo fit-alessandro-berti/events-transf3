@@ -309,8 +309,18 @@ def classification_metric_objective(
     if profile == "legacy":
         loss = nll_raw
     else:
-        denominator = sum(weights.values())
-        loss = sum(weights[name] * components[name] for name in weights) / denominator
+        # Named profiles resolve to a complete metric dictionary so callers can
+        # inspect every configured weight.  Exclude zero-weight terms from the
+        # arithmetic itself: under AMP an unused surrogate can legitimately be
+        # infinite, and IEEE ``0 * inf`` would otherwise contaminate the active
+        # finite objective with NaN.
+        active_weights = {
+            name: weight for name, weight in weights.items() if weight > 0.0
+        }
+        denominator = sum(active_weights.values())
+        loss = sum(
+            weight * components[name] for name, weight in active_weights.items()
+        ) / denominator
 
     hard_columns = probability_matrix.argmax(dim=1)
     predicted_classes = class_universe[hard_columns]
@@ -344,8 +354,8 @@ def classification_metric_objective(
         diagnostics[f"loss/classification/{name}_surrogate_raw"] = component
         diagnostics[f"loss/classification/{name}_surrogate_weighted"] = (
             component.new_tensor(0.0)
-            if profile == "legacy"
-            else weights[name] * component / sum(weights.values())
+            if profile == "legacy" or weights[name] == 0.0
+            else weights[name] * component / denominator
         )
         diagnostics[f"objective/classification/{name}_weight"] = component.new_tensor(
             0.0 if profile == "legacy" else weights[name]

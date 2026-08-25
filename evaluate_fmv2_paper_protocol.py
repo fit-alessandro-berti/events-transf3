@@ -18,7 +18,6 @@ import random
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pm4py
 import torch
 import torch.nn.functional as F
@@ -40,6 +39,7 @@ FRACTION_CODES = {
     "100": "1000",
 }
 DEFAULT_LOGS = ["billing", "helpdesk", "receipt", "roadtraffic_10000", "sepsis"]
+PAPER_MINIMUM_PREFIX_LENGTH = 2
 
 
 def _fraction_label(value: str | float) -> str:
@@ -60,6 +60,16 @@ def _select_queries(tasks, count: int, seed: int):
         return list(tasks)
     indices = random.Random(seed).sample(range(len(tasks)), count)
     return [tasks[index] for index in indices]
+
+
+def _paper_tasks(log, task_type: str):
+    """Build the fixed FM-v2 cohort independently of the training prefix floor."""
+    return get_task_data(
+        log,
+        task_type,
+        minimum_prefix_length=PAPER_MINIMUM_PREFIX_LENGTH,
+        config=CONFIG,
+    )
 
 
 def _activity_universe(paper_repo: Path, log_name: str):
@@ -83,30 +93,24 @@ def _encode(experts, tasks, task_type: str, batch_size: int):
     for start in range(0, len(sequences), batch_size):
         batch = sequences[start : start + batch_size]
         max_len = max(len(sequence) for sequence in batch)
-        padded_frames = []
+        padded_events = []
         masks = []
         for sequence in batch:
             pad_len = max_len - len(sequence)
-            frame = pd.DataFrame(sequence)
-            if pad_len:
-                frame = pd.concat(
-                    [
-                        frame,
-                        pd.DataFrame([experts[0].pad_event] * pad_len),
-                    ],
-                    ignore_index=True,
-                )
-            padded_frames.append(frame)
+            padded_events.extend(sequence)
+            padded_events.extend([experts[0].pad_event] * pad_len)
             masks.append([False] * len(sequence) + [True] * pad_len)
         prepared_batches.append(
-            (pd.concat(padded_frames, ignore_index=True), masks, len(batch), max_len)
+            (padded_events, masks, len(batch), max_len)
         )
 
     raw_by_expert = []
     with torch.inference_mode():
         # Preserve the historical expert-major execution order so CUDA
         # numerical behavior and nearest-neighbor tie breaking remain stable.
-        # Only the expert-independent DataFrame padding work is cached.
+        # Keep events as dictionaries, matching training. Converting sparse
+        # historical-memory records to one DataFrame materializes missing
+        # tuple-valued fields as scalar NaNs and changes their input schema.
         for expert in experts:
             encoded_batches = []
             for batch_frame, masks, batch_len, max_len in prepared_batches:
@@ -481,7 +485,7 @@ def main():
         test_path = paper_repo / "logs" / "test" / f"{log_name}.xes.gz"
         test_log = _transform_log(loader, test_path, "test", activity_names)
         all_query_tasks = {
-            task: get_task_data(test_log, task, config=CONFIG)
+            task: _paper_tasks(test_log, task)
             for task in ("classification", "regression")
         }
         stable_log_index = (
@@ -505,7 +509,7 @@ def main():
             )
             support_log = _transform_log(loader, support_path, "support", activity_names)
             for task in ("classification", "regression"):
-                support_tasks = get_task_data(support_log, task, config=CONFIG)
+                support_tasks = _paper_tasks(support_log, task)
                 support_embeddings = _encode(
                     model.experts, support_tasks, task, args.embedding_batch_size
                 )
@@ -572,7 +576,11 @@ def main():
         "retrieval_k": args.retrieval_k,
         "overview_selection": "best task metric across retrieval_k; smallest k on ties",
         "num_queries_per_task_log": args.num_queries,
-        "query_selection": "all held-out prefixes" if args.num_queries <= 0 else "deterministic sampled prefixes",
+        "query_selection": (
+            "all held-out prefixes with at least two observed events"
+            if args.num_queries <= 0 else "deterministic sampled paper-eligible prefixes"
+        ),
+        "minimum_prefix_length": PAPER_MINIMUM_PREFIX_LENGTH,
         "retrieval_representation": "L2(mean(raw expert embedding))",
         "expert_head_representation": "per-expert L2-normalized embedding",
         "neighborhood_sharing": "one model-level neighbor set shared by all experts",

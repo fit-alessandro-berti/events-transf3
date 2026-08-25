@@ -123,6 +123,25 @@ class MetricObjectiveTests(unittest.TestCase):
         balanced.loss.backward()
         self.assertGreater(float(logits.grad[3].abs().sum()), 0.0)
 
+    def test_zero_weight_infinite_surrogate_does_not_contaminate_loss(self):
+        logits = torch.tensor([[0.0, float("-inf")]], requires_grad=True)
+        result = classification_metric_objective(
+            logits,
+            torch.tensor([1]),
+            {"classification_objective": {"profile": "accuracy"}},
+        )
+        self.assertTrue(torch.isinf(result.components["nll"]))
+        self.assertTrue(torch.isfinite(result.loss))
+        self.assertEqual(float(result.loss.detach()), 1.0)
+        self.assertEqual(
+            float(
+                result.diagnostics[
+                    "loss/classification/nll_surrogate_weighted"
+                ]
+            ),
+            0.0,
+        )
+
     def test_macro_f1_supports_query_specific_class_spaces(self):
         first = torch.tensor([2.0, 0.0], requires_grad=True)
         second = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
