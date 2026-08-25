@@ -187,6 +187,8 @@ fmv3_training:
   deployment_queries_per_episode: 10
   # Zero means no prefix cap: every valid prefix from selected support cases.
   deployment_support_max_prefixes: 0
+  # Execution-only activation checkpointing; the support set is unchanged.
+  deployment_encode_chunk_size: 128
   classification_retrieval_policy: class_diverse
   class_diverse_shortlist_classes: 10
   class_diverse_examples_per_class: 2

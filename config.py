@@ -333,6 +333,7 @@ CONFIG = {
 'deployment_query_case_fraction':0.30,
 'deployment_queries_per_episode':10,
 'deployment_support_max_prefixes':0,
+'deployment_encode_chunk_size':128,
 'classification_retrieval_policy':'class_diverse',
 'class_diverse_shortlist_classes':10,
 'class_diverse_examples_per_class':2,

@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from metric_objectives import classification_metric_objective
 from training_debug import (
@@ -311,6 +312,31 @@ def _deployment_structured_probabilities(
     return probabilities ,context_support
 
 
+def _checkpointed_deployment_encoding(model, sequences, task_type, chunk_size):
+    """Encode every deployment prefix without retaining all encoder activations."""
+    sequences = list(sequences)
+    chunk_size = max(int(chunk_size), 1)
+    if len(sequences) <= chunk_size:
+        return model._process_batch(sequences, task_type=task_type)
+    outputs = []
+    anchor = next(model.parameters()).new_zeros((), requires_grad=True)
+    for start in range(0, len(sequences), chunk_size):
+        current = sequences[start : start + chunk_size]
+
+        def encode(_anchor, batch=current):
+            return model._process_batch(batch, task_type=task_type)
+
+        outputs.append(
+            checkpoint(
+                encode,
+                anchor,
+                use_reentrant=False,
+                preserve_rng_state=True,
+            )
+        )
+    return torch.cat(outputs, dim=0)
+
+
 def _run_deployment_classification_step(
     model, task_pool, episode_type, config, return_diagnostics,
 ):
@@ -325,8 +351,11 @@ def _run_deployment_classification_step(
     None ,f"{task_name}_empty",diagnostics ,return_diagnostics )
     support_tasks ,query_tasks =episode
     all_tasks =support_tasks +query_tasks
-    base =model ._process_batch (
-    [item [0 ]for item in all_tasks ],task_type ="classification")
+    train_cfg =config .get ("fmv3_training",{})or {}
+    encode_chunk_size =int (train_cfg .get (
+    "deployment_encode_chunk_size",config .get ("retrieval_train_batch_size",128 )))
+    base =_checkpointed_deployment_encoding (
+    model ,[item [0 ]for item in all_tasks ],"classification",encode_chunk_size )
     decision =model .classification_decision_features (base )
     retrieval =F .normalize (
     model .classification_retrieval_features (base ),p =2 ,dim =1 )
@@ -434,7 +463,6 @@ def _run_deployment_classification_step(
         None ,f"{task_name}_invalid",diagnostics ,return_diagnostics )
     logits =torch .stack (logits_rows )
     probabilities =torch .stack (probability_rows )
-    train_cfg =config .get ("fmv3_training",{})or {}
     if bool (train_cfg .get ("structured_memory_enabled",True )):
         structured_probabilities ,context_support =_deployment_structured_probabilities (
         support_tasks ,query_tasks ,candidate_classes ,

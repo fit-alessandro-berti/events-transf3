@@ -50,41 +50,67 @@ def class_diverse_topk_indices(
         candidate_classes ,dtype =torch .long ,device =rows .device )
         if candidate_scores .size (0 )not in {1 ,rows .size (0 )}:
             raise ValueError ("candidate_scores must have one row or align with queries")
+    # Only the first ``depth`` members of each class and at most ``k`` global
+    # members can be selected.  Materializing those bounded top-k sets in
+    # batches is equivalent to fully sorting each support class for every
+    # query, but avoids an O(query * support log support) sort in large logs.
+    depth =max (int (examples_per_class ),1 )
+    query_count =int (rows .size (0 ))
+    class_count =int (unique .numel ())
+    class_best =rows .new_empty ((query_count ,class_count ))
+    ranked_by_class =torch .full (
+    (query_count ,class_count ,depth ),-1 ,dtype =torch .long ,device =rows .device )
+    for class_index ,label in enumerate (unique ):
+        members =torch .where (labels ==label )[0 ]
+        take =min (depth ,int (members .numel ()))
+        values ,positions =torch .topk (
+        rows [:,members ],take ,dim =1 ,largest =True ,sorted =True )
+        class_best [:,class_index ]=values [:,0 ]
+        ranked_by_class [:,class_index ,:take ]=members [positions ]
+    if candidate_scores is not None :
+        candidate_positions =torch .stack ([
+        (candidate_classes ==label ).nonzero (as_tuple =False )[0 ,0 ]
+        for label in unique ])
+        semantic_for_observed =candidate_scores [:,candidate_positions ]
+        if semantic_for_observed .size (0 )==1 and query_count >1 :
+            semantic_for_observed =semantic_for_observed .expand (query_count ,-1 )
+        class_best =class_best +float (semantic_weight )*semantic_for_observed
+    shortlist_size =(
+    class_count if class_count <=k
+    else min (max (int (classes_per_shortlist ),1 ),class_count ,k ))
+    shortlist_positions =torch .topk (
+    class_best ,shortlist_size ,dim =1 ).indices
+    shortlisted_rankings =torch .gather (
+    ranked_by_class ,1 ,shortlist_positions .unsqueeze (-1 ).expand (
+    -1 ,-1 ,depth ))
+    # Match the historical depth-major order: one member from every class,
+    # followed by the second member from every class, and so on.
+    initial =shortlisted_rankings .permute (0 ,2 ,1 ).reshape (query_count ,-1 )
+    max_initial =min (k ,int (initial .size (1 )))
+    # ``k + max_initial`` guarantees at least k candidates remain after
+    # removing every possible duplicate already chosen in the breadth pass.
+    fill_width =min (int (labels .numel ()),k +max_initial )
+    global_ranked =torch .topk (
+    rows ,fill_width ,dim =1 ,largest =True ,sorted =True ).indices
+    # Compact candidate lists are cheaper to de-duplicate on the host.  One
+    # batched transfer avoids a device synchronization for every scalar index.
+    initial_rows =initial .cpu ().tolist ()
+    global_rows =global_ranked .cpu ().tolist ()
     output =[]
-    for row_index ,scores in enumerate (rows ):
-        class_best =torch .stack ([
-        scores [labels ==label ].max ()for label in unique ])
-        if candidate_scores is not None :
-            semantic_row =candidate_scores [
-            0 if candidate_scores .size (0 )==1 else row_index ]
-            semantic_for_observed =torch .stack ([
-            semantic_row [(candidate_classes ==label ).nonzero (
-            as_tuple =False )[0 ,0 ]]for label in unique ])
-            class_best =class_best +float (semantic_weight )*semantic_for_observed
-        shortlist_size =(
-        int (unique .numel ())if unique .numel ()<=k
-        else min (max (int (classes_per_shortlist ),1 ),int (unique .numel ()),k ))
-        shortlisted =unique [torch .topk (class_best ,shortlist_size ).indices ]
+    for row_index in range (query_count ):
         selected =[]
-        # One pass guarantees breadth; later passes add limited within-class depth.
-        depth =max (int (examples_per_class ),1 )
-        ranked_by_class ={}
-        for label in shortlisted :
-            members =torch .where (labels ==label )[0 ]
-            ranked_by_class [int (label )]=members [
-            torch .argsort (scores [members ],descending =True )]
-        for rank in range (depth ):
-            for label in shortlisted :
-                ranked =ranked_by_class [int (label )]
-                if rank <ranked .numel ()and len (selected )<k :
-                    selected .append (ranked [rank ])
-        selected_ids ={int (index )for index in selected }
+        selected_ids =set ()
+        for value in initial_rows [row_index ]:
+            if value <0 or value in selected_ids :continue
+            selected .append (value )
+            selected_ids .add (value )
+            if len (selected )==k :break
         if len (selected )<k :
-            for index in torch .argsort (scores ,descending =True ):
-                if int (index )not in selected_ids :
-                    selected .append (index )
-                    selected_ids .add (int (index ))
-                    if len (selected )==k :break
-        output .append (torch .stack (selected ))
-    result =torch .stack (output )
+            for value in global_rows [row_index ]:
+                if value in selected_ids :continue
+                selected .append (value )
+                selected_ids .add (value )
+                if len (selected )==k :break
+        output .append (selected )
+    result =torch .as_tensor (output ,dtype =torch .long ,device =rows .device )
     return result [0 ]if squeeze else result

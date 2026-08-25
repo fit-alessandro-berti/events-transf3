@@ -10,6 +10,7 @@ from evaluation.fmv3_protocol import (
     _predict_frozen_embedding_logistic,
 )
 from training_strategies.retrieval_strategy import (
+    _checkpointed_deployment_encoding,
     _sample_deployment_classification_episode,
 )
 from training_debug import split_training_tasks_by_case
@@ -18,6 +19,27 @@ from utils.retrieval_utils import class_diverse_topk_indices
 
 
 class SchemaCandidateDecoderTests(unittest.TestCase):
+    def test_checkpointed_deployment_encoding_preserves_full_gradient(self):
+        class TinyEncoder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.tensor(2.0))
+
+            def _process_batch(self, sequences, task_type=None):
+                values = torch.as_tensor(
+                    [[float(sequence[0]["value"])] for sequence in sequences]
+                )
+                return values * self.weight
+
+        model = TinyEncoder()
+        sequences = [[{"value": index}] for index in range(7)]
+        encoded = _checkpointed_deployment_encoding(
+            model, sequences, "classification", chunk_size=2
+        )
+        self.assertEqual(encoded[:, 0].tolist(), [0, 2, 4, 6, 8, 10, 12])
+        encoded.sum().backward()
+        self.assertEqual(model.weight.grad.item(), sum(range(7)))
+
     def test_schema_metadata_survives_lazy_task_construction(self):
         candidates = (
             {"label_id": 0, "activity_name": "A", "activity_char_ids": (2,)},
