@@ -19,6 +19,7 @@ SOURCE_LOG_PATHS = {
     '00010_rid2mit': os.path.join(LOG_DIR, '00010_rid2mit.xes.gz'),
     '00011_req2receipt': os.path.join(LOG_DIR, '00011_req2receipt.xes.gz'),
     '00012_camp2lead': os.path.join(LOG_DIR, '00012_camp2lead.xes.gz'),
+    '00013_clos2rep': os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),
     'bpic2013_incidents': os.path.join(LOG_DIR, 'bpic2013_incidents.xes.gz'),
     'bpic2020_request_for_payment': os.path.join(
         LOG_DIR, 'bpic2020_request_for_payment.xes.gz'
@@ -38,6 +39,7 @@ SOURCE_LOG_SHA256 = {
     '00010_rid2mit': '0ae5d396b1870ccbdb4810196edf17e06eeb09e78ff9f9f0c7b197a963fc451c',
     '00011_req2receipt': '2ab33011332bcc92cd0e17b87f3292699768cb73fbfdb280b4a97c6905e96fc2',
     '00012_camp2lead': '3c1d955d6ac29d4b6715c65c970d7af350db822572c1a3cd5030954cf9f5a60b',
+    '00013_clos2rep': '94c504f1bd6d6ac7a769a8cdbb3f40333f7e0064be80e2f6c7717b63520d8787',
     'bpic2013_incidents': '6ec2136c607648608655802486df97a866f351668751b7ecbca51e1f8715d522',
     'bpic2020_request_for_payment': '028e2d645153190200b2ea998747efa02cf1beb6f83db62598963cf391f114b1',
     'production': 'be5956a57c8106db5e1151033e63ee4836e6d3b4f794b39e7674d0f3ac057d5c',
@@ -49,17 +51,9 @@ TRAINING_LOG_SETS = [
         'name': 'source',
         'log_paths': SOURCE_LOG_PATHS,
         'file_sha256': SOURCE_LOG_SHA256,
-        'manifest_sha256': 'f08c17aaaab244e0c93125ce8a6ecb4931d4c747a36705ea3c870e3830b29c59',
+        'manifest_sha256': 'a4ea925ba9084ebfa0eea73919402320f55ba0aab76f5ce2f628c71335ad5618',
         'require_manifest': True,
         'reject_unknown_in_directory': LOG_DIR,
-        'allowed_extra_paths': (
-            os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),
-            os.path.join(LOG_DIR, '01_running-example.xes.gz'),
-            os.path.join(LOG_DIR, '02_teleclaims.xes.gz'),
-            os.path.join(LOG_DIR, '03_repairExample.xes.gz'),
-            os.path.join(LOG_DIR, '04_reviewing.xes.gz'),
-            os.path.join(LOG_DIR, 'dummy.xes.gz'),
-        ),
         'epochs': (1, None),
         'weight_schedule': (
             (1, 5, 0.70),
@@ -87,9 +81,7 @@ CONFIG = {
 'run_mode':'train', # train, resume, initialize, assemble
 'training_log_sets': TRAINING_LOG_SETS,
     'log_paths': {
-        'testing': {
-            'D_unseen': os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),
-        },
+        'testing': {},
     },
 'evaluation_log_sets':{
 'screening':{
@@ -99,9 +91,6 @@ CONFIG = {
 'roadtraffic100traces':os.path.join ('logs_eval','roadtraffic100traces.xes'),
 'roadtraffic_10000':os.path.join ('logs_eval','roadtraffic_10000.xes.gz'),
 'sepsis':os.path.join ('logs_eval','sepsis.xes.gz'),
-},
-'meta_test':{
-'D_unseen':os.path.join (LOG_DIR,'00013_clos2rep.xes.gz'),
 },
 },
 'moe_settings':{

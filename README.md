@@ -18,8 +18,8 @@ It supports two embedding strategies for event attributes:
 - `data_generator.py`: XES loader and feature/embedding preparation.
 - `components/`: model components (Transformer, MoE, meta-learner heads).
 - `evaluation/`: evaluation routines (meta-learning and retrieval-augmented).
-- `logs/`: training/sample XES logs, [public-dataset provenance](logs/README.md),
-  and a simulation script.
+- `logs/`: training XES logs, [public-dataset provenance](logs/README.md), and a
+  simulation script.
 
 ## Setup
 
@@ -39,7 +39,7 @@ The loader expects XES logs with these event attributes:
 - `org:resource` (resource name; missing values default to `Unknown`)
 - `amount` (cost; missing values default to 0.0)
 
-Default training/testing logs are configured in `config.py`. Sample logs are already in `logs/`.
+Default training/testing logs are configured in `config.py`. Training logs are already in `logs/`.
 The bundled public training logs include source citations, dataset-specific
 terms, checksums, conversion notes, and non-overlap rationale in
 [`logs/README.md`](logs/README.md).
@@ -80,9 +80,10 @@ remain available when no manifest is requested. Every configured training
 epoch must have positive weight. Resolved paths and hashes are also checked so
 a copied, renamed, or directly referenced evaluation log cannot enter training.
 
-The bundled `D_unseen` log is excluded and reserved for the final `meta_test`
-split. Checkpoints trained before this exclusion are contaminated and must be
-retrained from scratch before their `D_unseen` results are treated as unseen.
+Every XES file under `logs/`, including `00013_clos2rep.xes.gz`, is part of the
+default training corpus. The repository does not designate a bundled
+`meta_test` log; `logs_eval/` remains the registered screening split, and truly
+unseen logs should be supplied through the external evaluation split.
 
 ## Training
 
@@ -124,26 +125,33 @@ encoder across four lightweight routed experts.
 Evaluate a trained model against a test log key from `config.py`:
 
 ```bash
-python testing.py --checkpoint_dir ./checkpoints --test_log_name D_unseen
+python testing.py \
+  --checkpoint_dir ./checkpoints \
+  --test_log_name helpdesk \
+  --evaluation_split screening
 ```
 
 You can also pass a direct path to a `.xes` or `.xes.gz` file:
 
 ```bash
-python testing.py --checkpoint_dir ./checkpoints --test_log_name ./logs/00013_clos2rep.xes.gz
+python testing.py \
+  --checkpoint_dir ./checkpoints \
+  --test_log_name ./external_log.xes.gz \
+  --evaluation_split external
 ```
 
-`D_unseen` is the untouched `meta_test` split. Registered development logs use
-`--evaluation_split screening`; an unregistered user-supplied log requires
-`--evaluation_split external`. Path and file-content hashes are checked against
-every training log before evaluation starts.
+Registered development logs use `--evaluation_split screening`; an unregistered
+user-supplied log requires `--evaluation_split external`. Path and file-content
+hashes are checked against every training log before evaluation starts, so a
+training log cannot be evaluated as unseen.
 
 To run retrieval-augmented evaluation:
 
 ```bash
 python testing.py \
   --checkpoint_dir ./checkpoints \
-  --test_log_name D_unseen \
+  --test_log_name helpdesk \
+  --evaluation_split screening \
   --test_mode retrieval_augmented \
   --test_retrieval_k 1 5 10 20 \
   --test_retrieval_prediction_mode proto_head \

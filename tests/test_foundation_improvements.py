@@ -84,16 +84,30 @@ class FoundationImprovementTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"source_epoch \+ additional_epochs"):
             validate_run_configuration({**valid, "epochs": 7})
 
-    def test_default_split_excludes_unseen_and_replays_source(self):
+    def test_default_corpus_includes_every_log_and_replays_source(self):
         log_sets = resolve_training_log_sets(CONFIG)
         self.assertEqual([item["name"] for item in log_sets], ["source", "synthetic"])
-        self.assertFalse(
+        repository_root = Path(__file__).resolve().parents[1]
+        logs_directory = repository_root / "logs"
+        disk_log_paths = {
+            path.resolve()
+            for pattern in ("*.xes", "*.xes.gz")
+            for path in logs_directory.rglob(pattern)
+        }
+        configured_training_paths = {
+            (repository_root / path).resolve()
+            for item in log_sets
+            for path in item["log_paths"].values()
+        }
+        self.assertEqual(disk_log_paths, configured_training_paths)
+        self.assertTrue(
             any(
                 Path(path).name == "00013_clos2rep.xes.gz"
                 for item in log_sets
                 for path in item["log_paths"].values()
             )
         )
+        self.assertNotIn("meta_test", CONFIG["evaluation_log_sets"])
         self.assertEqual(training_log_set_weight(log_sets[0], 1), 0.70)
         self.assertEqual(training_log_set_weight(log_sets[0], 40), 0.25)
         self.assertEqual(training_log_set_weight(log_sets[1], 40), 0.75)

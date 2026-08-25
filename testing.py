@@ -21,7 +21,7 @@ if __name__ =='__main__':
     parser .add_argument ('--checkpoint_dir',type =str ,default ='./checkpoints',help ="Directory to load checkpoints and artifacts from.")
     parser .add_argument ('--checkpoint_epoch',type =int ,default =None ,help ="Specific epoch checkpoint to test (e.g., 1, 5). Defaults to the latest.")
     parser .add_argument ('--test_log_name',type =str ,required =True ,help ="Name of the test log (from config) OR a direct path to a .xes.gz file.")
-    parser .add_argument ('--evaluation_split',choices =['meta_test','screening','external'],default ='meta_test',help ="Declared evaluation split; use external for an unregistered log.")
+    parser .add_argument ('--evaluation_split',choices =['meta_test','screening','external'],default ='screening',help ="Declared evaluation split; use external for an unregistered log.")
     parser .add_argument ('--test_mode',type =str ,default =default_config ['test_mode'],choices =['meta_learning','retrieval_augmented'],help =f"Evaluation mode. (default: {default_config ['test_mode']})")
     parser .add_argument ('--num_test_episodes',type =int ,default =default_config ['num_test_episodes'],help =f"Number of episodes to run for testing. (default: {default_config ['num_test_episodes']})")
     parser .add_argument ('--test_retrieval_k',type =int ,nargs ='+',default =default_config ['test_retrieval_k'],help =f"List of k-values for retrieval-augmented mode. (default: {default_config ['test_retrieval_k']})")
@@ -92,7 +92,10 @@ if __name__ =='__main__':
         log_key_name =re .sub (r'\.xes(\.gz)?$','',log_file_name ,flags =re .IGNORECASE )
     else :
         print (f"  - Test Log: Looking up key in config: {log_input }")
-        log_path_to_transform =CONFIG ['log_paths']['testing'].get (log_input )
+        split_paths =(CONFIG .get ('evaluation_log_sets',{})or {}).get (
+        args .evaluation_split,{})or {}
+        legacy_paths =(CONFIG .get ('log_paths',{})or {}).get ('testing',{})or {}
+        log_path_to_transform =split_paths .get (log_input )or legacy_paths .get (log_input )
         log_key_name =log_input
     if not log_path_to_transform :
         exit (f"❌ Error: Test log not found. '{log_input }' is not a valid path or config key.")

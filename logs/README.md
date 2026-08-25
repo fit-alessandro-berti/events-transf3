@@ -52,5 +52,4 @@ calendar patterns that are absent from a corpus dominated by generated business
 flows. They are source-disjoint: Volvo IT incidents, TU/e payment requests, and
 an unrelated industrial production process come from independent datasets.
 None is a derivative, subset, or alternate serialization of Billing, Helpdesk,
-Receipt, Road Traffic Fines, or Sepsis in `../logs_eval/`, or of the held-out
-`00013_clos2rep.xes.gz` log.
+Receipt, Road Traffic Fines, or Sepsis in `../logs_eval/`.
