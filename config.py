@@ -56,9 +56,8 @@ TRAINING_LOG_SETS = [
         'reject_unknown_in_directory': LOG_DIR,
         'epochs': (1, None),
         'weight_schedule': (
-            (1, 5, 0.70),
-            (6, 20, 0.40),
-            (21, None, 0.25),
+            (1, 10, 1.00),
+            (11, None, 0.70),
         ),
     },
     {
@@ -70,9 +69,8 @@ TRAINING_LOG_SETS = [
         'allow_aggregate_manifest_only': True,
         'epochs': (1, None),
         'weight_schedule': (
-            (1, 5, 0.30),
-            (6, 20, 0.60),
-            (21, None, 0.75),
+            (1, 10, 0.00),
+            (11, None, 0.30),
         ),
     },
 ]

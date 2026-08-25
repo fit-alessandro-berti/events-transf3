@@ -108,9 +108,14 @@ class FoundationImprovementTests(unittest.TestCase):
             )
         )
         self.assertNotIn("meta_test", CONFIG["evaluation_log_sets"])
-        self.assertEqual(training_log_set_weight(log_sets[0], 1), 0.70)
-        self.assertEqual(training_log_set_weight(log_sets[0], 40), 0.25)
-        self.assertEqual(training_log_set_weight(log_sets[1], 40), 0.75)
+        self.assertEqual(training_log_set_weight(log_sets[0], 1), 1.00)
+        self.assertEqual(training_log_set_weight(log_sets[1], 1), 0.00)
+        self.assertEqual(training_log_set_weight(log_sets[0], 10), 1.00)
+        self.assertEqual(training_log_set_weight(log_sets[1], 10), 0.00)
+        self.assertEqual(training_log_set_weight(log_sets[0], 11), 0.70)
+        self.assertEqual(training_log_set_weight(log_sets[1], 11), 0.30)
+        self.assertEqual(training_log_set_weight(log_sets[0], 40), 0.70)
+        self.assertEqual(training_log_set_weight(log_sets[1], 40), 0.30)
         validate_training_evaluation_disjointness(CONFIG, log_sets)
 
     def test_disjointness_rejects_copied_or_renamed_log(self):

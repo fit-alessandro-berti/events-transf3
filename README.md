@@ -46,9 +46,9 @@ terms, checksums, conversion notes, and non-overlap rationale in
 
 Training supports weighted, overlapping log sets with inclusive epoch ranges.
 A set is selected independently for every successful optimizer step. The
-default curriculum replays source logs throughout training while gradually
-increasing synthetic data. A null/None end epoch means the configured final
-epoch:
+default curriculum warms up on source logs for ten epochs, then uses a fixed
+70% source / 30% generated mixture. A null/None end epoch means the configured
+final epoch:
 
 ```python
 TRAINING_LOG_SETS = [
@@ -59,7 +59,7 @@ TRAINING_LOG_SETS = [
         "manifest_sha256": "<ordered-manifest-sha256>",
         "require_manifest": True,
         "epochs": (1, None),
-        "weight_schedule": ((1, 5, 0.70), (6, 20, 0.40), (21, None, 0.25)),
+        "weight_schedule": ((1, 10, 1.00), (11, None, 0.70)),
     },
     {
         "name": "synthetic",
@@ -68,17 +68,20 @@ TRAINING_LOG_SETS = [
         "require_manifest": True,
         "allow_aggregate_manifest_only": True,
         "epochs": (1, None),
-        "weight_schedule": ((1, 5, 0.30), (6, 20, 0.60), (21, None, 0.75)),
+        "weight_schedule": ((1, 10, 0.00), (11, None, 0.30)),
     },
 ]
 ```
 
-The foundation defaults are immutable: source logs are explicit and the large
-synthetic directory is guarded by an ordered aggregate hash. Added, removed,
-renamed, or modified XES files fail resolution. Legacy ad hoc directory sets
-remain available when no manifest is requested. Every configured training
-epoch must have positive weight. Resolved paths and hashes are also checked so
-a copied, renamed, or directly referenced evaluation log cannot enter training.
+The first ten epochs use only the source logs directly under `logs/`. From
+epoch 11 onward, optimizer steps select source and generated logs with 70% and
+30% probability, respectively. The foundation defaults are immutable: source
+logs are explicit and the large synthetic directory is guarded by an ordered
+aggregate hash. Added, removed, renamed, or modified XES files fail resolution.
+Legacy ad hoc directory sets remain available when no manifest is requested.
+Every configured training epoch must have positive weight. Resolved paths and
+hashes are also checked so a copied, renamed, or directly referenced evaluation
+log cannot enter training.
 
 Every XES file under `logs/`, including `00013_clos2rep.xes.gz`, is part of the
 default training corpus. The repository does not designate a bundled
