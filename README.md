@@ -18,7 +18,8 @@ It supports two embedding strategies for event attributes:
 - `data_generator.py`: XES loader and feature/embedding preparation.
 - `components/`: model components (Transformer, MoE, meta-learner heads).
 - `evaluation/`: evaluation routines (meta-learning and retrieval-augmented).
-- `logs/`: sample XES logs and a simulation script.
+- `logs/`: training/sample XES logs, [public-dataset provenance](logs/README.md),
+  and a simulation script.
 
 ## Setup
 
@@ -39,6 +40,9 @@ The loader expects XES logs with these event attributes:
 - `amount` (cost; missing values default to 0.0)
 
 Default training/testing logs are configured in `config.py`. Sample logs are already in `logs/`.
+The bundled public training logs include source citations, dataset-specific
+terms, checksums, conversion notes, and non-overlap rationale in
+[`logs/README.md`](logs/README.md).
 
 Training supports weighted, overlapping log sets with inclusive epoch ranges.
 A set is selected independently for every successful optimizer step. The

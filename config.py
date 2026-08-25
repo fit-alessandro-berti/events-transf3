@@ -19,6 +19,11 @@ SOURCE_LOG_PATHS = {
     '00010_rid2mit': os.path.join(LOG_DIR, '00010_rid2mit.xes.gz'),
     '00011_req2receipt': os.path.join(LOG_DIR, '00011_req2receipt.xes.gz'),
     '00012_camp2lead': os.path.join(LOG_DIR, '00012_camp2lead.xes.gz'),
+    'bpic2013_incidents': os.path.join(LOG_DIR, 'bpic2013_incidents.xes.gz'),
+    'bpic2020_request_for_payment': os.path.join(
+        LOG_DIR, 'bpic2020_request_for_payment.xes.gz'
+    ),
+    'production': os.path.join(LOG_DIR, 'production.xes.gz'),
 }
 SOURCE_LOG_SHA256 = {
     '00001_o2c': '8d7c6a5913b73695fb434a05de38c14f9c9ffff4ba1524f0c591770ed8d091cc',
@@ -33,6 +38,9 @@ SOURCE_LOG_SHA256 = {
     '00010_rid2mit': '0ae5d396b1870ccbdb4810196edf17e06eeb09e78ff9f9f0c7b197a963fc451c',
     '00011_req2receipt': '2ab33011332bcc92cd0e17b87f3292699768cb73fbfdb280b4a97c6905e96fc2',
     '00012_camp2lead': '3c1d955d6ac29d4b6715c65c970d7af350db822572c1a3cd5030954cf9f5a60b',
+    'bpic2013_incidents': '6ec2136c607648608655802486df97a866f351668751b7ecbca51e1f8715d522',
+    'bpic2020_request_for_payment': '028e2d645153190200b2ea998747efa02cf1beb6f83db62598963cf391f114b1',
+    'production': 'be5956a57c8106db5e1151033e63ee4836e6d3b4f794b39e7674d0f3ac057d5c',
 }
 
 # Epoch ranges are inclusive. Add another dictionary to add another log set.
@@ -41,7 +49,7 @@ TRAINING_LOG_SETS = [
         'name': 'source',
         'log_paths': SOURCE_LOG_PATHS,
         'file_sha256': SOURCE_LOG_SHA256,
-        'manifest_sha256': 'c0a2dde6acae017bec4c0e630e90223525ccfa6c0369b74ce1c6e1225247525a',
+        'manifest_sha256': 'f08c17aaaab244e0c93125ce8a6ecb4931d4c747a36705ea3c870e3830b29c59',
         'require_manifest': True,
         'reject_unknown_in_directory': LOG_DIR,
         'allowed_extra_paths': (
