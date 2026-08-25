@@ -3,7 +3,7 @@ import torch .nn as nn
 import torch .nn .functional as F
 import numpy as np
 class CharCNNEmbedder (nn .Module ):
-    def __init__ (self ,char_vocab_size :int ,char_embedding_dim :int ,output_dim :int ,max_word_len :int =30 ):
+    def __init__ (self ,char_vocab_size :int ,char_embedding_dim :int ,output_dim :int ,max_word_len :int =64 ):
         super ().__init__ ()
         self .max_word_len =max_word_len
         self .char_embedding =nn .Embedding (char_vocab_size ,char_embedding_dim ,padding_idx =0 )
@@ -27,8 +27,21 @@ class CharCNNEmbedder (nn .Module ):
             padded_ids =char_ids +[0 ]*(self .max_word_len -len (char_ids ))
             batch_char_ids .append (padded_ids )
         return torch .tensor (batch_char_ids ,dtype =torch .long ,device =device )
-    def forward (self ,strings :list [str ],char_to_id :dict ):
-        char_ids =self ._strings_to_char_ids (strings ,char_to_id )
+    def _cached_to_char_ids (self ,cached_ids ):
+        device =self .char_embedding .weight .device
+        if all (len (values )==self .max_word_len for values in cached_ids ):
+            return torch .as_tensor (cached_ids ,dtype =torch .long ,device =device )
+        rows =[]
+        for values in cached_ids :
+            values =list (values )[:self .max_word_len ]
+            rows .append (values +[0 ]*(self .max_word_len -len (values )))
+        return torch .as_tensor (rows ,dtype =torch .long ,device =device )
+    def forward (self ,strings :list [str ],char_to_id :dict ,cached_ids =None ):
+        char_ids =(
+        self ._cached_to_char_ids (cached_ids )
+        if cached_ids is not None
+        else self ._strings_to_char_ids (strings ,char_to_id )
+        )
         embedded_chars =self .char_embedding (char_ids )
         embedded_chars =embedded_chars .permute (0 ,2 ,1 )
         conv_outputs =[F .gelu (conv (embedded_chars ))for conv in self .convs ]

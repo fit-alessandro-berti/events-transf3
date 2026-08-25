@@ -222,6 +222,18 @@ def regression_head_metrics(predictions, targets, confidence=None, diagnostics=N
                 diagnostics.get(name),
                 quantiles=False,
             )
+        for name in (
+            "residual_delta_log",
+            "residual_anchor_gate",
+            "retrieval_anchor_hours",
+            "parametric_prediction_hours",
+        ):
+            tensor_distribution(
+                metrics,
+                f"head/regression/{name}",
+                diagnostics.get(name),
+                quantiles=False,
+            )
         branch_predictions = diagnostics.get("branch_predictions_hours")
         aggregation = diagnostics.get("aggregation_weights")
         if isinstance(aggregation, torch.Tensor) and aggregation.numel():

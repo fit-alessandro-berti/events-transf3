@@ -1,6 +1,9 @@
+import copy
+import json
 import os
 import random
 import re
+import time
 
 import numpy as np
 import torch
@@ -17,6 +20,7 @@ from training_debug import (
     parameter_group,
     parameter_update_metrics,
     snapshot_trainable_parameters,
+    scalar_metrics,
 )
 from training_strategies.episodic_strategy import run_episodic_step
 from training_strategies.retrieval_strategy import run_retrieval_step
@@ -32,6 +36,93 @@ def split_params_for_proto(model):
             continue
         (proto_params if ".proto_head." in name else base_params).append(parameter)
     return base_params, proto_params
+
+
+def expert_adapter_diversity_loss(model):
+    """Penalize collapsed lightweight experts without duplicating the encoder."""
+    vectors = []
+    for expert in getattr(model, "experts", ()):
+        adapter = getattr(expert, "expert_adapter", None)
+        if adapter is None:
+            continue
+        parameters = [
+            parameter.reshape(-1)
+            for parameter in adapter.parameters()
+            if parameter.requires_grad
+        ]
+        if parameters:
+            vectors.append(torch.cat(parameters))
+    if len(vectors) < 2:
+        reference = next(model.parameters())
+        return reference.new_zeros(())
+    normalized = [vector / vector.norm().clamp_min(1e-8) for vector in vectors]
+    similarities = torch.stack(
+        [
+            (left * right).sum().square()
+            for index, left in enumerate(normalized)
+            for right in normalized[index + 1 :]
+        ]
+    )
+    return similarities.mean()
+
+
+def adaptive_clip_grad_(parameters, factor=0.02, epsilon=1e-3):
+    """Adaptive gradient clipping relative to each parameter tensor's scale."""
+    parameters = [
+        parameter
+        for parameter in parameters
+        if parameter.grad is not None and parameter.requires_grad
+    ]
+    if not parameters:
+        return 0.0, 0.0
+    total_squared = 0.0
+    clipped = 0
+    factor = max(float(factor), 0.0)
+    epsilon = max(float(epsilon), 1e-12)
+    for parameter in parameters:
+        grad_norm = parameter.grad.detach().float().norm()
+        parameter_norm = parameter.detach().float().norm().clamp_min(epsilon)
+        total_squared += float(grad_norm.square().cpu())
+        maximum = factor * parameter_norm
+        if grad_norm > maximum:
+            parameter.grad.mul_((maximum / grad_norm.clamp_min(1e-12)).to(parameter.grad.dtype))
+            clipped += 1
+    return total_squared ** 0.5, clipped / len(parameters)
+
+
+def build_training_state(
+    epoch, model, optimizer, scheduler, scaler, log_set_rng, config
+):
+    """Capture every state required to reproduce the next optimizer step."""
+    return {
+        "format_version": 2,
+        "epoch": int(epoch),
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "scaler": scaler.state_dict(),
+        "python_rng": random.getstate(),
+        "numpy_rng": np.random.get_state(),
+        "torch_rng": torch.random.get_rng_state(),
+        "cuda_rng": (
+            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+        ),
+        "log_set_rng": log_set_rng.getstate(),
+        "config": copy.deepcopy(config),
+    }
+
+
+def gpu_utilization_percent():
+    """Return a best-effort instantaneous GPU utilization sample."""
+    if not torch.cuda.is_available():
+        return 0.0
+    utilization = getattr(torch.cuda, "utilization", None)
+    if utilization is None:
+        return None
+    try:
+        return float(utilization())
+    except (OSError, RuntimeError, AttributeError, ImportError):
+        return None
 
 
 def optimizer_parameter_groups(model, base_lr, lr_multipliers=None):
@@ -217,6 +308,7 @@ def _normalize_training_task_sets(training_tasks, config):
                 "name": str(task_set.get("name", f"set_{index + 1}")),
                 "start_epoch": int(task_set.get("start_epoch", 1)),
                 "end_epoch": int(task_set.get("end_epoch", config["epochs"])),
+                "weight_schedule": task_set.get("weight_schedule"),
                 "tasks": tasks,
             }
         )
@@ -257,8 +349,10 @@ def train(
     stop_after_epoch=None,
     cleanup_checkpoints=False,
     validation_tasks=None,
+    resume_state=None,
 ):
     print("🚀 Starting meta-training...")
+    run_config_snapshot = copy.deepcopy(config)
     if resume_epoch > 0:
         print(f"--- Resuming from epoch {resume_epoch + 1} ---")
     (
@@ -287,8 +381,6 @@ def train(
     scheduler = CosineAnnealingLR(
         optimizer, T_max=config["epochs"], eta_min=1e-6
     )
-    if resume_epoch > 0:
-        scheduler.last_epoch = resume_epoch
     use_amp = torch.cuda.is_available()
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     print(f"✅ Automatic Mixed Precision (AMP) enabled: {use_amp}")
@@ -315,10 +407,24 @@ def train(
             f"[{task_set['start_epoch']}, {task_set['end_epoch']}]"
         )
     log_set_rng = random.Random(int(config.get("seed", 42)) + 7919)
-    for completed_epoch in range(1, int(resume_epoch) + 1):
-        choose_training_log_set(
-            training_task_sets, completed_epoch, rng=log_set_rng
-        )
+    if resume_state is not None:
+        if int(resume_state.get("epoch", -1)) != int(resume_epoch):
+            raise ValueError("Resume-state epoch does not match resume_epoch")
+        optimizer.load_state_dict(resume_state["optimizer"])
+        scheduler.load_state_dict(resume_state["scheduler"])
+        scaler.load_state_dict(resume_state.get("scaler", {}))
+        random.setstate(resume_state["python_rng"])
+        np.random.set_state(resume_state["numpy_rng"])
+        torch.random.set_rng_state(resume_state["torch_rng"])
+        if torch.cuda.is_available() and resume_state.get("cuda_rng") is not None:
+            torch.cuda.set_rng_state_all(resume_state["cuda_rng"])
+        log_set_rng.setstate(resume_state["log_set_rng"])
+        print("✅ Restored optimizer, scheduler, AMP scaler, and all RNG states.")
+    else:
+        for completed_epoch in range(1, int(resume_epoch) + 1):
+            choose_training_log_set(
+                training_task_sets, completed_epoch, rng=log_set_rng
+            )
     training_strategy = config.get("training_strategy", "episodic")
     print(f"✅ Training Strategy: '{training_strategy}'")
     if training_strategy in {"retrieval", "mixed"}:
@@ -366,8 +472,8 @@ def train(
     print(f"✅ Episodic Label Shuffle strategy set to: '{shuffle_strategy}'")
     if model.num_experts > 1:
         print(
-            "✅ MoE Training enabled: Randomly selecting 1 of "
-            f"{model.num_experts} experts per step."
+            "✅ MoE Training enabled: deterministic balanced quotas across "
+            f"{model.num_experts} experts."
         )
 
     diagnostics = TrainingDiagnostics(checkpoint_dir, config)
@@ -377,6 +483,7 @@ def train(
             "heads, gradients, updates, and case-held-out validation."
         )
     gradient_clip_norm = max(float(config.get("gradient_clip_norm", 1.0)), 0.0)
+    gradient_clip_mode = str(config.get("gradient_clip_mode", "global")).lower()
     last_saved_epoch = 0
     for epoch in range(resume_epoch, config["epochs"]):
         epoch_number = epoch + 1
@@ -386,18 +493,18 @@ def train(
         selected_task_set = choose_training_log_set(
             training_task_sets, epoch_number, rng=log_set_rng
         )
-        classification_pools, regression_pools = _pools_for_task_set(
-            selected_task_set
-        )
         selected_validation_tasks = _validation_for_task_set(
             validation_task_sets, selected_task_set["name"]
         )
         active_names = ", ".join(task_set["name"] for task_set in active_task_sets)
         print(
-            f"\n🗂️ Epoch {epoch_number}: selected training log set "
-            f"'{selected_task_set['name']}' from [{active_names}]"
+            f"\n🗂️ Epoch {epoch_number}: mixing training log sets "
+            f"[{active_names}] per successful optimizer step"
         )
         model.train()
+        epoch_started_at =time .monotonic ()
+        if torch .cuda .is_available ():
+            torch .cuda .reset_peak_memory_stats ()
         diagnostics.start_epoch()
         parameter_snapshot = (
             snapshot_trainable_parameters(model) if diagnostics.enabled else {}
@@ -410,6 +517,8 @@ def train(
         nonfinite_steps = 0
         task_counts = {"classification": 0, "regression": 0}
         expert_counts = {index: 0 for index in range(model.num_experts)}
+        log_set_counts ={task_set ["name"]:0 for task_set in active_task_sets }
+        examples_processed =0
         base_lr = (
             optimizer.param_groups[0]["lr"] / base_reference_multiplier
         )
@@ -461,44 +570,60 @@ def train(
             shuffle_strategy == "yes"
             or (shuffle_strategy == "mixed" and epoch % 2 == 0)
         )
-        description = (
-            f"Epoch {epoch + 1}/{config['epochs']} "
-            f"[{selected_task_set['name']}]"
-        )
+        description = f"Epoch {epoch + 1}/{config['epochs']} [mixed log sets]"
         if shuffle_strategy != "no":
             description += f" (Shuffle: {'ON' if should_shuffle_labels else 'OFF'})"
-        progress_bar = tqdm(range(config["episodes_per_epoch"]), desc=description)
-        for step in progress_bar:
-            expert_index = random.randint(0, model.num_experts - 1)
+        target_optimizer_steps = int(config["episodes_per_epoch"])
+        classification_probability = min(
+            1.0,
+            max(0.0, float(config.get("classification_task_probability", 0.5))),
+        )
+        classification_quota = int(
+            round(target_optimizer_steps * classification_probability)
+        )
+        planned_tasks = (
+            ["classification"] * classification_quota
+            + ["regression"] * (target_optimizer_steps - classification_quota)
+        )
+        random.shuffle(planned_tasks)
+        planned_experts = [
+            index % model.num_experts for index in range(target_optimizer_steps)
+        ]
+        random.shuffle(planned_experts)
+        attempt = 0
+        max_attempts = max(target_optimizer_steps * 50, 100)
+        progress_bar = tqdm(total=target_optimizer_steps, desc=description)
+        while optimizer_steps < target_optimizer_steps:
+            if attempt >= max_attempts:
+                raise RuntimeError(
+                    f"Could not obtain {target_optimizer_steps} successful optimizer "
+                    f"steps after {attempt} attempts in epoch {epoch_number}."
+                )
+            step = attempt
+            attempt += 1
+            selected_task_set = choose_training_log_set(
+                training_task_sets, epoch_number, rng=log_set_rng
+            )
+            classification_pools, regression_pools = _pools_for_task_set(
+                selected_task_set
+            )
+            expert_index = planned_experts[optimizer_steps]
             active_expert = model.experts[expert_index]
             concrete_strategy = training_strategy
             if training_strategy == "mixed":
-                concrete_strategy = "retrieval" if step % 2 == 0 else "episodic"
-            classification_probability = min(
-                1.0,
-                max(
-                    0.0,
-                    float(config.get("classification_task_probability", 0.5)),
-                ),
-            )
-            task_type = (
-                "classification"
-                if random.random() < classification_probability
-                else "regression"
-            )
-            if task_type == "classification" and classification_pools:
-                pool_index, task_pool = random.choice(classification_pools)
-            elif task_type == "regression" and regression_pools:
-                pool_index, task_pool = random.choice(regression_pools)
-            else:
-                task_type = "regression" if regression_pools else "classification"
-                available_pools = (
-                    regression_pools if regression_pools else classification_pools
+                concrete_strategy = (
+                    "retrieval" if optimizer_steps % 2 == 0 else "episodic"
                 )
-                pool_index, task_pool = random.choice(available_pools)
-            if not task_pool:
+            task_type = planned_tasks[optimizer_steps]
+            available_pools = (
+                classification_pools
+                if task_type == "classification"
+                else regression_pools
+            )
+            if not available_pools:
                 skipped_steps += 1
                 continue
+            pool_index, task_pool = random.choice(available_pools)
 
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type="cuda", enabled=use_amp):
@@ -526,14 +651,30 @@ def train(
                 step_metrics["optimization/nonfinite_loss"] = 1.0
                 step_metrics["optimization/step_applied"] = 0.0
             else:
-                finite_loss_steps += 1
+                diversity_weight =max (0.0 ,float (
+                (config .get ("moe_settings",{})or {}).get (
+                "expert_diversity_weight",0.0 )))
+                if diversity_weight >0.0 :
+                    diversity_loss =expert_adapter_diversity_loss (model )
+                    loss =loss +diversity_weight *diversity_loss
+                    step_metrics ["loss/expert_diversity_raw"]=diversity_loss
+                    step_metrics ["loss/expert_diversity_weighted"]=(
+                    diversity_weight *diversity_loss )
                 if diagnostics.should_record_loss_gradients(step):
                     step_metrics.update(loss_gradient_metrics(model, step_metrics))
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 if sampled_step:
                     step_metrics.update(gradient_metrics(model))
-                if gradient_clip_norm > 0:
+                if gradient_clip_mode == "adaptive":
+                    preclip_norm, clip_fraction = adaptive_clip_grad_(
+                        model.parameters(),
+                        factor=config.get("adaptive_gradient_clip_factor", 0.02),
+                        epsilon=config.get("adaptive_gradient_clip_epsilon", 1e-3),
+                    )
+                    step_metrics["optimization/gradient_total_preclip"] = preclip_norm
+                    step_metrics["optimization/gradient_clip_fraction"] = clip_fraction
+                elif gradient_clip_norm > 0:
                     preclip_norm = torch.nn.utils.clip_grad_norm_(
                         model.parameters(), gradient_clip_norm
                     )
@@ -545,18 +686,25 @@ def train(
                 scaler.step(optimizer)
                 scaler.update()
                 scale_after = scaler.get_scale()
+                applied = scale_after >= scale_before
                 step_metrics["optimization/amp_scale"] = scale_after
-                step_metrics["optimization/amp_overflow"] = float(
-                    scale_after < scale_before
-                )
-                step_metrics["optimization/step_applied"] = float(
-                    scale_after >= scale_before
-                )
-                total_loss += float(loss.detach().cpu())
-                if scale_after >= scale_before:
+                step_metrics["optimization/amp_overflow"] = float(not applied)
+                step_metrics["optimization/step_applied"] = float(applied)
+                if applied:
+                    finite_loss_steps += 1
+                    total_loss += float(loss.detach().cpu())
                     optimizer_steps += 1
                     task_counts[task_type] += 1
                     expert_counts[expert_index] += 1
+                    log_set_counts [selected_task_set ["name"]]+=1
+                    if concrete_strategy =="retrieval":
+                        examples_processed +=min (
+                        int (config .get ("retrieval_train_batch_size",64 )),
+                        len (task_pool ),
+                        )
+                    else :
+                        examples_processed +=int (config .get ("num_queries",0 ))
+                    progress_bar.update(1)
                 else:
                     amp_overflow_steps += 1
                 step_metrics["loss/total"] = loss
@@ -574,18 +722,21 @@ def train(
             postfix = {
                 "loss": f"{loss.item():.4f}" if loss is not None else "N/A",
                 "task": progress_task,
+                "attempts": attempt,
             }
             if model.num_experts > 1:
                 postfix["expert"] = expert_index
             progress_bar.set_postfix(postfix)
+        progress_bar.close()
 
         average_loss = total_loss / max(finite_loss_steps, 1)
-        legacy_average_loss = total_loss / max(config["episodes_per_epoch"], 1)
+        legacy_average_loss = total_loss / max(attempt, 1)
         current_lr = optimizer.param_groups[0]["lr"]
+        epoch_elapsed_seconds =max (time .monotonic ()-epoch_started_at ,1e-9 )
         message = (
             f"\nEpoch {epoch + 1} finished. Average Loss: {average_loss:.4f} "
-            f"({optimizer_steps}/{config['episodes_per_epoch']} optimizer steps; "
-            f"{finite_loss_steps} finite losses)"
+            f"({optimizer_steps}/{target_optimizer_steps} optimizer steps "
+            f"from {attempt} attempts)"
         )
         if proto_group_index is not None:
             message += (
@@ -618,15 +769,28 @@ def train(
             "skipped_steps": skipped_steps,
             "nonfinite_steps": nonfinite_steps,
             "step_success_fraction": optimizer_steps
-            / max(config["episodes_per_epoch"], 1),
+            / max(attempt, 1),
             "average_loss_successful_steps": average_loss,
             "legacy_average_loss_scheduled_steps": legacy_average_loss,
+            "epoch_elapsed_seconds":epoch_elapsed_seconds ,
+            "optimizer_steps_per_second":optimizer_steps /epoch_elapsed_seconds ,
+            "examples_processed":examples_processed ,
+            "examples_per_second":examples_processed /epoch_elapsed_seconds ,
+            "gpu_peak_memory_bytes":(
+            torch .cuda .max_memory_allocated ()
+            if torch .cuda .is_available ()else 0
+            ),
+            "gpu_utilization_percent":gpu_utilization_percent (),
             **{
                 f"task/{task}/steps": count for task, count in task_counts.items()
             },
             **{
                 f"expert/{index}/steps": count
                 for index, count in expert_counts.items()
+            },
+            **{
+                f"log_set/{name}/steps":count
+                for name ,count in log_set_counts .items ()
             },
         }
         schedule = {
@@ -650,6 +814,25 @@ def train(
                 for group, index in special_group_indices.items()
             },
         }
+        with open(
+            os.path.join(checkpoint_dir, "training_metrics.jsonl"),
+            "a",
+            encoding="utf-8",
+        ) as metrics_handle:
+            metrics_handle.write(
+                json.dumps(
+                    {
+                        "epoch": epoch_number,
+                        "active_training_log_sets": [
+                            task_set["name"] for task_set in active_task_sets
+                        ],
+                        "epoch_metrics": scalar_metrics(epoch_metrics),
+                        "schedule": scalar_metrics(schedule),
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
         diagnostics.finish_epoch(
             epoch + 1,
             validation,
@@ -658,7 +841,7 @@ def train(
             update_metrics,
             schedule,
             context={
-                "training_log_set": selected_task_set["name"],
+                "training_log_set": "weighted_mixture",
                 "active_training_log_sets": [
                     task_set["name"] for task_set in active_task_sets
                 ],
@@ -680,6 +863,21 @@ def train(
             checkpoint_dir, f"model_epoch_{epoch + 1}.pth"
         )
         torch.save(model.state_dict(), checkpoint_path)
+        training_state_path = os.path.join(
+            checkpoint_dir, f"training_state_epoch_{epoch + 1}.pth"
+        )
+        torch.save(
+            build_training_state(
+                epoch + 1,
+                model,
+                optimizer,
+                scheduler,
+                scaler,
+                log_set_rng,
+                run_config_snapshot,
+            ),
+            training_state_path,
+        )
         print(f"💾 Model checkpoint saved to {checkpoint_path}")
         last_saved_epoch = epoch + 1
         if stop_after_epoch is not None and epoch + 1 == stop_after_epoch:
@@ -695,10 +893,17 @@ def train(
         file_to_keep = f"model_epoch_{last_saved_epoch}.pth"
         print(f"  - Keeping final checkpoint: {file_to_keep}")
         checkpoint_pattern = re.compile(r"^model_epoch_(\d+)\.pth$")
+        state_pattern = re.compile(r"^training_state_epoch_(\d+)\.pth$")
         try:
             removed_count = 0
             for filename in os.listdir(checkpoint_dir):
-                if checkpoint_pattern.match(filename) and filename != file_to_keep:
+                checkpoint_match = checkpoint_pattern.match(filename)
+                state_match = state_pattern.match(filename)
+                keep_state = f"training_state_epoch_{last_saved_epoch}.pth"
+                if (
+                    (checkpoint_match and filename != file_to_keep)
+                    or (state_match and filename != keep_state)
+                ):
                     os.remove(os.path.join(checkpoint_dir, filename))
                     removed_count += 1
             if removed_count > 0:

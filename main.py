@@ -6,14 +6,37 @@ import shutil
 import re
 import random
 from config import CONFIG
-from config_utils import apply_experiment_config, save_yaml_config
-from utils .data_utils import get_task_data
-from utils .model_utils import init_loader ,create_model ,load_state_dict_compatible
+from config_utils import (
+apply_experiment_config ,save_yaml_config ,validate_exact_resume_config ,
+validate_run_configuration ,
+)
+from utils .data_utils import get_classification_and_regression_tasks
+from utils .model_utils import init_loader ,create_model ,load_state_dict_compatible, extract_model_state_dict
 from utils .parameter_utils import configure_trainable_scope
 from training import train
 from training_debug import save_validation_manifest, split_training_tasks_by_case
 from metric_objectives import resolve_classification_objective, resolve_regression_metric_weights
-from training_log_sets import combined_training_log_paths, resolve_training_log_sets
+from training_log_sets import (
+combined_training_log_paths ,resolve_training_log_sets ,
+validate_training_evaluation_disjointness ,
+)
+
+
+def _clear_training_outputs(checkpoint_dir):
+    """Start a fresh optimizer trajectory without retaining stale states."""
+    for filename in os .listdir (checkpoint_dir ):
+        file_path =os .path .join (checkpoint_dir ,filename )
+        try :
+            if os .path .isfile (file_path )or os .path .islink (file_path ):
+                os .unlink (file_path )
+            elif os .path .isdir (file_path ):
+                shutil .rmtree (file_path )
+        except Exception as error :
+            raise RuntimeError (
+            f"Failed to clear prior training output {file_path }: {error }"
+            )from error
+
+
 def main ():
     pre_parser =argparse .ArgumentParser (add_help =False )
     pre_parser .add_argument ('--config',type =str ,default =None )
@@ -26,6 +49,7 @@ def main ():
     parser .add_argument ('--config',type =str ,default =pre_args .config ,help ="YAML experiment config (supports an extends key).")
     parser .add_argument ('--set',dest ='config_overrides',action ='append',default =pre_args .config_overrides ,help ="Override a config value with dotted.path=value.")
     parser .add_argument ('--resume',action ='store_true',help ="Resume training from the latest checkpoint in --checkpoint_dir.")
+    parser .add_argument ('--initialize_from',type =str ,default =None ,help ="Initialize model weights from a checkpoint while resetting optimizer/scheduler state.")
     parser .add_argument ('--stop_after_epoch',type =int ,default =None ,help ="Stop training after this specific epoch number completes (e.g., 1).")
     parser .add_argument ('--cleanup_checkpoints',action ='store_true',help ="Remove all intermediate checkpoints after training, keeping only the last one.")
     parser .add_argument ('--embedding_strategy',type =str ,default =default_config ['embedding_strategy'],choices =['learned','pretrained'],help =f"Embedding strategy to use. (default: {default_config ['embedding_strategy']})")
@@ -57,7 +81,25 @@ def main ():
     CONFIG ['retrieval_train_k']=args .retrieval_train_k
     CONFIG ['num_shots_range']=tuple (args .num_shots_range )
     CONFIG ['num_queries']=args .num_queries
+    if args .resume and args .initialize_from :
+        parser .error ('--resume and --initialize_from are mutually exclusive')
+    if args .resume :
+        CONFIG ['run_mode']='resume'
+    elif args .initialize_from :
+        CONFIG ['run_mode']='initialize'
+        CONFIG ['initialize_from_checkpoint']=args .initialize_from
+    run_mode =validate_run_configuration (CONFIG )
+    if run_mode =='assemble':
+        validate_run_configuration (CONFIG ,check_checkpoint_paths =True )
+        from merge_task_isolated_checkpoints import assemble_from_config
+        output ,classification_keys ,regression_keys =assemble_from_config (CONFIG )
+        print (
+        f"Assembled {output} from {len (classification_keys)} classification and "
+        f"{len (regression_keys)} regression tensors."
+        )
+        return
     training_log_sets =resolve_training_log_sets (CONFIG )
+    validate_training_evaluation_disjointness (CONFIG ,training_log_sets )
     print ("--- 🚀 Initializing Training Run with Configuration ---")
     print (f"  - Embedding Strategy: {CONFIG ['embedding_strategy']}")
     print (f"  - Num Experts (MoE): {CONFIG ['moe_settings']['num_experts']}")
@@ -73,7 +115,7 @@ def main ():
         f"epochs [{log_set ['start_epoch']}, {log_set ['end_epoch']}]"
         )
     print (f"  - Checkpoint Directory: {args .checkpoint_dir }")
-    print (f"  - Resume Training: {args .resume }")
+    print (f"  - Run Mode: {run_mode }")
     if args .stop_after_epoch :
         print (f"  - Stop After Epoch: {args .stop_after_epoch }")
     print (f"  - Cleanup Checkpoints: {args .cleanup_checkpoints }")
@@ -95,48 +137,48 @@ def main ():
     config_path =os .path .join (checkpoint_dir ,'training_config.pth')
     start_epoch =0
     latest_checkpoint_path =None
-    if args .resume :
+    resume_state =None
+    initialized_model_state =None
+    if run_mode =='resume':
         print (f"--- 🔄 Resuming training from {checkpoint_dir } ---")
-        checkpoints =[f for f in os .listdir (checkpoint_dir )if f .startswith ('model_epoch_')and f .endswith ('.pth')]
-        if checkpoints :
-            latest_checkpoint =sorted (checkpoints ,key =lambda f :int (re .search (r'(\d+)',f ).group (1 )))[-1 ]
-            latest_epoch_num =int (re .search (r'(\d+)',latest_checkpoint ).group (1 ))
-            start_epoch =latest_epoch_num
-            latest_checkpoint_path =os .path .join (checkpoint_dir ,latest_checkpoint )
-            print (f"Found latest checkpoint: {latest_checkpoint }. Resuming from epoch {start_epoch +1 }.")
-        else :
-            print ("No checkpoints found. Starting from epoch 1.")
-        if os .path .exists (config_path ):
-            print (f"Loading saved config from {config_path } for resume...")
-            saved_config =torch .load (config_path )
-            CONFIG ['moe_settings']=saved_config ['moe_settings']
-            CONFIG ['embedding_strategy']=saved_config ['embedding_strategy']
-            CONFIG ['d_model']=saved_config ['d_model']
-            CONFIG ['n_heads']=saved_config ['n_heads']
-            CONFIG ['n_layers']=saved_config ['n_layers']
-            CONFIG ['dropout']=saved_config ['dropout']
-            CONFIG ['pretrained_settings']=saved_config .get ('pretrained_settings',CONFIG ['pretrained_settings'])
-            CONFIG ['learned_settings']=saved_config .get ('learned_settings',CONFIG ['learned_settings'])
-        else :
-            print ("No saved config found for resume, using current.")
+        checkpoints =[f for f in os .listdir (checkpoint_dir )if f .startswith ('training_state_epoch_')and f .endswith ('.pth')]
+        if not checkpoints :
+            raise FileNotFoundError (
+            "Exact resume requires training_state_epoch_N.pth. "
+            "Use --initialize_from for a weights-only checkpoint."
+            )
+        latest_checkpoint =sorted (checkpoints ,key =lambda f :int (re .search (r'(\d+)',f ).group (1 )))[-1 ]
+        resume_state =torch .load (
+        os .path .join (checkpoint_dir ,latest_checkpoint ),
+        map_location ='cpu',weights_only =False )
+        validate_exact_resume_config (CONFIG ,resume_state ['config'])
+        start_epoch =int (resume_state ['epoch'])
+        print (f"Found exact training state: {latest_checkpoint }. Resuming from epoch {start_epoch +1 }.")
+        if not os .path .exists (artifacts_path ):
+            raise FileNotFoundError (
+            f"Exact resume requires the original loader artifacts: {artifacts_path }"
+            )
+    elif run_mode =='initialize':
+        latest_checkpoint_path =os .fspath (CONFIG ['initialize_from_checkpoint'])
+        if not os .path .isfile (latest_checkpoint_path ):
+            raise FileNotFoundError (
+            f"Initialization checkpoint not found: {latest_checkpoint_path }"
+            )
+        print (f"--- Initializing weights from {latest_checkpoint_path } ---")
+        payload =torch .load (
+        latest_checkpoint_path ,map_location ='cpu',weights_only =False )
+        initialized_model_state =extract_model_state_dict (payload )
+        _clear_training_outputs (checkpoint_dir )
     else :
         print (f"--- 🗑️ Starting new training run. Clearing {checkpoint_dir } ---")
-        for filename in os .listdir (checkpoint_dir ):
-            file_path =os .path .join (checkpoint_dir ,filename )
-            try :
-                if os .path .isfile (file_path )or os .path .islink (file_path ):
-                    os .unlink (file_path )
-                elif os .path .isdir (file_path ):
-                    shutil .rmtree (file_path )
-            except Exception as e :
-                print (f'Failed to delete {file_path }. Reason: {e }')
+        _clear_training_outputs (checkpoint_dir )
     print ("Saving config...")
     torch .save (CONFIG ,config_path )
     save_yaml_config (CONFIG ,os .path .join (checkpoint_dir ,'training_config.yaml'))
     print ("--- Phase 1: Preparing Training Data ---")
     loader =init_loader (CONFIG )
     all_training_log_paths =combined_training_log_paths (training_log_sets )
-    if args .resume and os .path .exists (artifacts_path ):
+    if run_mode =='resume'and os .path .exists (artifacts_path ):
         print (f"Loading existing artifacts from {artifacts_path }...")
         loader .load_training_artifacts (artifacts_path )
     else :
@@ -152,9 +194,13 @@ def main ():
     for set_index ,log_set in enumerate (training_log_sets ):
         print (f"Preparing training log set '{log_set ['name']}'...")
         transformed_logs =loader .transform (log_set ['log_paths'])
+        joint_tasks =[
+        get_classification_and_regression_tasks (log ,config =CONFIG )
+        for log in transformed_logs .values ()
+        ]
         set_tasks ={
-        'classification':[get_task_data (log ,'classification')for log in transformed_logs .values ()],
-        'regression':[get_task_data (log ,'regression')for log in transformed_logs .values ()]
+        'classification':[tasks [0 ]for tasks in joint_tasks ],
+        'regression':[tasks [1 ]for tasks in joint_tasks ],
         }
         set_validation_tasks =None
         if diagnostics_enabled :
@@ -175,6 +221,7 @@ def main ():
         'name':log_set ['name'],
         'start_epoch':log_set ['start_epoch'],
         'end_epoch':log_set ['end_epoch'],
+        'weight_schedule':log_set .get ('weight_schedule'),
         'tasks':set_tasks ,
         }
         training_tasks .append (task_set )
@@ -191,9 +238,12 @@ def main ():
             )
     print ("\n--- Phase 3: Initializing Model ---")
     model =create_model (CONFIG ,loader ,device )
-    if latest_checkpoint_path :
+    if resume_state is not None :
+        print (f"Loading exact model state from epoch {start_epoch }...")
+        load_state_dict_compatible (model ,resume_state ['model'])
+    elif initialized_model_state is not None :
         print (f"Loading model weights from {latest_checkpoint_path }...")
-        load_state_dict_compatible (model ,torch .load (latest_checkpoint_path ,map_location =device ))
+        load_state_dict_compatible (model ,initialized_model_state )
     trainable_scope =str (CONFIG .get ('trainable_scope','all')).lower ()
     trainable_parameters =configure_trainable_scope (model ,trainable_scope )
     if trainable_scope in {
@@ -218,6 +268,7 @@ def main ():
     stop_after_epoch =args .stop_after_epoch ,
     cleanup_checkpoints =args .cleanup_checkpoints ,
     validation_tasks =validation_tasks ,
+    resume_state =resume_state ,
     )
     print ("\n✅ Training complete. Run 'testing.py' to evaluate.")
 if __name__ =='__main__':

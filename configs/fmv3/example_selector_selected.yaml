@@ -4,6 +4,14 @@
 # remain byte-identical to that endpoint.
 extends: loss_refinement_selected.yaml
 experiment_name: example_selector_selected
+run_mode: assemble
+training_enabled: false
+assembly:
+  base_checkpoint: checkpoints/fmv3/loss_refinement_selected/model_epoch_43.pth
+  classification_checkpoint: checkpoints/fmv3/example_selector_classification/model_epoch_44.pth
+  regression_checkpoint: checkpoints/fmv3/example_selector_regression/model_epoch_44.pth
+  output_checkpoint: checkpoints/fmv3/example_selector_selected/model_epoch_44.pth
+  artifacts: checkpoints/fmv3/loss_refinement_selected/training_artifacts.pth
 selected_checkpoint_epoch: 44
 epochs: 44
 fmv3_head:

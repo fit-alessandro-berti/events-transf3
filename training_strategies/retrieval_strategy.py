@@ -14,6 +14,7 @@ from training_debug import (
     tensor_distribution,
 )
 from utils.retrieval_utils import find_knn_indices
+from utils.data_utils import sample_task_batch
 
 
 def _step_result(loss, task, diagnostics, return_diagnostics):
@@ -36,7 +37,8 @@ def _autocast_disabled_for(device: torch.device):
 
 
 def _sample_balanced_classification_batch(
-    task_pool, batch_size, min_per_class=2, max_classes=None
+    task_pool, batch_size, min_per_class=2, max_classes=None,
+    case_uniform_fraction=0.5,
 ):
     """
     Ensure selected classes appear at least min_per_class times, ideally across cases.
@@ -59,7 +61,9 @@ def _sample_balanced_classification_batch(
         eligible.append(label)
 
     if not eligible:
-        return random.sample(task_pool, batch_size)
+        return sample_task_batch(
+            task_pool, batch_size, case_uniform_fraction=case_uniform_fraction
+        )
 
     num_classes = min(len(eligible), max(1, batch_size // min_per_class))
     if max_classes is not None:
@@ -79,7 +83,8 @@ def _sample_balanced_classification_batch(
             batch.append(random.choice(by_case[case_id]))
 
         while sum(1 for item in batch if item[1] == label) < min_per_class:
-            batch.append(random.choice(items))
+            case_id = random.choice(cases)
+            batch.append(random.choice(by_case[case_id]))
 
     if chosen_labels:
         label_cycle = chosen_labels[:]
@@ -87,7 +92,12 @@ def _sample_balanced_classification_batch(
         cycle_idx = 0
         while len(batch) < batch_size:
             lbl = label_cycle[cycle_idx % len(label_cycle)]
-            batch.append(random.choice(by_label[lbl]))
+            items = by_label[lbl]
+            label_cases = list({item[2] for item in items})
+            selected_case = random.choice(label_cases)
+            batch.append(random.choice([
+                item for item in items if item[2] == selected_case
+            ]))
             cycle_idx += 1
 
     return batch[:batch_size]
@@ -124,9 +134,18 @@ def _sample_classification_batch(task_pool, batch_size, episode_type, config):
             batch_size,
             min_per_class=int(config.get("retrieval_min_per_class", 2)),
             max_classes=config.get("retrieval_train_max_classes"),
+            case_uniform_fraction=float(
+                config.get("case_uniform_sampling_fraction", 0.5)
+            ),
         )
     if episode_type == "natural":
-        return random.sample(valid, batch_size)
+        return sample_task_batch(
+            valid,
+            batch_size,
+            case_uniform_fraction=float(
+                config.get("case_uniform_sampling_fraction", 0.5)
+            ),
+        )
 
     by_label = defaultdict(list)
     for item in valid:
@@ -147,7 +166,15 @@ def _sample_classification_batch(task_pool, batch_size, episode_type, config):
         else:
             weights = np.asarray([len(by_label[label]) ** (-power) for label in labels], dtype=float)
         weights /= weights.sum()
-        return [random.choice(by_label[int(np.random.choice(labels, p=weights))]) for _ in range(batch_size)]
+        sampled = []
+        for _ in range(batch_size):
+            label = int(np.random.choice(labels, p=weights))
+            items = by_label[label]
+            selected_case = random.choice(list({item[2] for item in items}))
+            sampled.append(random.choice([
+                item for item in items if item[2] == selected_case
+            ]))
+        return sampled
     if episode_type == "random_shot":
         random.shuffle(labels)
         low = max(1, int(train_cfg.get("random_shot_min", 1)))
@@ -375,8 +402,11 @@ def run_retrieval_step(
         "data/episode_valid": 0.0,
         "data/pool_prefixes": float(len(task_data_pool)),
     }
-    retrieval_k_train = int(config.get("retrieval_train_k", 5))
-    retrieval_batch_size = int(config.get("retrieval_train_batch_size", 64))
+    configured_k = int(config.get("retrieval_train_k", 5))
+    configured_batch_size = int(config.get("retrieval_train_batch_size", 64))
+    minimum_batch_size = max(2, int(config.get("retrieval_min_batch_size", 16)))
+    retrieval_batch_size = min(configured_batch_size, len(task_data_pool))
+    retrieval_k_train = min(configured_k, max(retrieval_batch_size - 1, 1))
     head_cfg = config.get("fmv3_head", {})
     cls_confidence_w = float(
         head_cfg.get(
@@ -394,7 +424,7 @@ def run_retrieval_step(
         head_cfg.get("expert_routing_confidence_loss_weight", 0.0)
     )
 
-    if len(task_data_pool) < retrieval_batch_size:
+    if retrieval_batch_size < minimum_batch_size:
         return _step_result(
             None, progress_bar_task, diagnostics_out, return_diagnostics
         )
@@ -414,7 +444,13 @@ def run_retrieval_step(
             )
         progress_bar_task = f"{progress_bar_task}_{episode_type}"
     else:
-        batch_tasks_raw = random.sample(task_data_pool, retrieval_batch_size)
+        batch_tasks_raw = sample_task_batch(
+            task_data_pool,
+            retrieval_batch_size,
+            case_uniform_fraction=float(
+                config.get("case_uniform_sampling_fraction", 0.5)
+            ),
+        )
 
     batch_prefixes = [t[0] for t in batch_tasks_raw]
     batch_labels = np.array([t[1] for t in batch_tasks_raw])
@@ -674,10 +710,10 @@ def run_retrieval_step(
         classification_target_indices = []
         classification_class_id_rows = []
         classification_confidence_losses = []
+        classification_groups = defaultdict(list)
         for i in range(retrieval_batch_size):
             query_label = batch_labels[i]
             query_case_id = batch_case_ids[i]
-            query_embedding = all_embeddings[i : i + 1]
 
             with torch.no_grad():
                 query_embedding_norm = all_embeddings_norm_detached[i : i + 1]
@@ -688,10 +724,8 @@ def run_retrieval_step(
                 eligible = batch_case_ids != query_case_id
                 if episode_type == "missing_pool_label":
                     eligible &= batch_labels != query_label
-                pool_indices_np = np.where(eligible)[0]
-                if pool_indices_np.size == 0:
+                if not eligible.any():
                     continue
-                pool_indices = torch.from_numpy(pool_indices_np).to(device)
 
                 local_eligible = eligible.copy()
                 if episode_type == "missing_local_label":
@@ -731,16 +765,39 @@ def run_retrieval_step(
 
             if support_indices.numel() == 0:
                 continue
-            support_embeddings = all_embeddings[support_indices]
-            support_labels_tensor = labels_t[support_indices]
-            global_embeddings = all_embeddings[pool_indices]
-            global_labels = labels_t[pool_indices]
-            classification_result = model.proto_head.forward_classification(
-                support_embeddings,
-                support_labels_tensor,
-                query_embedding,
-                global_support_features=global_embeddings,
-                global_support_labels=global_labels,
+            target_label = (
+                int(config.get("fmv3_head", {}).get("abstain_label", -101))
+                if episode_type == "missing_pool_label"
+                else int(query_label)
+            )
+            classification_groups[int(support_indices.numel())].append(
+                (i, support_indices, eligible, target_label)
+            )
+
+        smoothing = min(
+            max(float(config.get("classification_label_smoothing", 0.05)), 0.0),
+            1.0,
+        )
+        for _, group in classification_groups.items():
+            query_ids = torch.as_tensor(
+                [item[0] for item in group], dtype=torch.long, device=device
+            )
+            local_indices = torch.stack([item[1] for item in group])
+            global_mask = torch.as_tensor(
+                np.stack([item[2] for item in group]),
+                dtype=torch.bool,
+                device=device,
+            )
+            targets = torch.as_tensor(
+                [item[3] for item in group], dtype=torch.long, device=device
+            )
+            classification_result = model.proto_head.forward_classification_batched(
+                all_embeddings[local_indices],
+                labels_t[local_indices],
+                all_embeddings[query_ids],
+                global_support_features=all_embeddings,
+                global_support_labels=labels_t,
+                global_support_mask=global_mask,
                 return_diagnostics=return_diagnostics,
             )
             if return_diagnostics:
@@ -752,42 +809,38 @@ def run_retrieval_step(
                 head_diagnostics = None
             if logits is None:
                 continue
-
-            label_map = {orig.item(): new for new, orig in enumerate(proto_classes)}
-            target_label = (
-                int(config.get("fmv3_head", {}).get("abstain_label", -101))
-                if episode_type == "missing_pool_label"
-                else int(query_label)
-            )
-            mapped_label = torch.tensor(
-                [label_map.get(target_label, -100)], device=device, dtype=torch.long
-            )
-            if mapped_label.item() == -100:
+            matches = targets.unsqueeze(1).eq(proto_classes.unsqueeze(0))
+            valid = matches.any(dim=1)
+            if not valid.any():
                 continue
+            mapped_labels = matches.long().argmax(dim=1)[valid]
+            selected_logits = logits[valid]
+            selected_probabilities = probabilities[valid]
 
             routing_correctness.append(
-                (probabilities.argmax(dim=-1) == mapped_label).float().mean().detach()
+                (
+                    selected_probabilities.argmax(dim=-1) == mapped_labels
+                ).float().mean().detach()
             )
-
-            smoothing = min(
-                max(float(config.get("classification_label_smoothing", 0.05)), 0.0),
-                1.0,
+            classification_logits_rows.extend(selected_logits.unbind(dim=0))
+            classification_target_indices.extend(mapped_labels.unbind(dim=0))
+            classification_class_id_rows.extend(
+                [proto_classes] * int(valid.sum().item())
             )
-            classification_logits_rows.append(logits.reshape(-1))
-            classification_target_indices.append(mapped_label.reshape(-1)[0])
-            classification_class_id_rows.append(proto_classes)
             if cls_confidence_w > 0:
-                confidence_query_loss = (
+                classification_confidence_losses.append(
                     model.proto_head.classification_expert_confidence_loss(
-                        probabilities, mapped_label
+                        selected_probabilities, mapped_labels
                     )
                 )
-                classification_confidence_losses.append(confidence_query_loss)
 
             if return_diagnostics:
                 classification_head_rows.append(
                     classification_head_metrics(
-                        logits, mapped_label, probabilities, head_diagnostics
+                        selected_logits,
+                        mapped_labels,
+                        selected_probabilities,
+                        head_diagnostics,
                     )
                 )
 

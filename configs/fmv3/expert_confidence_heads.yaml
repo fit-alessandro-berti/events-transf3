@@ -1,5 +1,7 @@
 extends: selected.yaml
 experiment_name: expert_confidence_heads
+run_mode: initialize
+initialize_from_checkpoint: checkpoints/fmv3/loss_multimetric_gate_aux_005/model_epoch_38.pth
 epochs: 40
 trainable_scope: expert_confidence
 fmv3_head:

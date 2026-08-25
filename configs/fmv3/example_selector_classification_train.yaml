@@ -3,6 +3,9 @@
 # frozen; only the bounded classification support-trust MLP is optimized.
 extends: loss_refinement_selected.yaml
 experiment_name: example_selector_classification
+run_mode: initialize
+training_enabled: true
+initialize_from_checkpoint: checkpoints/fmv3/loss_refinement_selected/model_epoch_43.pth
 epochs: 44
 episodes_per_epoch: 300
 lr: 0.002

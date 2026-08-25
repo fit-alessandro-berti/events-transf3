@@ -133,7 +133,9 @@ def classification_metrics(
     }
 
 
-def regression_metrics(y_true, y_pred, lower=None, upper=None):
+def regression_metrics(
+    y_true, y_pred, lower=None, upper=None, process_duration_hours=None
+):
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     errors = np.abs(y_true - y_pred)
@@ -146,6 +148,9 @@ def regression_metrics(y_true, y_pred, lower=None, upper=None):
         "n_queries": int(len(y_true)),
         "mae_hours": mae,
         "rmse_hours": rmse,
+        "log_mae": float(
+            np.abs(np.log1p(np.clip(y_true, 0.0, None)) - np.log1p(np.clip(y_pred, 0.0, None))).mean()
+        ),
         "median_absolute_error_hours": float(np.median(errors)),
         "normalized_mae": mae / max(float(np.mean(np.abs(y_true))), 1e-12),
         "mae_skill_vs_median": 1.0 - mae / max(baseline_mae, 1e-12),
@@ -153,10 +158,76 @@ def regression_metrics(y_true, y_pred, lower=None, upper=None):
         "d2_absolute_error": 1.0 - float(errors.sum()) / max(float(np.abs(y_true - np.median(y_true)).sum()), 1e-12),
         "r2": float(r2_score(y_true, y_pred)) if len(y_true) > 1 else None,
     }
+    duration_scale = (
+        y_true
+        if process_duration_hours is None
+        else np.asarray(process_duration_hours, dtype=float)
+    )
+    if duration_scale.shape != y_true.shape:
+        raise ValueError("process_duration_hours must align with regression targets")
+    duration_bins = {
+        "<1h": duration_scale < 1.0,
+        "1-24h": (duration_scale >= 1.0) & (duration_scale < 24.0),
+        "1-7d": (duration_scale >= 24.0) & (duration_scale < 168.0),
+        ">=7d": duration_scale >= 168.0,
+    }
+    result["duration_scale_basis"] = (
+        "remaining_time" if process_duration_hours is None else "full_case_duration"
+    )
+    result["duration_scale_metrics"] = {
+        name: {
+            "n": int(mask.sum()),
+            "mae_hours": float(np.abs(y_true[mask] - y_pred[mask]).mean()),
+            "rmse_hours": float(
+                np.sqrt(np.mean((y_true[mask] - y_pred[mask]) ** 2))
+            ),
+        }
+        for name, mask in duration_bins.items()
+        if mask.any()
+    }
     if lower is not None and upper is not None:
         lower, upper = np.asarray(lower), np.asarray(upper)
         result["interval_coverage"] = float(((y_true >= lower) & (y_true <= upper)).mean())
         result["mean_interval_width_hours"] = float(np.mean(upper - lower))
+    return result
+
+
+def prefix_length_metrics(task, prefix_lengths, y_true, y_pred):
+    """Report the protocol's explicit early/mid/long-prefix strata."""
+    lengths = np.asarray(prefix_lengths, dtype=int)
+    truth = np.asarray(y_true)
+    prediction = np.asarray(y_pred)
+    bins = {
+        "1": lengths == 1,
+        "2-3": (lengths >= 2) & (lengths <= 3),
+        "4-10": (lengths >= 4) & (lengths <= 10),
+        ">10": lengths > 10,
+    }
+    result = {}
+    for name, mask in bins.items():
+        if not mask.any():
+            continue
+        if task == "regression":
+            errors = truth[mask].astype(float) - prediction[mask].astype(float)
+            result[name] = {
+                "n": int(mask.sum()),
+                "mae_hours": float(np.abs(errors).mean()),
+                "rmse_hours": float(np.sqrt(np.mean(errors ** 2))),
+            }
+            continue
+        labels = np.unique(truth[mask])
+        f1_values = []
+        for label in labels:
+            true_positive = np.sum((truth[mask] == label) & (prediction[mask] == label))
+            false_positive = np.sum((truth[mask] != label) & (prediction[mask] == label))
+            false_negative = np.sum((truth[mask] == label) & (prediction[mask] != label))
+            denominator = 2 * true_positive + false_positive + false_negative
+            f1_values.append(0.0 if denominator == 0 else 2 * true_positive / denominator)
+        result[name] = {
+            "n": int(mask.sum()),
+            "accuracy": float((truth[mask] == prediction[mask]).mean()),
+            "macro_f1": float(np.mean(f1_values)),
+        }
     return result
 
 

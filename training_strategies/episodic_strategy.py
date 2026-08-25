@@ -59,18 +59,32 @@ def run_episodic_step(
             num_ways_range=(3, 10),
             shuffle_labels=should_shuffle_labels,
         )
-    elif len(task_data_pool) >= config["num_shots_range"][1] + config["num_queries"]:
-        random.shuffle(task_data_pool)
+    elif len(task_data_pool) >= config["num_shots_range"][0] + config["num_queries"]:
         num_shots = random.randint(
             config["num_shots_range"][0], config["num_shots_range"][1]
         )
-        support_set_raw = task_data_pool[:num_shots]
-        query_set_raw = task_data_pool[
-            num_shots : num_shots + config["num_queries"]
-        ]
-        support_set = [(item[0], item[1]) for item in support_set_raw]
-        query_set = [(item[0], item[1]) for item in query_set_raw]
-        episode = (support_set, query_set)
+        cases = sorted({str(item[2]) for item in task_data_pool})
+        if len(cases) >= 2:
+            random.shuffle(cases)
+            cut = min(max(1, len(cases) // 2), len(cases) - 1)
+            support_cases = set(cases[:cut])
+            support_candidates = [
+                item for item in task_data_pool if str(item[2]) in support_cases
+            ]
+            query_candidates = [
+                item for item in task_data_pool if str(item[2]) not in support_cases
+            ]
+            if (
+                len(support_candidates) >= num_shots
+                and len(query_candidates) >= config["num_queries"]
+            ):
+                support_set_raw = random.sample(support_candidates, num_shots)
+                query_set_raw = random.sample(
+                    query_candidates, config["num_queries"]
+                )
+                support_set = [(item[0], item[1]) for item in support_set_raw]
+                query_set = [(item[0], item[1]) for item in query_set_raw]
+                episode = (support_set, query_set)
     if episode is None or not episode[0] or not episode[1]:
         return _result(None, progress_bar_task, diagnostics_out, return_diagnostics)
 

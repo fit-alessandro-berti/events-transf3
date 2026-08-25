@@ -4,6 +4,8 @@ import pm4py
 import os
 import numpy as np
 import torch
+import hashlib
+import math
 from itertools import chain
 from sentence_transformers import SentenceTransformer
 from sklearn .metrics .pairwise import cosine_similarity
@@ -11,7 +13,9 @@ from scipy .optimize import linear_sum_assignment
 from config import CONFIG
 from training_log_sets import combined_training_log_paths, resolve_training_log_sets
 class XESLogLoader :
-    def __init__ (self ,strategy :str ,sbert_model_name :str ='all-MiniLM-L6-v2'):
+    def __init__ (self ,strategy :str ,sbert_model_name :str ='all-MiniLM-L6-v2',
+    max_string_length :int =64 ,max_generic_attributes :int =16 ,
+    attribute_hash_buckets :int =4096 ):
         self .strategy =strategy
         print (f"Data loader initialized with strategy: '{self .strategy }'")
         self .activity_to_id ={}
@@ -24,6 +28,9 @@ class XESLogLoader :
         self .UNK_TOKEN ='<UNK>'
         self .pad_id =0
         self .unk_id =1
+        self .max_string_length =max (1 ,int (max_string_length ))
+        self .max_generic_attributes =max (0 ,int (max_generic_attributes ))
+        self .attribute_hash_buckets =max (32 ,int (attribute_hash_buckets ))
         self .sbert_model =None
         if self .strategy =='pretrained':
             try :
@@ -84,7 +91,7 @@ class XESLogLoader :
         if not self .training_activity_names :raise RuntimeError ("Loader has not been fitted.")
         if not frames :return {}
         for frame in frames .values ():
-            if resource_key not in frame :frame [resource_key ]="Unknown"
+            if resource_key not in frame :frame [resource_key ]=None
         combined_df =pd .concat (frames .values (),keys =frames .keys (),names =['log_name','orig_index']).reset_index ()
         processed_logs ={}
         for name ,group_df in combined_df .groupby ('log_name'):
@@ -113,20 +120,42 @@ class XESLogLoader :
                 'time_from_previous':event ['time_from_previous'],
                 'timestamp':event ['timestamp'],'case_id':event ['case_id']
                 }
+                processed_event .update (self ._context_features (event ))
+                processed_event ['activity_char_ids']=self ._char_ids (event ['activity'])
+                processed_event ['resource_char_ids']=self ._char_ids (event ['resource'])
+                processed_event ['lifecycle_char_ids']=self ._char_ids (event ['lifecycle'])
                 processed_trace .append (processed_event )
             log_with_strings .append (processed_trace )
         return log_with_strings
     def _convert_df_to_raw_traces (self ,df ,case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key ):
         raw_log =[]
-        df [timestamp_key ]=pd .to_datetime (df [timestamp_key ],errors ='coerce').dt .tz_localize (None )
+        df [timestamp_key ]=pd .to_datetime (
+        df [timestamp_key ],errors ='coerce',utc =True
+        ).dt .tz_convert (None )
         df =df .dropna (subset =[timestamp_key ])
-        df [resource_key ]=df [resource_key ].fillna ('Unknown')
         if cost_key not in df :
-            df [cost_key ]=0.0
+            df [cost_key ]=np .nan
         # Sorting once and iterating over plain tuples is materially faster than
         # sorting every case and constructing a pandas Series for every event.
-        columns =[case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key ]
-        ordered =df .sort_values ([case_id_key ,timestamp_key ])[columns ]
+        lifecycle_key ='lifecycle:transition'
+        if lifecycle_key not in df :
+            df [lifecycle_key ]=None
+        ignored ={
+        case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key ,
+        lifecycle_key ,'log_name','orig_index','index'
+        }
+        attribute_columns =sorted (
+        column for column in df .columns
+        if column not in ignored and not str (column ).startswith ('_fmv3_')
+        )[:self .max_generic_attributes ]
+        stable_key ='orig_index'if 'orig_index'in df else '_fmv3_original_order'
+        if stable_key not in df :
+            df [stable_key]=np .arange (len (df ))
+        columns =[case_id_key ,activity_key ,timestamp_key ,resource_key ,cost_key ,
+        lifecycle_key ,stable_key ,*attribute_columns ]
+        ordered =df .sort_values (
+        [case_id_key ,timestamp_key ,stable_key ],kind ='mergesort'
+        )[columns ]
         for case_id ,trace_df in ordered .groupby (case_id_key ,sort =False ):
             if trace_df .empty :continue
             rows =trace_df .itertuples (index =False ,name =None )
@@ -135,12 +164,27 @@ class XESLogLoader :
             prev_time =start_time
             trace =[]
             for event in chain ((first ,),rows ):
-                _ ,activity ,current_time ,resource ,cost_val =event
+                _ ,activity ,current_time ,resource ,cost_val ,lifecycle ,_ =event [:7 ]
+                resource_missing =pd .isna (resource )
+                resource ='Unknown'if resource_missing else str (resource )
+                cost_missing =not isinstance (cost_val ,(int ,float ,np .number ))or pd .isna (cost_val )
                 if not isinstance (cost_val ,(int ,float ,np .number ))or pd .isna (cost_val ):
                     cost_val =0.0
+                lifecycle_missing =pd .isna (lifecycle )
+                lifecycle ='Unknown'if lifecycle_missing else str (lifecycle )
+                attributes =[self ._encode_attribute (lifecycle_key ,lifecycle )]+[
+                self ._encode_attribute (column ,value )
+                for column ,value in zip (attribute_columns ,event [7 :])
+                ]
                 event_dict ={
                 'case_id':case_id ,'activity':activity ,'timestamp':current_time .timestamp (),
                 'resource':resource ,'cost':cost_val ,
+                'resource_missing':float (resource_missing ),
+                'cost_missing':float (cost_missing ),
+                'lifecycle':lifecycle ,
+                'lifecycle_missing':float (lifecycle_missing ),
+                'calendar_features':self ._calendar_features (current_time ),
+                'generic_attributes':attributes ,
                 'time_from_start':(current_time -start_time ).total_seconds (),
                 'time_from_previous':(current_time -prev_time ).total_seconds (),
                 }
@@ -151,17 +195,11 @@ class XESLogLoader :
     def _transform_pretrained (self ,df ,raw_traces ,activity_key ,resource_key ):
         activity_embedding_map =self .activity_embedding_map .copy ()
         resource_embedding_map =self .resource_embedding_map .copy ()
-        current_activities =sorted (list (df [activity_key ].unique ()))
+        current_activities =sorted (list (df [activity_key ].dropna ().unique ()))
         resources_in_log =sorted (list (df [resource_key ].fillna ('Unknown').unique ()))
-        final_activity_id_map =self .activity_to_id .copy ()
-        unseen_activities_for_id_map =[name for name in current_activities if name not in self .activity_to_id ]
-        if unseen_activities_for_id_map :
-            unseen_id_embeddings =self .sbert_model .encode (unseen_activities_for_id_map ,normalize_embeddings =True )
-            similarity_matrix =cosine_similarity (unseen_id_embeddings ,self .training_activity_embeddings )
-            row_ind ,col_ind =linear_sum_assignment (1 -similarity_matrix )
-            for r ,c in zip (row_ind ,col_ind ):
-                final_activity_id_map [unseen_activities_for_id_map [r ]]=self .activity_to_id [
-                self .training_activity_names [c ]]
+        # Labels are always log-local. Semantic similarity is an input feature,
+        # never the identity of the target class.
+        final_activity_id_map ={name :index for index ,name in enumerate (current_activities )}
         unseen_activities_for_embed =[name for name in current_activities if name not in activity_embedding_map ]
         if unseen_activities_for_embed :
             print (f"  - Encoding {len (unseen_activities_for_embed )} new activity embeddings...")
@@ -187,8 +225,57 @@ class XESLogLoader :
                 'time_from_previous':event ['time_from_previous'],
                 'timestamp':event ['timestamp'],'case_id':event ['case_id']
                 })
+                processed_trace [-1 ].update (self ._context_features (event ))
             log_with_embeddings .append (processed_trace )
         return log_with_embeddings
+    def _char_ids (self ,value ):
+        unknown =self .char_to_id .get (self .UNK_TOKEN ,self .unk_id )
+        values =tuple (
+        self .char_to_id .get (char ,unknown )
+        for char in str (value )[:self .max_string_length ]
+        )
+        return values +(0 ,)*(self .max_string_length -len (values ))
+    def _hash_bucket (self ,value ):
+        digest =hashlib .blake2b (
+        str (value ).encode ('utf-8',errors ='replace'),digest_size =8
+        ).digest ()
+        return 1 +int .from_bytes (digest ,'little')%(self .attribute_hash_buckets -1 )
+    def _encode_attribute (self ,name ,value ):
+        try :
+            missing =bool (pd .isna (value ))
+        except (TypeError ,ValueError ):
+            value =str (value )
+            missing =False
+        if missing :
+            type_id ,value_id ,numeric =0 ,0 ,0.0
+        elif isinstance (value ,(bool ,np .bool_ )):
+            type_id ,value_id ,numeric =3 ,self ._hash_bucket (bool (value )),float (value )
+        elif isinstance (value ,(int ,float ,np .number )):
+            type_id ,value_id ,numeric =1 ,0 ,float (value )
+        else :
+            type_id ,value_id ,numeric =2 ,self ._hash_bucket (value ),0.0
+        return (self ._hash_bucket (name ),type_id ,value_id ,numeric ,float (missing ))
+    @staticmethod
+    def _calendar_features (timestamp ):
+        hour =timestamp .hour +timestamp .minute /60.0 +timestamp .second /3600.0
+        weekday =timestamp .weekday ()
+        return (
+        math .sin (2 *math .pi *hour /24.0 ),
+        math .cos (2 *math .pi *hour /24.0 ),
+        math .sin (2 *math .pi *weekday /7.0 ),
+        math .cos (2 *math .pi *weekday /7.0 ),
+        float (weekday >=5 ),
+        )
+    @staticmethod
+    def _context_features (event ):
+        return {
+        'resource_missing':event ['resource_missing'],
+        'cost_missing':event ['cost_missing'],
+        'lifecycle_name':event ['lifecycle'],
+        'lifecycle_missing':event ['lifecycle_missing'],
+        'calendar_features':event ['calendar_features'],
+        'generic_attributes':event ['generic_attributes'],
+        }
     def save_training_artifacts (self ,path ):
         artifacts ={'strategy':self .strategy ,'activity_to_id':self .activity_to_id ,
         'training_activity_names':self .training_activity_names }

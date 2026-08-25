@@ -270,7 +270,7 @@ class LearnedTimeTransformBank(nn.Module):
 class PrototypicalHead(nn.Module):
     """Classification and remaining-time heads with config-selected behavior."""
 
-    def __init__(self, init_logit_scale: float = 5.0, **config):
+    def __init__(self, init_logit_scale: float = 5.0, feature_dim=None, **config):
         super().__init__()
         self.config = dict(config)
         self.classification_mode = str(config.get("classification_mode", "legacy_soft_knn"))
@@ -365,6 +365,34 @@ class PrototypicalHead(nn.Module):
                 init_logit_scale=init_logit_scale,
                 **config,
             )
+        self.regression_residual_enabled = _as_bool(
+            config.get("regression_residual_enabled", False)
+        )
+        self.regression_residual_head = None
+        if self.regression_residual_enabled:
+            if feature_dim is None:
+                raise ValueError(
+                    "feature_dim is required when regression_residual_enabled is true"
+                )
+            residual_hidden = max(
+                int(config.get("regression_residual_hidden_dim", 128)), 8
+            )
+            self.regression_residual_head = nn.Sequential(
+                nn.LayerNorm(2 * int(feature_dim) + 8),
+                nn.Linear(2 * int(feature_dim) + 8, residual_hidden),
+                nn.GELU(),
+                nn.Linear(residual_hidden, 2),
+            )
+            nn.init.zeros_(self.regression_residual_head[-1].weight)
+            anchor_gate = min(
+                max(float(config.get("regression_residual_anchor_gate", 0.8)), 1e-4),
+                1.0 - 1e-4,
+            )
+            with torch.no_grad():
+                self.regression_residual_head[-1].bias[0] = 0.0
+                self.regression_residual_head[-1].bias[1] = math.log(
+                    anchor_gate / (1.0 - anchor_gate)
+                )
         (
             self.regression_objective_profile,
             regression_metric_weights,
@@ -730,6 +758,250 @@ class PrototypicalHead(nn.Module):
         ], dim=-1)
         gate = torch.sigmoid(self.gate_network(features).squeeze(-1))
         return torch.where(local_present.unsqueeze(0), gate, torch.zeros_like(gate))
+
+    def forward_classification_batched(
+        self,
+        local_support,
+        local_labels,
+        query_features,
+        *,
+        global_support_features,
+        global_support_labels,
+        global_support_mask=None,
+        candidate_classes=None,
+        return_diagnostics=False,
+    ):
+        """Vectorized classification for query-specific retrieval/pool masks."""
+        query = _l2_normalize(query_features)
+        pool = _l2_normalize(global_support_features)
+        local = _l2_normalize(local_support)
+        if local.ndim != 3 or local_labels.ndim != 2:
+            raise ValueError("Batched local support must be [query, support, ...]")
+        if global_support_mask is None:
+            global_support_mask = torch.ones(
+                query.size(0),
+                pool.size(0),
+                dtype=torch.bool,
+                device=query.device,
+            )
+        if candidate_classes is None:
+            classes = torch.unique(global_support_labels, sorted=True)
+        else:
+            classes = torch.unique(
+                candidate_classes.to(global_support_labels.device), sorted=True
+            )
+        classes = classes[classes != self.abstain_label]
+        if classes.numel() == 0:
+            empty = (None, None, None, {}) if return_diagnostics else (None, None, None)
+            return empty
+
+        local_class_mask = local_labels.unsqueeze(2).eq(classes.view(1, 1, -1))
+        local_counts = local_class_mask.sum(dim=1).float()
+        selector_local, selector_query = local, query
+        selected_mode = {
+            "soft_knn": "legacy_soft_knn",
+            "proto": "global",
+            "global_proto": "global",
+        }.get(self.classification_mode.lower(), self.classification_mode.lower())
+        if selected_mode == "legacy_soft_knn":
+            center = local.mean(dim=1, keepdim=True)
+            centered_local = _l2_normalize(local - center)
+            centered_query = _l2_normalize(query - center.squeeze(1))
+            raw_similarities = torch.einsum(
+                "qd,qkd->qk", centered_query, centered_local
+            )
+            selection_logits = self.classification_selection_logits(
+                selector_local,
+                local_labels,
+                selector_query,
+                base_similarities=raw_similarities,
+            )
+            attention = F.softmax(
+                raw_similarities * self.logit_scale.clamp(1.0, 20.0)
+                + selection_logits,
+                dim=1,
+            )
+            mass = attention.new_zeros((query.size(0), classes.numel()))
+            columns = torch.searchsorted(classes, local_labels)
+            mass.scatter_add_(1, columns, attention)
+            logits = torch.log(mass.clamp_min(1e-8))
+            logits = logits + self.count_prior * torch.log(
+                local_counts.clamp_min(1.0)
+            )
+            logits = logits.masked_fill(local_counts == 0, -torch.inf)
+            probabilities = F.softmax(logits, dim=1)
+            diagnostics = {
+                "mode": selected_mode,
+                "local_counts": local_counts,
+                "pool_counts": local_counts,
+                **self._selection_diagnostics(selection_logits, attention),
+            }
+            result = logits, classes, probabilities, diagnostics
+            return result if return_diagnostics else result[:3]
+
+        local_query = query
+        evidence_local = local
+        if self.local_centering:
+            center = local.mean(dim=1, keepdim=True)
+            evidence_local = _l2_normalize(local - center)
+            local_query = _l2_normalize(query - center.squeeze(1))
+        raw_similarities = torch.einsum(
+            "qd,qkd->qk", local_query, evidence_local
+        )
+        selection_logits = self.classification_selection_logits(
+            selector_local,
+            local_labels,
+            selector_query,
+            base_similarities=raw_similarities,
+        )
+        local_similarities = raw_similarities * self.local_scale + selection_logits
+        local_evidence = query.new_full(
+            (query.size(0), classes.numel()), -torch.inf
+        )
+        for column in range(classes.numel()):
+            mask = local_class_mask[:, :, column]
+            values = torch.logsumexp(
+                local_similarities.masked_fill(~mask, -torch.inf), dim=1
+            )
+            present = local_counts[:, column] > 0
+            local_evidence[:, column] = torch.where(
+                present,
+                values
+                - self.evidence_gamma
+                * torch.log(local_counts[:, column].clamp_min(1.0)),
+                values,
+            )
+
+        pool_class_mask = (
+            global_support_mask.unsqueeze(2)
+            & global_support_labels.view(1, -1, 1).eq(classes.view(1, 1, -1))
+        )
+        pool_counts = pool_class_mask.sum(dim=1).float()
+        pool_denominator = global_support_mask.sum(dim=1, keepdim=True).clamp_min(1)
+        task_prior = (
+            global_support_mask.float() @ pool
+        ) / pool_denominator.float()
+        global_query = query
+        prototype_pool = pool.unsqueeze(0).expand(query.size(0), -1, -1)
+        if self.global_centering:
+            prototype_pool = _l2_normalize(
+                prototype_pool - task_prior.unsqueeze(1)
+            )
+            global_query = _l2_normalize(query - task_prior)
+            shrink_prior = torch.zeros_like(task_prior)
+        else:
+            shrink_prior = task_prior
+        prototypes = torch.einsum(
+            "qbc,qbd->qcd", pool_class_mask.float(), prototype_pool
+        ) / pool_counts.clamp_min(1.0).unsqueeze(2)
+        if self.shrinkage_mode in {"fixed", "learned"} and not self.global_centering:
+            weight = pool_counts / (pool_counts + self.shrinkage_kappa)
+            prototypes = (
+                weight.unsqueeze(2) * prototypes
+                + (1.0 - weight).unsqueeze(2) * shrink_prior.unsqueeze(1)
+            )
+        prototypes = _l2_normalize(prototypes)
+        global_evidence = torch.einsum(
+            "qd,qcd->qc", global_query, prototypes
+        ) * self.global_scale
+        global_evidence = global_evidence.masked_fill(pool_counts <= 0, -torch.inf)
+
+        if selected_mode == "local":
+            evidence = local_evidence
+            gate = torch.ones_like(evidence)
+        elif selected_mode == "global":
+            evidence = global_evidence
+            gate = torch.zeros_like(evidence)
+        elif selected_mode == "global_local":
+            if self.gate_mode == "dynamic":
+                safe_local = torch.where(
+                    torch.isfinite(local_evidence),
+                    local_evidence,
+                    torch.zeros_like(local_evidence),
+                )
+                retrieval_probs = F.softmax(local_similarities, dim=1)
+                entropy = -(
+                    retrieval_probs * F.log_softmax(local_similarities, dim=1)
+                ).sum(dim=1) / math.log(max(local_similarities.size(1), 2))
+                features = torch.stack(
+                    [
+                        torch.tanh(safe_local),
+                        torch.log1p(local_counts),
+                        torch.log1p(pool_counts),
+                        entropy.unsqueeze(1).expand_as(safe_local),
+                        torch.tanh(safe_local - global_evidence),
+                    ],
+                    dim=-1,
+                )
+                gate = torch.sigmoid(self.gate_network(features).squeeze(-1))
+                gate = torch.where(local_counts > 0, gate, torch.zeros_like(gate))
+            else:
+                gate = torch.full_like(local_evidence, float(self.fixed_gate.item()))
+                gate = torch.where(local_counts > 0, gate, torch.zeros_like(gate))
+            evidence = torch.logaddexp(
+                local_evidence + torch.log(gate.clamp_min(1e-8)),
+                global_evidence + torch.log1p(-gate.clamp(max=1.0 - 1e-8)),
+            )
+        elif selected_mode == "coverage_fallback":
+            local_present = local_counts > 0
+            valid_local = local_evidence.masked_fill(~local_present, -torch.inf)
+            best_local = valid_local.max(dim=1, keepdim=True).values
+            best_present_global = global_evidence.masked_fill(
+                ~local_present, -torch.inf
+            ).max(dim=1, keepdim=True).values
+            missing = (~local_present) & (pool_counts > 0)
+            missing_logits = (
+                best_local
+                + global_evidence
+                - best_present_global
+                - self.coverage_fallback_margin
+            )
+            evidence = torch.where(missing, missing_logits, valid_local)
+            gate = local_present.float()
+        else:
+            raise ValueError(f"Unknown classification mode: {selected_mode}")
+
+        if (
+            self.prior_mode in {"none", "uniform", "balanced"}
+            or self.prior_strength == 0.0
+        ):
+            prior_logits = torch.zeros_like(evidence)
+        elif self.prior_mode in {"natural", "empirical"}:
+            smoothed = pool_counts + self.prior_smoothing
+            prior_logits = self.prior_strength * torch.log(
+                (
+                    smoothed
+                    / smoothed.sum(dim=1, keepdim=True).clamp_min(1e-8)
+                ).clamp_min(1e-8)
+            )
+        else:
+            raise ValueError(f"Unknown prior mode: {self.prior_mode}")
+        logits = evidence + prior_logits
+        output_classes = classes
+        if self.enable_abstention:
+            abstain_logits = (
+                self.abstain_bias
+                - F.softplus(self.abstain_slope) * evidence.max(dim=1).values
+            )
+            logits = torch.cat([logits, abstain_logits.unsqueeze(1)], dim=1)
+            output_classes = torch.cat(
+                [classes, classes.new_tensor([self.abstain_label])]
+            )
+        probabilities = F.softmax(logits, dim=1)
+        diagnostics = {
+            "mode": selected_mode,
+            "local_counts": local_counts,
+            "pool_counts": pool_counts,
+            "local_evidence": local_evidence,
+            "global_evidence": global_evidence,
+            "gate": gate,
+            "prototypes": prototypes,
+            **self._selection_diagnostics(
+                selection_logits, F.softmax(local_similarities, dim=1)
+            ),
+        }
+        result = logits, output_classes, probabilities, diagnostics
+        return result if return_diagnostics else result[:3]
 
     def forward_classification(
         self,
@@ -1216,6 +1488,66 @@ class PrototypicalHead(nn.Module):
         diagnostics.update(
             self._selection_diagnostics(selection_logits, selection_attention)
         )
+        if self.regression_residual_head is not None:
+            if support_labels.ndim == 1:
+                expanded_labels = support_labels.unsqueeze(0).expand(query.size(0), -1)
+            else:
+                expanded_labels = support_labels
+            support_hours = self.regression_output_to_hours(
+                self.regression_labels_to_output(expanded_labels)
+            )
+            anchor_hours = self.regression_output_to_hours(prediction)
+            attention = selection_attention
+            support_summary = (attention.unsqueeze(-1) * support).sum(dim=1)
+            log_support = torch.log1p(support_hours.clamp_min(0.0))
+            entropy = -(
+                attention * torch.log(attention.clamp_min(1e-8))
+            ).sum(dim=1) / math.log(max(attention.size(1), 2))
+            scalar_features = torch.stack(
+                [
+                    log_support.min(dim=1).values,
+                    log_support.max(dim=1).values,
+                    log_support.median(dim=1).values,
+                    log_support.mean(dim=1),
+                    log_support.std(dim=1, correction=0),
+                    similarities.max(dim=1).values,
+                    similarities.std(dim=1, correction=0),
+                    entropy,
+                ],
+                dim=-1,
+            )
+            residual_features = torch.cat(
+                [query, support_summary, scalar_features], dim=-1
+            )
+            residual_outputs = self.regression_residual_head(residual_features)
+            delta_log = 4.0 * torch.tanh(residual_outputs[:, 0])
+            anchor_gate = torch.sigmoid(residual_outputs[:, 1])
+            parametric_hours = torch.expm1(
+                torch.log1p(anchor_hours.clamp_min(0.0)) + delta_log
+            ).clamp_min(0.0)
+            prediction_hours = (
+                anchor_gate * anchor_hours
+                + (1.0 - anchor_gate) * parametric_hours
+            )
+            prediction = (
+                prediction_hours
+                if self.regression_outputs_hours
+                else torch.sqrt(prediction_hours.clamp_min(0.0))
+            )
+            diagnostics.update(
+                {
+                    "retrieval_anchor_hours": anchor_hours,
+                    "parametric_prediction_hours": parametric_hours,
+                    "residual_delta_log": delta_log,
+                    "residual_anchor_gate": anchor_gate,
+                    "residual_branch_predictions_hours": torch.stack(
+                        [anchor_hours, parametric_hours], dim=0
+                    ),
+                    "residual_aggregation_weights": torch.stack(
+                        [anchor_gate, 1.0 - anchor_gate], dim=0
+                    ),
+                }
+            )
         return prediction, confidence.clamp(0.0, 1.0), diagnostics
 
     def forward_regression(

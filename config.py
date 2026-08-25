@@ -6,26 +6,58 @@ LOG_DIR = './logs'
 # Epoch ranges are inclusive. Add another dictionary to add another log set.
 TRAINING_LOG_SETS = [
     {
-        'name': 'logs',
+        'name': 'source',
         'directory': LOG_DIR,
-        'epochs': (1, 5),
+        'patterns': ('*.xes', '*.xes.gz'),
+        # D_unseen is deliberately stored beside the source logs for legacy
+        # scripts, so the training scan must exclude it explicitly.
+        'exclude_paths': (os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),),
+        'epochs': (1, None),
+        'weight_schedule': (
+            (1, 5, 0.70),
+            (6, 20, 0.40),
+            (21, None, 0.25),
+        ),
     },
     {
-        'name': 'logs_out',
+        'name': 'synthetic',
         'directory': os.path.join(LOG_DIR, 'out'),
-        'epochs': (6, 40),
+        'epochs': (1, None),
+        'weight_schedule': (
+            (1, 5, 0.30),
+            (6, 20, 0.60),
+            (21, None, 0.75),
+        ),
     },
 ]
 
 CONFIG = {
-    'training_log_sets': TRAINING_LOG_SETS,
+'run_mode':'train', # train, resume, initialize, assemble
+'training_log_sets': TRAINING_LOG_SETS,
     'log_paths': {
         'testing': {
             'D_unseen': os.path.join(LOG_DIR, '00013_clos2rep.xes.gz'),
         },
     },
+'evaluation_log_sets':{
+'screening':{
+'billing':os.path.join ('logs_eval','billing.xes.gz'),
+'helpdesk':os.path.join ('logs_eval','helpdesk.xes'),
+'receipt':os.path.join ('logs_eval','receipt.xes'),
+'roadtraffic100traces':os.path.join ('logs_eval','roadtraffic100traces.xes'),
+'roadtraffic_10000':os.path.join ('logs_eval','roadtraffic_10000.xes.gz'),
+'sepsis':os.path.join ('logs_eval','sepsis.xes.gz'),
+},
+'meta_test':{
+'D_unseen':os.path.join (LOG_DIR,'00013_clos2rep.xes.gz'),
+},
+},
 'moe_settings':{
-'num_experts':4
+'num_experts':4,
+'shared_backbone':True,
+'expert_adapter_enabled':True,
+'expert_adapter_hidden_dim':64,
+'expert_diversity_weight':0.01,
 },
 'embedding_strategy':'learned',
 'pretrained_settings':{
@@ -35,6 +67,15 @@ CONFIG = {
 'learned_settings':{
 'char_embedding_dim':64 ,
 'char_cnn_output_dim':128 ,
+'max_string_length':64,
+},
+'data':{
+'max_sequence_length':32,
+'minimum_prefix_length':1,
+'historical_memory_enabled':True,
+'task_storage':'lazy_joint',
+'max_generic_attributes':16,
+'attribute_hash_buckets':4096,
 },
 'd_model':256 ,
 'n_heads':8 ,
@@ -62,6 +103,8 @@ CONFIG = {
 'proto_head_lr_mult_after_warmup':0.1 ,
 'retrieval_train_k':32 ,
 'retrieval_train_batch_size':128 ,
+'retrieval_min_batch_size':16,
+'case_uniform_sampling_fraction':0.5,
 'retrieval_min_per_class':2 ,
 'retrieval_train_max_classes':32 ,
 'retrieval_cls_pos_k':2 ,
@@ -94,6 +137,9 @@ CONFIG = {
 'seed':42,
 'training_enabled':True,
 'gradient_clip_norm':1.0,
+'gradient_clip_mode':'adaptive',
+'adaptive_gradient_clip_factor':0.02,
+'adaptive_gradient_clip_epsilon':1e-3,
 'training_lr_multipliers':{},
 'training_diagnostics':{
 'enabled':False,
@@ -129,6 +175,9 @@ CONFIG = {
 'abstain_bias':0.0,
 'abstain_slope':2.0,
 'regression_mode':'sqrt_knn', # sqrt_knn, raw_hours_knn, learned_transform_ensemble
+'regression_residual_enabled':True,
+'regression_residual_hidden_dim':128,
+'regression_residual_anchor_gate':0.80,
 'regression_num_transforms':8,
 'regression_transform_aggregation':'learned', # learned, mean
 'regression_power_min':0.05,
@@ -200,11 +249,11 @@ CONFIG = {
 'expert_confidence_hidden_dim':16,
 'classification_expert_confidence_loss_weight':0.0,
 'regression_expert_confidence_loss_weight':0.0,
-'expert_routing_confidence_enabled':False,
+'expert_routing_confidence_enabled':True,
 'expert_routing_architecture':'mlp', # task_bias, linear, mlp
 'expert_routing_hidden_dim':32,
 'expert_routing_dropout':0.0,
-'expert_routing_confidence_loss_weight':0.0,
+'expert_routing_confidence_loss_weight':0.05,
 'expert_active_fraction':0.5,
 'expert_routing_temperature':1.0,
 },

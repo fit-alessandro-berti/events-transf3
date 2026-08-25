@@ -1,6 +1,5 @@
 import torch
 import torch .nn as nn
-import pandas as pd
 import numpy as np
 from .learned_event_embedder import LearnedEventEmbedder
 from .pretrained_event_embedder import PretrainedEventEmbedder
@@ -13,7 +12,7 @@ class MetaLearner (nn .Module ):
         self .strategy =strategy
         self .encoder =EventEncoder (
         d_model ,n_heads ,n_layers ,dropout ,prefix_config =proto_head_config )
-        self .proto_head =PrototypicalHead (**(proto_head_config or {}))
+        self .proto_head =PrototypicalHead (feature_dim =d_model ,**(proto_head_config or {}))
         routing_config =proto_head_config or {}
         routing_enabled =routing_config .get ('expert_routing_confidence_enabled',False )
         if isinstance (routing_enabled ,str ):
@@ -33,6 +32,18 @@ class MetaLearner (nn .Module ):
         nn .LayerNorm (128 ),
         )
         self .d_model =d_model
+        self .expert_adapter =None
+        if kwargs .get ('expert_adapter_enabled',False ):
+            expert_hidden =max (int (kwargs .get ('expert_adapter_hidden_dim',64 )),1 )
+            self .expert_adapter =nn .Sequential (
+            nn .LayerNorm (d_model ),
+            nn .Linear (d_model ,expert_hidden ),
+            nn .GELU (),
+            nn .Linear (expert_hidden ,d_model ,bias =False ),
+            )
+            # Exact identity for checkpoint migration; balanced expert quotas
+            # make the adapters diverge as soon as training starts.
+            nn .init .zeros_ (self .expert_adapter [-1 ].weight )
         self .classification_embedding_adapter =None
         if routing_config .get ('classification_embedding_adapter_enabled',False ):
             adapter_hidden =max (int (routing_config .get (
@@ -72,9 +83,12 @@ class MetaLearner (nn .Module ):
         if self .strategy =='pretrained':
             self .embedding_dim =kwargs ['embedding_dim']
             self .embedder =PretrainedEventEmbedder (
-            self .embedding_dim ,num_feat_dim ,d_model ,dropout ,time_input_config =proto_head_config )
-            self .pad_event ={'activity_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'resource_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'activity_id':0 ,'cost':0.0 ,'time_from_start':0.0 ,'time_from_previous':0.0 ,'timestamp':0.0 ,'case_id':'pad'}
+            self .embedding_dim ,num_feat_dim ,d_model ,dropout ,
+            time_input_config =proto_head_config ,
+            attribute_hash_buckets =kwargs .get ('attribute_hash_buckets',4096 ))
+            self .pad_event ={'activity_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'resource_embedding':np .zeros (self .embedding_dim ,dtype =np .float32 ),'activity_id':0 ,'cost':0.0 ,'time_from_start':0.0 ,'time_from_previous':0.0 ,'timestamp':0.0 ,'case_id':'pad','calendar_features':(0.0 ,)*5 ,'resource_missing':1.0 ,'cost_missing':1.0 ,'lifecycle_missing':1.0 ,'generic_attributes':()}
         elif self .strategy =='learned':
+            max_string_length =kwargs .get ('max_string_length',64 )
             self .embedder =LearnedEventEmbedder (
             char_vocab_size =kwargs ['char_vocab_size'],
             char_emb_dim =kwargs ['char_embedding_dim'],
@@ -83,11 +97,19 @@ class MetaLearner (nn .Module ):
             d_model =d_model ,
             dropout =dropout
             ,time_input_config =proto_head_config
+            ,max_string_length =max_string_length
+            ,attribute_hash_buckets =kwargs .get ('attribute_hash_buckets',4096 )
             )
             self .pad_event ={
             'activity_name':'','resource_name':'','activity_id':-100 ,
             'cost':0.0 ,'time_from_start':0.0 ,'time_from_previous':0.0 ,
             'timestamp':0.0 ,'case_id':'pad'
+            ,'calendar_features':(0.0 ,)*5 ,'resource_missing':1.0 ,
+            'cost_missing':1.0 ,'lifecycle_name':'','lifecycle_missing':1.0 ,
+            'generic_attributes':(),
+            'activity_char_ids':(0 ,)*max_string_length ,
+            'resource_char_ids':(0 ,)*max_string_length ,
+            'lifecycle_char_ids':(0 ,)*max_string_length
             }
         else :
             raise ValueError (f"Unknown embedding strategy: '{self .strategy }'")
@@ -112,33 +134,35 @@ class MetaLearner (nn .Module ):
         return self .task_confidence_head .reliability_loss (descriptor ,target )
     def adapt_task_embeddings (self ,encoded ,task_type ):
         """Apply the opt-in task residual without changing the other task."""
+        if self .expert_adapter is not None :
+            encoded =encoded +self .expert_adapter (encoded )
         if task_type =='classification'and self .classification_embedding_adapter is not None :
             return encoded +self .classification_embedding_adapter (encoded )
         if task_type =='regression'and self .regression_embedding_adapter is not None :
             return encoded +self .regression_embedding_adapter (encoded )
         return encoded
-    def _process_batch (self ,batch_of_sequences ,task_type =None ,time_scale_factor =None ):
+    def _encode_batch (self ,batch_of_sequences ,task_type =None ,time_scale_factor =None ):
         device =next (self .parameters ()).device
         max_len =max (len (seq )for seq in batch_of_sequences )if batch_of_sequences else 0
         if max_len ==0 :return torch .empty (0 ,self .d_model ,device =device )
-        padded_dfs ,masks =[],[]
+        padded_events ,masks =[],[]
         for seq in batch_of_sequences :
             pad_len =max_len -len (seq )
             mask =[False ]*len (seq )+[True ]*pad_len
-            df =pd .DataFrame (seq )
+            padded_events .extend (list (seq ))
             if pad_len >0 :
-                pad_df =pd .DataFrame ([self .pad_event ]*pad_len )
-                df =pd .concat ([df ,pad_df ],ignore_index =True )
-            padded_dfs .append (df )
+                padded_events .extend ([self .pad_event ]*pad_len )
             masks .append (mask )
-        batch_df =pd .concat (padded_dfs ,ignore_index =True )
         all_embeddings =self .embedder (
-        batch_df ,use_time_adapter =(task_type =='regression'),
+        padded_events ,use_time_adapter =(task_type =='regression'),
         time_scale_factor =time_scale_factor )
         embeddings_reshaped =all_embeddings .view (len (batch_of_sequences ),max_len ,-1 )
         mask_tensor =torch .tensor (masks ,dtype =torch .bool ,device =device )
-        encoded =self .encoder (
+        return self .encoder (
         embeddings_reshaped ,src_key_padding_mask =mask_tensor ,task_type =task_type )
+    def _process_batch (self ,batch_of_sequences ,task_type =None ,time_scale_factor =None ):
+        encoded =self ._encode_batch (
+        batch_of_sequences ,task_type =task_type ,time_scale_factor =time_scale_factor )
         return self .adapt_task_embeddings (encoded ,task_type )
     def forward (self ,support_set ,query_set ,task_type ):
         support_seqs ,query_seqs =[s [0 ]for s in support_set ],[q [0 ]for q in query_set ]

@@ -1,0 +1,6 @@
+extends: context_32.yaml
+experiment_name: independent_encoder_ablation
+moe_settings:
+  shared_backbone: false
+  expert_adapter_enabled: false
+

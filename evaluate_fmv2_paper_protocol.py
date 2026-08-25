@@ -481,7 +481,8 @@ def main():
         test_path = paper_repo / "logs" / "test" / f"{log_name}.xes.gz"
         test_log = _transform_log(loader, test_path, "test", activity_names)
         all_query_tasks = {
-            task: get_task_data(test_log, task) for task in ("classification", "regression")
+            task: get_task_data(test_log, task, config=CONFIG)
+            for task in ("classification", "regression")
         }
         stable_log_index = (
             DEFAULT_LOGS.index(log_name) if log_name in DEFAULT_LOGS else log_index
@@ -504,7 +505,7 @@ def main():
             )
             support_log = _transform_log(loader, support_path, "support", activity_names)
             for task in ("classification", "regression"):
-                support_tasks = get_task_data(support_log, task)
+                support_tasks = get_task_data(support_log, task, config=CONFIG)
                 support_embeddings = _encode(
                     model.experts, support_tasks, task, args.embedding_batch_size
                 )

@@ -1,5 +1,7 @@
 extends: learned_time_4_dynamic.yaml
 experiment_name: learned_time_4_temporal
+run_mode: initialize
+initialize_from_checkpoint: checkpoints/fmv3/learned_time_4_dynamic/model_epoch_31.pth
 epochs: 33
 selected_checkpoint_epoch: 33
 fmv3_head:

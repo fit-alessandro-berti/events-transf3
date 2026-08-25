@@ -1,4 +1,7 @@
 seed: 42
+data:
+  max_sequence_length: 32
+  minimum_prefix_length: 1
 case_budgets: [1, 2, 4, 8, 16, 32, 64, 128]
 support_scenarios: [natural, class_aware]
 repetitions: 5

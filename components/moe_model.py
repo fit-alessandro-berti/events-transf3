@@ -4,10 +4,11 @@ import torch .nn as nn
 import torch .nn .functional as F
 from .meta_learner import MetaLearner
 class MoEModel (nn .Module ):
-    def __init__ (self ,num_experts ,strategy ,**kwargs ):
+    def __init__ (self ,num_experts ,strategy ,shared_backbone =False ,**kwargs ):
         super ().__init__ ()
         self .num_experts =num_experts
         self .strategy =strategy
+        self .shared_backbone =bool (shared_backbone )
         routing_config =kwargs .get ('proto_head_config')or {}
         enabled_value =routing_config .get ('expert_routing_confidence_enabled',False )
         if isinstance (enabled_value ,str ):
@@ -26,7 +27,14 @@ class MoEModel (nn .Module ):
         MetaLearner (strategy =strategy ,**kwargs )
         for _ in range (num_experts )
         ])
-        print (f"✅ Initialized MoEModel with {num_experts } expert(s).")
+        if self .shared_backbone and self .experts :
+            shared_embedder =self .experts [0 ].embedder
+            shared_encoder =self .experts [0 ].encoder
+            for expert in self .experts [1 :]:
+                expert .embedder =shared_embedder
+                expert .encoder =shared_encoder
+        architecture ="shared backbone + lightweight experts"if self .shared_backbone else "independent experts"
+        print (f"✅ Initialized MoEModel with {num_experts } expert(s): {architecture }.")
     @property
     def active_expert_count (self ):
         if not self .expert_routing_confidence_enabled :
@@ -71,10 +79,18 @@ class MoEModel (nn .Module ):
     def _process_batch (self ,batch_of_sequences ,task_type =None ):
         if not self .experts :
             return None
-        all_expert_embeddings =[
-        expert ._process_batch (batch_of_sequences ,task_type =task_type )
-        for expert in self .experts
-        ]
+        if self .shared_backbone :
+            encoded =self .experts [0 ]._encode_batch (
+            batch_of_sequences ,task_type =task_type )
+            all_expert_embeddings =[
+            expert .adapt_task_embeddings (encoded ,task_type )
+            for expert in self .experts
+            ]
+        else :
+            all_expert_embeddings =[
+            expert ._process_batch (batch_of_sequences ,task_type =task_type )
+            for expert in self .experts
+            ]
         stacked_embeddings =torch .stack (all_expert_embeddings )
         avg_embeddings =torch .mean (stacked_embeddings ,dim =0 )
         return avg_embeddings

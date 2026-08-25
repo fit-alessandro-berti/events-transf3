@@ -2,4 +2,5 @@
 # checkpoints/fmv3/expert_routing_bias.
 extends: expert_routing_bias.yaml
 experiment_name: expert_routing_selected
+training_enabled: false
 selected_checkpoint_epoch: 42

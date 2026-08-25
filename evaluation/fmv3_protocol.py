@@ -15,7 +15,12 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from evaluation.fmv3_metrics import classification_metrics, regression_metrics
+from evaluation.fmv3_metrics import (
+    classification_metrics,
+    regression_metrics,
+    prefix_length_metrics,
+)
+from utils.data_utils import prefix_task_length
 from time_transf import inverse_transform_time
 
 
@@ -152,13 +157,16 @@ def prepare_case_plan(transformed_log, config):
     """Plan splits/subsets from case label sets before materializing prefixes."""
     planning_tasks = []
     traces_by_case = {}
+    minimum_prefix = int(
+        (config.get("data", {}) or {}).get("minimum_prefix_length", 1)
+    )
     for trace in transformed_log:
-        if len(trace) < 3:
+        if len(trace) < minimum_prefix + 1:
             continue
         case_id = str(trace[0]["case_id"])
         labels = {
             int(trace[index + 1]["activity_id"])
-            for index in range(1, len(trace) - 1)
+            for index in range(minimum_prefix - 1, len(trace) - 1)
             if trace[index + 1]["activity_id"] is not None
             and int(trace[index + 1]["activity_id"]) != -100
         }
@@ -179,17 +187,27 @@ def prepare_case_plan_from_dataframe(
 ):
     """Plan on compact dataframe columns and return only materialized case rows."""
     work = frame.copy()
-    work[timestamp_key] = pd.to_datetime(work[timestamp_key], errors="coerce").dt.tz_localize(None)
+    work[timestamp_key] = pd.to_datetime(
+        work[timestamp_key], errors="coerce", utc=True
+    ).dt.tz_convert(None)
     work = work.dropna(subset=[timestamp_key])
     activity_names = sorted(work[activity_key].dropna().unique().tolist())
     activity_to_id = {name: index for index, name in enumerate(activity_names)}
-    work = work.sort_values([case_key, timestamp_key])
+    work["_fmv3_original_order"] = np.arange(len(work))
+    work = work.sort_values(
+        [case_key, timestamp_key, "_fmv3_original_order"], kind="mergesort"
+    )
     work["_fmv3_activity_id"] = work[activity_key].map(activity_to_id)
     work["_fmv3_event_position"] = work.groupby(case_key, sort=False).cumcount()
     case_sizes = work.groupby(case_key, sort=False).size()
-    eligible_cases = set(case_sizes[case_sizes >= 3].index.tolist())
+    minimum_prefix = int(
+        (config.get("data", {}) or {}).get("minimum_prefix_length", 1)
+    )
+    eligible_cases = set(
+        case_sizes[case_sizes >= minimum_prefix + 1].index.tolist()
+    )
     label_rows = work[
-        (work["_fmv3_event_position"] >= 2)
+        (work["_fmv3_event_position"] >= minimum_prefix)
         & work[case_key].isin(eligible_cases)
         & work["_fmv3_activity_id"].notna()
     ]
@@ -1476,6 +1494,15 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                             int(eval_cfg.get("bootstrap_repetitions", 200)),
                                             seed + repetition * 1009 + budget + int(retrieval_k),
                                         )
+                                        metrics["prefix_length_metrics"] = prefix_length_metrics(
+                                            "classification",
+                                            [
+                                                prefix_task_length(class_tasks, int(idx))
+                                                for idx in class_query_indices
+                                            ],
+                                            prediction["y_true"],
+                                            prediction["y_pred"],
+                                        )
                                         structured_diagnostics = {}
                                         if "structured_context_support" in prediction:
                                             context_support = np.asarray(
@@ -1503,6 +1530,9 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                                                 )
                                         row = {
                                             "task": "classification", "log": log_name,
+                                            "evaluation_split": config.get(
+                                                "evaluation_split", "unspecified"
+                                            ),
                                             "experiment": config.get("experiment_name", "unnamed"),
                                             "evaluation_profile": profile.get("name", "unnamed"),
                                             "repetition": repetition, "support_scenario": scenario,
@@ -1543,8 +1573,17 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                         eval_cfg=eval_cfg,
                         case_budget=budget,
                     )
+                    process_duration_hours = [
+                        float(target)
+                        + float(reg_tasks[int(index)][0][-1]["time_from_start"])
+                        / 3600.0
+                        for target, index in zip(truth, reg_query_indices)
+                    ]
                     row = {
                         "task": "regression", "log": log_name,
+                        "evaluation_split": config.get(
+                            "evaluation_split", "unspecified"
+                        ),
                         "experiment": config.get("experiment_name", "unnamed"),
                         "repetition": repetition, "support_scenario": scenario,
                         "case_budget": budget, "support_prefixes": int(len(reg_support_indices)),
@@ -1561,7 +1600,22 @@ def evaluate_log(model, test_tasks, log_name, config, output_jsonl: Path, case_p
                             if reg_experts[0].proto_head.time_transform_bank is not None else "single"
                         ),
                         **_virtual_expert_row(eval_cfg, "regression"),
-                        **regression_metrics(truth, pred, lower, upper),
+                        **regression_metrics(
+                            truth,
+                            pred,
+                            lower,
+                            upper,
+                            process_duration_hours=process_duration_hours,
+                        ),
+                        "prefix_length_metrics": prefix_length_metrics(
+                            "regression",
+                            [
+                                prefix_task_length(reg_tasks, int(idx))
+                                for idx in reg_query_indices
+                            ],
+                            truth,
+                            pred,
+                        ),
                     }
                     if reg_routing is not None:
                         row["expert_routing"] = reg_routing

@@ -4,6 +4,14 @@
 # merged, while the learned router remains byte-identical.
 extends: expert_routing_selected.yaml
 experiment_name: loss_refinement_selected
+run_mode: assemble
+training_enabled: false
+assembly:
+  base_checkpoint: checkpoints/fmv3/expert_routing_bias/model_epoch_42.pth
+  classification_checkpoint: checkpoints/fmv3/loss_refinement_classification/model_epoch_43.pth
+  regression_checkpoint: checkpoints/fmv3/loss_refinement_regression/model_epoch_43.pth
+  output_checkpoint: checkpoints/fmv3/loss_refinement_selected/model_epoch_43.pth
+  artifacts: checkpoints/fmv3/expert_routing_bias/training_artifacts.pth
 selected_checkpoint_epoch: 43
 epochs: 43
 episodes_per_epoch: 300

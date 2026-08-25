@@ -1,7 +1,8 @@
 extends: prefix_state_attention_joint.yaml
 experiment_name: loss_gate_aux_005
+run_mode: initialize
+initialize_from_checkpoint: checkpoints/fmv3/prefix_state_attention_joint/model_epoch_36.pth
 epochs: 38
 fmv3_head:
   regression_gate_aux_weight: 0.05
   regression_gate_target_temperature: 0.10
-

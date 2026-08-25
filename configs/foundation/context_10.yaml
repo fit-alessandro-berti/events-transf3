@@ -1,0 +1,9 @@
+experiment_name: corrected_context_10
+run_mode: train
+training_enabled: true
+trainable_scope: all
+epochs: 40
+data:
+  max_sequence_length: 10
+  minimum_prefix_length: 1
+

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import hashlib
 from pathlib import Path
 
 import torch
@@ -78,6 +79,54 @@ def merge_task_isolated_state_dicts(base, classification, regression):
         classification_changed | new_classification_keys,
         regression_changed | new_regression_keys,
     )
+
+
+def assemble_from_config(config):
+    """Materialize an explicit assembly manifest and its reproducibility files."""
+    assembly = config["assembly"]
+    def digest(path):
+        value = hashlib.sha256()
+        with Path(path).open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                value.update(block)
+        return value.hexdigest()
+    input_hashes = {
+        key: digest(assembly[key])
+        for key in (
+            "base_checkpoint",
+            "classification_checkpoint",
+            "regression_checkpoint",
+        )
+    }
+    expected_hashes = assembly.get("input_sha256", {}) or {}
+    mismatches = {
+        key: (expected_hashes[key], actual)
+        for key, actual in input_hashes.items()
+        if key in expected_hashes and expected_hashes[key] != actual
+    }
+    if mismatches:
+        raise RuntimeError(f"Assembly input SHA-256 mismatch: {mismatches}")
+    assembly["input_sha256"] = input_hashes
+    base = torch.load(assembly["base_checkpoint"], map_location="cpu", weights_only=True)
+    classification = torch.load(
+        assembly["classification_checkpoint"], map_location="cpu", weights_only=True
+    )
+    regression = torch.load(
+        assembly["regression_checkpoint"], map_location="cpu", weights_only=True
+    )
+    merged, classification_keys, regression_keys = merge_task_isolated_state_dicts(
+        base, classification, regression
+    )
+    output = Path(assembly["output_checkpoint"])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(merged, output)
+    assembly["output_sha256"] = digest(output)
+    torch.save(config, output.parent / "training_config.pth")
+    save_yaml_config(config, str(output.parent / "training_config.yaml"))
+    artifacts = assembly.get("artifacts")
+    if artifacts:
+        shutil.copy2(artifacts, output.parent / "training_artifacts.pth")
+    return output, classification_keys, regression_keys
 
 
 def main():

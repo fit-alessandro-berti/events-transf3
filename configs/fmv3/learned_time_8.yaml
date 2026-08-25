@@ -1,5 +1,7 @@
 extends: corrected_fmv3.yaml
 experiment_name: learned_time_8
+run_mode: initialize
+initialize_from_checkpoint: checkpoints/fmv3/corrected_fmv3/model_epoch_23.pth
 epochs: 31
 lr: 0.003
 weight_decay: 0.0

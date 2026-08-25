@@ -3,6 +3,9 @@
 # optimized; the transform bank, confidence head, adapters, and router freeze.
 extends: loss_refinement_selected.yaml
 experiment_name: example_selector_regression
+run_mode: initialize
+training_enabled: true
+initialize_from_checkpoint: checkpoints/fmv3/loss_refinement_selected/model_epoch_43.pth
 epochs: 44
 episodes_per_epoch: 300
 lr: 0.002

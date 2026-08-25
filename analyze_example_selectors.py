@@ -272,7 +272,9 @@ def main():
             {log_name: selected_frame},
             activity_names_by_log={log_name: activity_names},
         )[log_name]
-        class_tasks, reg_tasks = get_classification_and_regression_tasks(traces)
+        class_tasks, reg_tasks = get_classification_and_regression_tasks(
+            traces, config=config
+        )
         tasks_by_type = {
             "classification": class_tasks,
             "regression": reg_tasks,

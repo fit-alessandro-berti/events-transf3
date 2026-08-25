@@ -40,29 +40,39 @@ The loader expects XES logs with these event attributes:
 
 Default training/testing logs are configured in `config.py`. Sample logs are already in `logs/`.
 
-Training supports any number of named log sets with inclusive epoch ranges. At
-the start of an epoch, one of the sets active in that epoch is selected
-uniformly at random, and all episodes in that epoch use that set. Configure the
-sets near the top of `config.py`:
+Training supports weighted, overlapping log sets with inclusive epoch ranges.
+A set is selected independently for every successful optimizer step. The
+default curriculum replays source logs throughout training while gradually
+increasing synthetic data. A null/None end epoch means the configured final
+epoch:
 
 ```python
 TRAINING_LOG_SETS = [
     {
-        "name": "logs",
+        "name": "source",
         "directory": LOG_DIR,
-        "epochs": (1, 100),
+        "exclude_paths": ("./logs/held_out.xes.gz",),
+        "epochs": (1, None),
+        "weight_schedule": ((1, 5, 0.70), (6, 20, 0.40), (21, None, 0.25)),
     },
     {
-        "name": "logs_out",
+        "name": "synthetic",
         "directory": os.path.join(LOG_DIR, "out"),
-        "epochs": (10, 100),
+        "epochs": (1, None),
+        "weight_schedule": ((1, 5, 0.30), (6, 20, 0.60), (21, None, 0.75)),
     },
 ]
 ```
 
 Directories are scanned non-recursively for `.xes` and `.xes.gz` files. Add
-more entries as needed. Every configured training epoch must be covered by at
-least one enabled set.
+more entries as needed. Every configured training epoch must have positive
+weight. Before fitting or evaluation, resolved paths and SHA-256 hashes are
+checked so a copied, renamed, or directly referenced evaluation log cannot
+enter training.
+
+The bundled `D_unseen` log is excluded and reserved for the final `meta_test`
+split. Checkpoints trained before this exclusion are contaminated and must be
+retrained from scratch before their `D_unseen` results are treated as unseen.
 
 ## Training
 
@@ -76,10 +86,24 @@ Common options:
 
 - `--embedding_strategy learned|pretrained`
 - `--training_strategy episodic|retrieval|mixed`
-- `--resume` (resume from latest checkpoint)
+- `--resume` (exactly restore the latest full training state)
+- `--initialize_from PATH` (load model weights and intentionally reset optimizer state)
 - `--stop_after_epoch N`
 
-The script saves checkpoints and artifacts in `--checkpoint_dir`.
+The script saves deployable `model_epoch_N.pth` files and exact-resume
+`training_state_epoch_N.pth` files. Exact state includes optimizer, scheduler,
+AMP scaler, Python/NumPy/Torch/CUDA RNGs, and log-set sampling RNG.
+Exact resume also verifies the saved configuration; use `--initialize_from`
+when intentionally changing an architecture or optimization setting. Every
+epoch appends successful-step counts, skips, throughput, peak GPU memory, and
+best-effort GPU utilization to `training_metrics.jsonl`.
+
+Matched context-length and architecture controls are under
+`configs/foundation/` (`context_10.yaml`, `context_32.yaml`,
+`context_64.yaml`, `no_regression_residual.yaml`, and
+`independent_encoders.yaml`). Contexts longer than the configured window retain
+a learned compressed-history token, while the default model shares its encoder
+across four lightweight routed experts.
 
 ## Evaluation
 
@@ -94,6 +118,11 @@ You can also pass a direct path to a `.xes` or `.xes.gz` file:
 ```bash
 python testing.py --checkpoint_dir ./checkpoints --test_log_name ./logs/00013_clos2rep.xes.gz
 ```
+
+`D_unseen` is the untouched `meta_test` split. Registered development logs use
+`--evaluation_split screening`; an unregistered user-supplied log requires
+`--evaluation_split external`. Path and file-content hashes are checked against
+every training log before evaluation starts.
 
 To run retrieval-augmented evaluation:
 
@@ -372,6 +401,7 @@ Reproduce the base selected confirmation with:
 python evaluate_fmv3.py \
   --checkpoint_dir checkpoints/fmv3/loss_multimetric_gate_aux_005 \
   --checkpoint_epoch 38 \
+  --evaluation_split screening \
   --eval_config configs/fmv3/prefix_attention_confirmation_eval.yaml \
   --logs billing helpdesk receipt roadtraffic100traces sepsis \
   --output_dir evaluation_results/loss_multimetric/confirmations/loss_multimetric_gate_aux_005_e38
@@ -399,11 +429,10 @@ checkpoint and training artifacts, then resume with the corrected config and
 retain epoch 23:
 
 ```bash
-cp -a checkpoints/fmv3/00_fmv2 checkpoints/fmv3/corrected_fmv3_reproduction
 python main.py \
   --config configs/fmv3/corrected_fmv3.yaml \
   --checkpoint_dir checkpoints/fmv3/corrected_fmv3_reproduction \
-  --resume \
+  --initialize_from checkpoints/fmv3/00_fmv2/model_epoch_20.pth \
   --stop_after_epoch 23
 ```
 
@@ -411,10 +440,12 @@ The primary classification endpoint is balanced accuracy. The evaluator also rec
 
 ## Simulating new logs (optional)
 
-Generate synthetic XES logs using pm4py:
+Generate multi-scale, realistic synthetic XES logs with calendar, resource,
+role, loop/rework, parallel-join, long-dependency, missing-resource, and signed
+cost signals:
 
 ```bash
-python logs/perform_simulation.py --output logs/simulated_log.xes.gz --num-logs 3
+python synthetic_log_generator.py logs/out/simulated_log.xes.gz --cases 250 --seed 42
 ```
 
 Then point `config.py` to the new files or pass them directly to `testing.py`.

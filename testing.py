@@ -7,15 +7,21 @@ import argparse
 from pathlib import Path
 from config import CONFIG
 from time_transf import inverse_transform_time
-from utils .data_utils import get_task_data
+from utils .data_utils import get_classification_and_regression_tasks
 from utils .model_utils import init_loader ,create_model ,load_model_weights
 from evaluation import evaluate_model ,evaluate_retrieval_augmented
+from training_log_sets import (
+resolve_training_log_sets ,validate_training_evaluation_disjointness ,
+validate_evaluation_split ,
+)
 if __name__ =='__main__':
     parser =argparse .ArgumentParser (description ="Run the meta-learning model evaluation script.")
     default_config =CONFIG
+    default_evaluation_log_sets =CONFIG .get ('evaluation_log_sets',{})
     parser .add_argument ('--checkpoint_dir',type =str ,default ='./checkpoints',help ="Directory to load checkpoints and artifacts from.")
     parser .add_argument ('--checkpoint_epoch',type =int ,default =None ,help ="Specific epoch checkpoint to test (e.g., 1, 5). Defaults to the latest.")
     parser .add_argument ('--test_log_name',type =str ,required =True ,help ="Name of the test log (from config) OR a direct path to a .xes.gz file.")
+    parser .add_argument ('--evaluation_split',choices =['meta_test','screening','external'],default ='meta_test',help ="Declared evaluation split; use external for an unregistered log.")
     parser .add_argument ('--test_mode',type =str ,default =default_config ['test_mode'],choices =['meta_learning','retrieval_augmented'],help =f"Evaluation mode. (default: {default_config ['test_mode']})")
     parser .add_argument ('--num_test_episodes',type =int ,default =default_config ['num_test_episodes'],help =f"Number of episodes to run for testing. (default: {default_config ['num_test_episodes']})")
     parser .add_argument ('--test_retrieval_k',type =int ,nargs ='+',default =default_config ['test_retrieval_k'],help =f"List of k-values for retrieval-augmented mode. (default: {default_config ['test_retrieval_k']})")
@@ -71,6 +77,7 @@ if __name__ =='__main__':
         }
         CONFIG .clear ()
         CONFIG .update (saved_config )
+        CONFIG .setdefault ('evaluation_log_sets',default_evaluation_log_sets )
         CONFIG .update (evaluation_overrides )
     else :
         print ("⚠️ No training config found, using default. This may cause state_dict mismatch.")
@@ -91,6 +98,13 @@ if __name__ =='__main__':
         exit (f"❌ Error: Test log not found. '{log_input }' is not a valid path or config key.")
     if not Path (log_path_to_transform ).exists ():
         exit (f"❌ Error: Log file not found at resolved path: {log_path_to_transform }")
+    validate_training_evaluation_disjointness (
+    CONFIG ,resolve_training_log_sets (CONFIG ,validate_epoch_coverage =False ),
+    {log_key_name :log_path_to_transform },
+    )
+    validate_evaluation_split (
+    CONFIG ,{log_key_name :log_path_to_transform },args .evaluation_split )
+    CONFIG ['evaluation_split']=args .evaluation_split
     print (f"  - Test Mode: {CONFIG ['test_mode']}")
     print (f"  - Test Episodes: {CONFIG ['num_test_episodes']}")
     print (f"  - Checkpoint Directory: {args .checkpoint_dir }")
@@ -129,9 +143,11 @@ if __name__ =='__main__':
     if not unseen_log :
         exit (f"❌ Error: Test log '{log_key_name }' could not be processed.")
     print ("\n🛠️ Creating test tasks...")
+    classification_tasks ,regression_tasks =get_classification_and_regression_tasks (
+    unseen_log ,config =CONFIG )
     test_tasks ={
-    'classification':get_task_data (unseen_log ,'classification'),
-    'regression':get_task_data (unseen_log ,'regression')
+    'classification':classification_tasks ,
+    'regression':regression_tasks ,
     }
     test_mode =CONFIG .get ('test_mode','meta_learning')
     k_list_meta =CONFIG ['num_shots_test']

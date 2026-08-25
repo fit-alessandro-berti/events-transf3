@@ -16,6 +16,11 @@ from config import CONFIG
 from config_utils import apply_experiment_config, deep_merge, load_yaml_config
 from evaluation.fmv3_protocol import evaluate_log, prepare_case_plan_from_dataframe
 from utils.data_utils import get_classification_and_regression_tasks
+from training_log_sets import (
+    resolve_training_log_sets,
+    validate_training_evaluation_disjointness,
+    validate_evaluation_split,
+)
 from utils.model_utils import create_model, init_loader, load_model_weights
 
 
@@ -32,7 +37,7 @@ def _load_checkpoint_config(checkpoint_dir: Path):
 
 def _write_summary(rows, output_dir: Path):
     columns = [
-        "task", "experiment", "evaluation_profile", "log", "repetition", "support_scenario", "case_budget",
+        "task", "experiment", "evaluation_split", "evaluation_profile", "log", "repetition", "support_scenario", "case_budget",
         "support_prefixes", "retrieval_mode", "prior_mode", "prior_strength", "retrieval_k", "n_queries",
         "structured_max_order", "structured_smoothing", "structured_weight", "structured_tau",
         "structured_context_coverage", "structured_mean_context_support",
@@ -43,7 +48,7 @@ def _write_summary(rows, output_dir: Path):
         "accuracy", "balanced_accuracy", "adjusted_balanced_accuracy", "macro_precision", "macro_f1", "zero_recall_fraction",
         "support_pool_availability", "macro_label_recall_at_k", "macro_retrieval_given_pool",
         "macro_decision_given_retrieval", "nll", "multiclass_brier",
-        "ece_10", "aurc", "mae_hours", "rmse_hours", "median_absolute_error_hours", "normalized_mae",
+        "ece_10", "aurc", "mae_hours", "rmse_hours", "log_mae", "median_absolute_error_hours", "normalized_mae",
         "mae_skill_vs_median", "rmse_skill_vs_median", "d2_absolute_error", "r2", "interval_coverage",
         "mean_interval_width_hours",
         "regression_mode", "regression_num_transforms", "regression_transform_aggregation",
@@ -95,6 +100,11 @@ def main():
     parser.add_argument("--eval_config", default=None)
     parser.add_argument("--set", dest="overrides", action="append", default=[])
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--evaluation_split",
+        choices=["screening", "meta_test", "external"],
+        default="screening",
+    )
     args = parser.parse_args()
 
     checkpoint_dir = Path(args.checkpoint_dir).resolve()
@@ -117,6 +127,17 @@ def main():
         log_paths = [path for path in log_paths if path.name in requested or path.name.replace(".xes.gz", "").replace(".xes", "") in requested]
     if not log_paths:
         raise FileNotFoundError(f"No XES logs found in {args.logs_dir}")
+    validate_training_evaluation_disjointness(
+        CONFIG,
+        resolve_training_log_sets(CONFIG, validate_epoch_coverage=False),
+        {path.name: str(path) for path in log_paths},
+    )
+    validate_evaluation_split(
+        CONFIG,
+        {path.name: str(path) for path in log_paths},
+        args.evaluation_split,
+    )
+    CONFIG["evaluation_split"] = args.evaluation_split
     for log_path in log_paths:
         log_name = log_path.name.replace(".xes.gz", "").replace(".xes", "")
         result_path = output_dir / f"{log_name}.jsonl"
@@ -131,7 +152,9 @@ def main():
         materialized_traces = loader.transform_dataframes(
             {log_name: selected_frame}, activity_names_by_log={log_name: activity_names}
         )[log_name]
-        classification_tasks, regression_tasks = get_classification_and_regression_tasks(materialized_traces)
+        classification_tasks, regression_tasks = get_classification_and_regression_tasks(
+            materialized_traces, config=CONFIG
+        )
         tasks = {"classification": classification_tasks, "regression": regression_tasks}
         evaluate_log(model, tasks, log_name, CONFIG, result_path, case_plan=case_plan)
         done_path.write_text("complete\n", encoding="utf-8")

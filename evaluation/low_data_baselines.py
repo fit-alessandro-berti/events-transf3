@@ -17,7 +17,7 @@ from sklearn.naive_bayes import GaussianNB
 from torch.utils.data import DataLoader, Dataset
 
 
-def load_classification_tasks(path, max_seq_len=10):
+def load_classification_tasks(path, max_seq_len=32, minimum_prefix_length=1):
     df = pm4py.read_xes(path)
     activity_key, time_key, case_key = "concept:name", "time:timestamp", "case:concept:name"
     resource_key, cost_key = "org:resource", "amount"
@@ -26,9 +26,12 @@ def load_classification_tasks(path, max_seq_len=10):
     activities = sorted(str(value) for value in df[activity_key].dropna().unique())
     activity_to_id = {name: idx for idx, name in enumerate(activities)}
     tasks = []
-    for case_id, trace in df.groupby(case_key):
-        trace = trace.sort_values(time_key)
-        if len(trace) < 3:
+    df["_foundation_original_order"] = np.arange(len(df))
+    for case_id, trace in df.groupby(case_key, sort=False):
+        trace = trace.sort_values(
+            [time_key, "_foundation_original_order"], kind="mergesort"
+        )
+        if len(trace) < minimum_prefix_length + 1:
             continue
         start, previous, events = trace.iloc[0][time_key], trace.iloc[0][time_key], []
         for _, event in trace.iterrows():
@@ -42,7 +45,7 @@ def load_classification_tasks(path, max_seq_len=10):
                 "time_from_previous": (timestamp - previous).total_seconds(),
             })
             previous = timestamp
-        for index in range(1, len(events) - 1):
+        for index in range(minimum_prefix_length - 1, len(events) - 1):
             tasks.append((events[max(0, index + 1 - max_seq_len) : index + 1], events[index + 1]["activity_id"], str(case_id)))
     return tasks, activities
 
@@ -59,7 +62,7 @@ class PrefixDataset(Dataset):
         sequence, label, _ = self.tasks[self.indices[position]]
         activities = torch.as_tensor([event["activity_id"] + 1 for event in sequence], dtype=torch.long)
         numerical = torch.as_tensor([
-            [np.log1p(max(0.0, float(event["cost"]))),
+            [np.sign(float(event["cost"])) * np.log1p(abs(float(event["cost"]))),
              np.log1p(max(0.0, float(event["time_from_start"]))),
              np.log1p(max(0.0, float(event["time_from_previous"])))]
             for event in sequence
@@ -163,7 +166,8 @@ def handcrafted_features(tasks, indices, num_classes):
         temporal = [
             np.log1p(max(0.0, float(sequence[-1]["time_from_start"]))),
             np.log1p(max(0.0, float(sequence[-1]["time_from_previous"]))),
-            np.log1p(max(0.0, float(sequence[-1]["cost"]))),
+            np.sign(float(sequence[-1]["cost"]))
+            * np.log1p(abs(float(sequence[-1]["cost"]))),
             len(sequence) / 10.0,
         ]
         rows.append(np.concatenate([counts, last, temporal]))

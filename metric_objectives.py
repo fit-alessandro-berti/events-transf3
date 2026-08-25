@@ -293,10 +293,11 @@ def classification_metric_objective(
     balanced_accuracy_loss = 1.0 - (
         true_positive[supported] / support[supported]
     ).mean()
-    macro_f1_loss = 1.0 - (
+    per_class_f1 = (
         2.0 * true_positive
         / (2.0 * true_positive + false_positive + false_negative).clamp_min(1e-8)
-    ).mean()
+    )
+    macro_f1_loss = 1.0 - per_class_f1[supported].mean()
     nll_raw = torch.stack(nll_rows).mean()
     components = {
         "accuracy": accuracy_loss,
@@ -323,14 +324,15 @@ def classification_metric_objective(
     hard_balanced_accuracy = (
         hard_true_positive[supported] / support[supported]
     ).mean()
-    hard_macro_f1 = (
+    hard_per_class_f1 = (
         2.0 * hard_true_positive
         / (
             2.0 * hard_true_positive
             + hard_false_positive
             + hard_false_negative
         ).clamp_min(1.0)
-    ).mean()
+    )
+    hard_macro_f1 = hard_per_class_f1[supported].mean()
 
     diagnostics = {
         "head/classification/episode_accuracy": hard_accuracy,

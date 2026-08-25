@@ -14,6 +14,22 @@ from metric_objectives import (
 
 
 class MetricObjectiveTests(unittest.TestCase):
+    def test_macro_f1_ignores_candidate_classes_absent_from_truth(self):
+        logits = torch.tensor(
+            [[20.0, -20.0, -20.0], [-20.0, 20.0, -20.0]]
+        )
+        result = classification_metric_objective(
+            logits,
+            torch.tensor([0, 1]),
+            {"classification_objective": {"profile": "macro_f1"}},
+        )
+        self.assertAlmostEqual(
+            result.diagnostics[
+                "head/classification/episode_macro_f1"
+            ].item(),
+            1.0,
+        )
+        self.assertLess(result.loss.item(), 1e-6)
     def test_matched_experiment_configs_change_only_requested_profile(self):
         expected = {
             "training_metric_equilibrated_retrain.yaml": (

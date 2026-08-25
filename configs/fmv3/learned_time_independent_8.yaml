@@ -1,5 +1,7 @@
 extends: learned_time_8_dynamic.yaml
 experiment_name: learned_time_independent_8
+run_mode: initialize
+initialize_from_checkpoint: checkpoints/fmv3/learned_time_8_temporal/model_epoch_33.pth
 epochs: 45
 lr: 0.003
 weight_decay: 0.0

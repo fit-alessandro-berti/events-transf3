@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import yaml
 
+from config import CONFIG
 from config_utils import parse_override, set_dotted
 from evaluation.fmv3_metrics import classification_metrics
 from evaluation.fmv3_protocol import (
@@ -29,6 +30,7 @@ from evaluation.low_data_baselines import (
     predict_weighted_linear,
     train_lstm,
 )
+from training_log_sets import validate_evaluation_split
 
 
 def _metric_row(name, probabilities, tasks, query_indices, support_indices, universe, metadata):
@@ -54,6 +56,11 @@ def main():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--set", dest="overrides", action="append", default=[])
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--evaluation_split",
+        choices=["screening", "meta_test", "external"],
+        default="screening",
+    )
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     for raw in args.overrides:
@@ -67,6 +74,9 @@ def main():
     if args.logs:
         requested = set(args.logs)
         paths = [path for path in paths if path.name in requested or path.name.replace(".xes.gz", "").replace(".xes", "") in requested]
+    validate_evaluation_split(
+        CONFIG, {path.name: str(path.resolve()) for path in paths}, args.evaluation_split
+    )
 
     for path in paths:
         log_name = path.name.replace(".xes.gz", "").replace(".xes", "")
@@ -75,7 +85,12 @@ def main():
             continue
         if output_path.exists():
             output_path.unlink()
-        tasks, activities = load_classification_tasks(str(path.resolve()))
+        data_config = config.get("data", {}) or {}
+        tasks, activities = load_classification_tasks(
+            str(path.resolve()),
+            max_seq_len=int(data_config.get("max_sequence_length", 32)),
+            minimum_prefix_length=int(data_config.get("minimum_prefix_length", 1)),
+        )
         num_classes = len(activities)
         test_cases, support_cases = fixed_case_split(
             tasks, seed, config.get("test_case_fraction", 0.3), config.get("max_test_cases", 50)

@@ -1,5 +1,7 @@
 extends: learned_time_independent_4_cls70.yaml
 experiment_name: prefix_state_attention_70
+run_mode: initialize
+initialize_from_checkpoint: checkpoints/fmv3/learned_time_independent_4_cls70/model_epoch_34.pth
 epochs: 38
 lr: 0.001
 weight_decay: 0.001
@@ -11,4 +13,3 @@ fmv3_head:
   prefix_attention_dropout: 0.15
   prefix_attention_gate_logit: -3.0
   prefix_attention_initial_recency: 0.25
-

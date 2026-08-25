@@ -6,8 +6,9 @@ from .temporal_adapter import (
     IndependentTemporalInputEncoder,
     LearnedTemporalInputAdapter,
 )
+from .attribute_encoder import GenericAttributeEncoder
 class PretrainedEventEmbedder (nn .Module ):
-    def __init__ (self ,embedding_dim :int ,num_feat_dim :int ,d_model :int ,dropout :float =0.1 ,time_input_config =None ):
+    def __init__ (self ,embedding_dim :int ,num_feat_dim :int ,d_model :int ,dropout :float =0.1 ,time_input_config =None ,attribute_hash_buckets :int =4096 ):
         super ().__init__ ()
         total_input_dim =(2 *embedding_dim )+num_feat_dim
         self .projection =nn .Sequential (
@@ -17,6 +18,13 @@ class PretrainedEventEmbedder (nn .Module ):
         nn .LayerNorm (d_model )
         )
         self .dropout =nn .Dropout (dropout )
+        self .context_projection =nn .Linear (8 ,d_model ,bias =False )
+        nn .init .zeros_ (self .context_projection .weight )
+        self .attribute_encoder =GenericAttributeEncoder (
+        d_model ,hash_buckets =attribute_hash_buckets )
+        self .history_projection =nn .Linear (4 ,d_model ,bias =False )
+        nn .init .zeros_ (self .history_projection .weight )
+        self .history_token =nn .Parameter (torch .zeros (d_model ))
         input_config =dict (time_input_config or {})
         self .temporal_input_encoder =None
         if input_config .get ('temporal_input_transforms',False ):
@@ -33,12 +41,22 @@ class PretrainedEventEmbedder (nn .Module ):
         self .replace_legacy_regression_times =bool (
         input_config .get ('regression_time_replace_legacy',False ))
     def forward (self ,events_df :pd .DataFrame ,use_time_adapter =False ,time_scale_factor =None ):
+        events =(
+        events_df .to_dict ('records')
+        if isinstance (events_df ,pd .DataFrame )
+        else list (events_df )
+        )
         device =next (self .parameters ()).device
-        act_emb =torch .from_numpy (np .stack (events_df ['activity_embedding'].values )).float ().to (device )
-        res_emb =torch .from_numpy (np .stack (events_df ['resource_embedding'].values )).float ().to (device )
-        num_arr =events_df [['cost','time_from_start','time_from_previous']].values
-        num_tensor =torch .as_tensor (num_arr .copy (),dtype =torch .float32 ,device =device ).clamp_min (0 )
-        num_feats =torch .log1p (num_tensor )
+        act_emb =torch .from_numpy (np .stack ([event ['activity_embedding']for event in events ])).float ().to (device )
+        res_emb =torch .from_numpy (np .stack ([event ['resource_embedding']for event in events ])).float ().to (device )
+        num_tensor =torch .as_tensor (
+        [[event ['cost'],event ['time_from_start'],event ['time_from_previous']]
+        for event in events ],dtype =torch .float32 ,device =device )
+        num_feats =torch .empty_like (num_tensor )
+        num_feats [:,0 ]=torch .sign (num_tensor [:,0 ])*torch .log1p (
+        num_tensor [:,0 ].abs ())
+        num_feats [:,1 :]=torch .log1p (num_tensor [:,1 :].clamp_min (0 ))
+        temporal_tensor =num_tensor [:,1 :].clamp_min (0 )
         if self .temporal_input_encoder is not None and self .replace_legacy_temporal_inputs :
             num_feats =num_feats .clone ()
             num_feats [:,1 :]=0.0
@@ -47,10 +65,27 @@ class PretrainedEventEmbedder (nn .Module ):
             num_feats [:,1 :]=0.0
         combined_input =torch .cat ([act_emb ,res_emb ,num_feats ],dim =-1 )
         embedded =self .projection (combined_input )
+        context =torch .as_tensor ([
+        [*event .get ('calendar_features',(0.0 ,0.0 ,0.0 ,0.0 ,0.0 )),
+        event .get ('resource_missing',0.0 ),event .get ('cost_missing',0.0 ),
+        event .get ('lifecycle_missing',0.0 )]
+        for event in events ],dtype =torch .float32 ,device =device )
+        embedded =embedded +self .context_projection (context )
+        embedded =embedded +self .attribute_encoder (events ,device )
+        history =torch .as_tensor ([
+        event .get ('history_features',(0.0 ,0.0 ,0.0 ,0.0 ))
+        for event in events ],dtype =torch .float32 ,device =device )
+        history [:,:2 ]=torch .log1p (history [:,:2 ].clamp_min (0 ))
+        history [:,3 ]=torch .log1p (history [:,3 ].clamp_min (0 ))
+        history_mask =torch .as_tensor ([
+        event .get ('is_history_summary',0.0 )for event in events
+        ],dtype =torch .float32 ,device =device ).unsqueeze (1 )
+        embedded =embedded +history_mask *(
+        self .history_projection (history )+self .history_token )
         if use_time_adapter and self .time_input_adapter is not None :
             embedded =embedded +self .time_input_adapter (
-            num_tensor [:,1 :],augmentation_factor =time_scale_factor )
+            temporal_tensor ,augmentation_factor =time_scale_factor )
         if self .temporal_input_encoder is not None :
             embedded =embedded +self .temporal_input_encoder (
-            num_tensor [:,1 :],augmentation_factor =time_scale_factor )
+            temporal_tensor ,augmentation_factor =time_scale_factor )
         return self .dropout (embedded )
